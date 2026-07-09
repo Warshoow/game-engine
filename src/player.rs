@@ -19,8 +19,8 @@ use voxel_core::physics::{move_and_collide, Aabb};
 use crate::GameWorld;
 
 // Gabarit et dynamique du joueur — en mètres et mètres/seconde.
-const PLAYER_WIDTH_M: f32 = 0.6;
-const PLAYER_HEIGHT_M: f32 = 1.8;
+pub const PLAYER_WIDTH_M: f32 = 0.6;
+pub const PLAYER_HEIGHT_M: f32 = 1.8;
 const EYE_HEIGHT_M: f32 = 1.62;
 const WALK_SPEED_M_S: f32 = 5.0;
 /// Plus fort que 9,81 : la gravité « réaliste » donne un saut flottant en
@@ -33,8 +33,13 @@ pub struct PlayerPlugin;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
+        // `interact` avant `cursor_grab` : le clic qui capture le curseur ne
+        // doit pas aussi casser un bloc (interact ne voit pas encore le grab).
         app.add_systems(FixedUpdate, physics_step)
-            .add_systems(Update, (mouse_look, cursor_grab));
+            .add_systems(
+                Update,
+                (mouse_look, crate::interact::interact, cursor_grab).chain(),
+            );
     }
 }
 

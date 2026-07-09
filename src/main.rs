@@ -2,6 +2,7 @@
 //! `voxel_core` (testable headless) ; ici on ne fait que brancher :
 //! registre → worldgen → mesher → entités Bevy, et le contrôleur joueur.
 
+mod interact;
 mod player;
 
 use bevy::asset::RenderAssetUsages;
@@ -11,7 +12,7 @@ use bevy::render::render_resource::PrimitiveTopology;
 
 use voxel_core::chunk::{ChunkPos, CHUNK_SIZE};
 use voxel_core::mesher::{mesh_chunk, MeshData};
-use voxel_core::registry::{BlockData, ContentEntry, Kind, Registry};
+use voxel_core::registry::{BlockData, ContentEntry, ContentId, Kind, Registry};
 use voxel_core::world::VoxelWorld;
 use voxel_core::worldgen::{HeightmapGenerator, WorldGenerator};
 
@@ -22,6 +23,13 @@ use voxel_core::worldgen::{HeightmapGenerator, WorldGenerator};
 pub struct GameWorld {
     pub world: VoxelWorld,
     pub generator: HeightmapGenerator,
+    /// IDs résolus une fois au setup — le gameplay manipule des `ContentId`,
+    /// jamais des identifiers en dur dans les systèmes.
+    pub air: ContentId,
+    /// Le bloc « en main » pour la pose (§7.3) — data-driven par ID.
+    pub held: ContentId,
+    /// Matériau partagé des chunks (blanc, couleurs aux sommets).
+    pub material: Handle<StandardMaterial>,
 }
 
 /// Marque l'entité-mesh d'un chunk — pour retrouver quoi re-mesher quand un
@@ -109,7 +117,24 @@ fn setup_world(
         ));
     }
 
-    commands.insert_resource(GameWorld { world, generator });
+    commands.insert_resource(GameWorld {
+        world,
+        generator,
+        air,
+        held: grass,
+        material,
+    });
+
+    // Crosshair minimal (HUD debug — §7 : pas d'UI riche).
+    commands.spawn((
+        Text::new("+"),
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Percent(50.0),
+            top: Val::Percent(50.0),
+            ..default()
+        },
+    ));
 
     // --- Éclairage full-bright-ish (non-goal §7 : pas de vrai éclairage). ---
     commands.spawn((

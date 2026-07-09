@@ -122,7 +122,35 @@ entre ticks (le rendu échantillonne le dernier état simulé) — viendra si le
 
 28 tests headless, clippy clean workspace.
 
-**Prochaine étape.** Pose/casse data-driven (§7.3) : raycast voxel (DDA)
-depuis la caméra, écriture via le registre, re-mesh du chunk touché — ça
-fermera les critères de la slice. Ensuite : greedy meshing (étape 2 du
-mesher) et l'interpolation caméra si besoin.
+## 2026-07-09 (suite) — Pose/casse : la slice est fonctionnellement complète
+
+**Raycast DDA (Amanatides & Woo).** Pour viser un voxel, on ne « marche »
+pas le long du rayon à petits pas (ça rate des voxels dans les coins et
+gaspille des tests partout ailleurs) : le DDA saute de frontière de grille
+en frontière de grille, sur l'axe dont la prochaine frontière est la plus
+proche le long du rayon (`t_max` minimal). On visite ainsi *exactement* la
+suite des voxels traversés. Le hit rapporte la **face d'entrée** (sa
+normale) : casser cible le voxel, poser cible `voxel + normale`. Testé
+notamment : rayon rasant (le piège des implémentations à pas fixe) et
+indépendance à la résolution — le même monde en 2 vox/m donne les mêmes
+distances en mètres (invariant §2).
+
+**Pose/casse (`src/interact.rs`).** Clic gauche casse, clic droit pose. Le
+bloc posé est un `ContentId` (`GameWorld::held`) — le système ne sait pas
+*ce qu'il* pose, il écrit un ID du registre (§7.3 : data-driven, pas
+hardcodé). Garde-fous : pas de pose dans le volume du joueur (test AABB),
+pas d'interaction curseur libre, et l'ordre des systèmes (`interact` avant
+`cursor_grab`) évite que le clic qui capture le curseur casse un bloc.
+Après écriture, le chunk touché est **re-meshé entièrement** — brut mais
+suffisant, et c'est le même chemin que le meshing initial (un seul code à
+faire évoluer vers le greedy). Détail Bevy : `meshes.insert(id, mesh)`
+remplace l'asset en place — l'entité et son handle ne bougent pas, le GPU
+reçoit juste les nouveaux tampons.
+
+**La tranche verticale (§7) est fonctionnellement complète** : chunk généré
+depuis la seed ✓, meshé blocky ✓, pose/casse data-driven avec re-mesh ✓,
+déplacement dessus ✓. 35 tests headless, clippy clean.
+
+**Prochaines pistes** (après validation en jeu) : greedy meshing (étape 2),
+interpolation caméra entre ticks si le 64 Hz se sent, curseur pointé sur le
+voxel visé (surbrillance), HUD debug egui.

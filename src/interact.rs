@@ -1,0 +1,141 @@
+//! Pose / casse de voxels — critère §7.3 de la slice.
+//!
+//! Clic gauche : casser le voxel visé. Clic droit : poser le bloc « en
+//! main » sur la face visée. Le bloc posé est **data-driven** : c'est un
+//! `ContentId` du registre (`GameWorld::held`), jamais un type en dur — le
+//! système ne sait pas ce qu'il pose.
+//!
+//! Après une écriture, le chunk touché est re-meshé intégralement. C'est
+//! brut (on reconstruit 32³ voxels pour un changement d'un seul) mais
+//! largement assez rapide pour la slice — et c'est le *même* chemin de
+//! meshing que la génération : un seul code à faire évoluer vers le greedy.
+
+use bevy::prelude::*;
+use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
+
+use voxel_core::chunk::ChunkPos;
+use voxel_core::mesher::mesh_chunk;
+use voxel_core::physics::Aabb;
+use voxel_core::raycast::raycast;
+
+use crate::player::{Player, PLAYER_HEIGHT_M, PLAYER_WIDTH_M, PlayerCamera};
+use crate::{to_bevy_mesh, ChunkMesh, GameWorld};
+
+/// Portée de la main, en mètres (§2 — jamais « en blocs »).
+const REACH_M: f32 = 5.0;
+
+pub fn interact(
+    mut commands: Commands,
+    mouse: Res<ButtonInput<MouseButton>>,
+    cursor: Query<&CursorOptions, With<PrimaryWindow>>,
+    mut game: ResMut<GameWorld>,
+    camera: Query<&GlobalTransform, With<PlayerCamera>>,
+    player: Query<&Transform, With<Player>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    chunk_meshes: Query<(Entity, &ChunkMesh, &Mesh3d)>,
+) {
+    // On n'interagit que curseur capturé — et comme ce système tourne AVANT
+    // `cursor_grab` (voir l'ordre dans main), le clic qui capture le curseur
+    // ne casse pas de bloc au passage.
+    let grabbed = cursor
+        .single()
+        .is_ok_and(|c| c.grab_mode != CursorGrabMode::None);
+    let breaking = mouse.just_pressed(MouseButton::Left);
+    let placing = mouse.just_pressed(MouseButton::Right);
+    if !grabbed || (!breaking && !placing) {
+        return;
+    }
+    let Ok(cam) = camera.single() else { return };
+
+    let Some(hit) = raycast(
+        &game.world,
+        cam.translation().to_array(),
+        cam.forward().as_vec3().to_array(),
+        REACH_M,
+    ) else {
+        return;
+    };
+
+    let touched: Option<ChunkPos> = if breaking {
+        let air = game.air;
+        game.world.set_voxel(hit.voxel, air)
+    } else {
+        // Poser : sur la face d'entrée du rayon. Normale nulle = l'œil est
+        // dans un solide, pas de face → rien.
+        if hit.normal == [0; 3] {
+            return;
+        }
+        let target = [
+            hit.voxel[0] + hit.normal[0] as i64,
+            hit.voxel[1] + hit.normal[1] as i64,
+            hit.voxel[2] + hit.normal[2] as i64,
+        ];
+        // Refuse de poser un bloc dans le volume du joueur.
+        if player
+            .single()
+            .is_ok_and(|t| voxel_overlaps_player(&game.world, target, t.translation))
+        {
+            return;
+        }
+        let held = game.held;
+        game.world.set_voxel(target, held)
+    };
+
+    if let Some(pos) = touched {
+        remesh_chunk(&mut commands, &game, pos, &mut meshes, &chunk_meshes);
+    }
+}
+
+fn voxel_overlaps_player(
+    world: &voxel_core::world::VoxelWorld,
+    voxel: [i64; 3],
+    player_feet: Vec3,
+) -> bool {
+    let vpm = world.voxels_per_meter;
+    let vmin = [
+        voxel[0] as f32 / vpm,
+        voxel[1] as f32 / vpm,
+        voxel[2] as f32 / vpm,
+    ];
+    let vmax = [vmin[0] + 1.0 / vpm, vmin[1] + 1.0 / vpm, vmin[2] + 1.0 / vpm];
+    let p = Aabb::from_feet(player_feet.to_array(), PLAYER_WIDTH_M, PLAYER_HEIGHT_M);
+    (0..3).all(|a| vmin[a] < p.max[a] && vmax[a] > p.min[a])
+}
+
+/// Reconstruit le mesh du chunk `pos` : met à jour l'asset existant, ou
+/// spawn/despawn l'entité si le chunk passe de/à vide.
+fn remesh_chunk(
+    commands: &mut Commands,
+    game: &GameWorld,
+    pos: ChunkPos,
+    meshes: &mut Assets<Mesh>,
+    chunk_meshes: &Query<(Entity, &ChunkMesh, &Mesh3d)>,
+) {
+    let Some(chunk) = game.world.chunk(pos) else { return };
+    let voxel_size_m = 1.0 / game.world.voxels_per_meter;
+    let data = mesh_chunk(chunk, &game.world.registry, voxel_size_m);
+    let existing = chunk_meshes.iter().find(|(_, cm, _)| cm.0 == pos);
+
+    match (existing, data.is_empty()) {
+        (Some((entity, _, _)), true) => commands.entity(entity).despawn(),
+        (Some((_, _, mesh3d)), false) => {
+            // Remplace le contenu de l'asset : l'entité et son handle ne
+            // bougent pas, le GPU reçoit les nouveaux tampons.
+            meshes.insert(mesh3d.id(), to_bevy_mesh(data));
+        }
+        (None, false) => {
+            let extent = game.world.chunk_size() as f32 * voxel_size_m;
+            commands.spawn((
+                ChunkMesh(pos),
+                Mesh3d(meshes.add(to_bevy_mesh(data))),
+                MeshMaterial3d(game.material.clone()),
+                Transform::from_xyz(
+                    pos.x as f32 * extent,
+                    pos.y as f32 * extent,
+                    pos.z as f32 * extent,
+                ),
+            ));
+        }
+        (None, true) => {}
+    }
+}
