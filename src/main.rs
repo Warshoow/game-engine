@@ -26,16 +26,29 @@ pub struct GameWorld {
     /// IDs résolus une fois au setup — le gameplay manipule des `ContentId`,
     /// jamais des identifiers en dur dans les systèmes.
     pub air: ContentId,
-    /// Le bloc « en main » pour la pose (§7.3) — data-driven par ID.
-    pub held: ContentId,
+    /// Blocs posables, **découverts** depuis le registre (tout bloc solide) —
+    /// jamais une liste de noms en dur. L'index est la sélection courante.
+    pub hotbar: Vec<ContentId>,
+    pub held_idx: usize,
     /// Matériau partagé des chunks (blanc, couleurs aux sommets).
     pub material: Handle<StandardMaterial>,
+}
+
+impl GameWorld {
+    /// Le bloc « en main » pour la pose (§7.3) — data-driven par ID.
+    pub fn held(&self) -> ContentId {
+        self.hotbar[self.held_idx]
+    }
 }
 
 /// Marque l'entité-mesh d'un chunk — pour retrouver quoi re-mesher quand un
 /// voxel change (pose/casse, prochaine étape).
 #[derive(Component)]
 pub struct ChunkMesh(pub ChunkPos);
+
+/// Marque le texte HUD affichant le bloc en main.
+#[derive(Component)]
+pub struct HeldBlockText;
 
 fn main() {
     // WSLg : le compositeur Wayland ne fournit ni pointer lock ni mouvements
@@ -79,6 +92,22 @@ fn setup_world(
             block: Some(BlockData { solid: true, color: [0.35, 0.6, 0.25] }),
         })
         .expect("identifier unique");
+    // Du contenu, pas du code (§0) : ces blocs n'existent qu'ici, en donnée.
+    // Aucun système ne les connaît — ils arrivent dans la hotbar par
+    // découverte du registre, et le worldgen n'en pose aucun.
+    for (identifier, color) in [
+        ("core:dirt", [0.45, 0.30, 0.15]),
+        ("core:stone", [0.55, 0.55, 0.58]),
+        ("core:sand", [0.85, 0.78, 0.55]),
+    ] {
+        registry
+            .register(ContentEntry {
+                identifier: identifier.into(),
+                kind: Kind::Block,
+                block: Some(BlockData { solid: true, color }),
+            })
+            .expect("identifier unique");
+    }
 
     // Gameplay en mètres (§2) : le relief est défini en mètres, la
     // résolution voxel ne fait que convertir.
@@ -124,11 +153,24 @@ fn setup_world(
         ));
     }
 
+    // La hotbar se **découvre** : tout bloc solide du registre est posable.
+    // Ajouter un bloc au registre suffit à le rendre disponible — aucun
+    // système à toucher. (grass est solide → présent, air non → absent.)
+    let hotbar: Vec<ContentId> = world
+        .registry
+        .iter()
+        .filter(|(_, e)| e.block.as_ref().is_some_and(|b| b.solid))
+        .map(|(id, _)| id)
+        .collect();
+    let held_idx = hotbar.iter().position(|&id| id == grass).unwrap_or(0);
+    let held_label = held_label(&world.registry, hotbar[held_idx]);
+
     commands.insert_resource(GameWorld {
         world,
         generator,
         air,
-        held: grass,
+        hotbar,
+        held_idx,
         material,
     });
 
@@ -143,10 +185,21 @@ fn setup_world(
         },
     ));
     commands.spawn((
-        Text::new("Clic gauche : jouer · Échap : libérer la souris · F11 : plein écran\nWASD/Espace : bouger · gauche : casser · droit : poser"),
+        Text::new("Clic gauche : jouer · Échap : libérer la souris · F : plein écran\nWASD/Espace : bouger · gauche : casser · droit : poser · molette : bloc"),
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(12.0),
+            bottom: Val::Px(12.0),
+            ..default()
+        },
+    ));
+    // Bloc en main (HUD debug — §7 : pas d'UI riche).
+    commands.spawn((
+        HeldBlockText,
+        Text::new(held_label),
+        Node {
+            position_type: PositionType::Absolute,
+            right: Val::Px(12.0),
             bottom: Val::Px(12.0),
             ..default()
         },
@@ -157,6 +210,15 @@ fn setup_world(
         DirectionalLight::default(),
         Transform::from_xyz(50.0, 80.0, 30.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
+}
+
+/// Libellé HUD du bloc en main — l'identifier vient du registre, le HUD ne
+/// connaît aucun nom de bloc.
+pub fn held_label(registry: &Registry, id: ContentId) -> String {
+    match registry.get(id) {
+        Some(entry) => format!("en main : {}", entry.identifier),
+        None => "en main : ???".to_string(),
+    }
 }
 
 /// Convertit les tampons purs du mesher en `Mesh` Bevy.

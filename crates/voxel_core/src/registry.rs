@@ -82,6 +82,17 @@ impl Registry {
             .map(|i| ContentId(i as u32))
     }
 
+    /// Itère les entrées avec leur ID, dans l'ordre d'insertion (= ordre des
+    /// IDs, par construction append-only). Lecture seule : permet au
+    /// consommateur de *découvrir* le contenu (ex. construire une hotbar de
+    /// blocs solides) sans nommer quoi que ce soit en dur.
+    pub fn iter(&self) -> impl Iterator<Item = (ContentId, &ContentEntry)> {
+        self.entries
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (ContentId(i as u32), e))
+    }
+
     pub fn len(&self) -> usize {
         self.entries.len()
     }
@@ -141,6 +152,22 @@ mod tests {
             err,
             RegistryError::DuplicateIdentifier("core:stone".to_string())
         );
+    }
+
+    #[test]
+    fn iter_yields_ids_in_insertion_order() {
+        let mut reg = Registry::new();
+        let air = reg.register(block("core:air", false)).unwrap();
+        let stone = reg.register(block("core:stone", true)).unwrap();
+        let ids: Vec<ContentId> = reg.iter().map(|(id, _)| id).collect();
+        assert_eq!(ids, vec![air, stone]);
+        // Le cas d'usage : découvrir les blocs solides sans les nommer.
+        let solids: Vec<ContentId> = reg
+            .iter()
+            .filter(|(_, e)| e.block.as_ref().is_some_and(|b| b.solid))
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(solids, vec![stone]);
     }
 
     #[test]

@@ -252,3 +252,27 @@ seul point d'entrée de meshing.
 sont toujours émises, et fusionnées entre elles sous le terrain — des quads
 invisibles subsistent aux frontières. Le raccord inter-chunks viendra avec
 le streaming.
+
+## 2026-07-09 (suite) — Sélection de blocs : le data-driven en action
+
+**Le but.** Prouver que « le contenu est de la donnée » (§0) tient la route :
+ajouter des blocs posables sans toucher un seul système.
+
+**Ce qui a été fait.** Trois blocs de plus au registre (`core:dirt`,
+`core:stone`, `core:sand`) — trois lignes de *donnée* dans le setup. La
+hotbar n'est pas une liste écrite à la main : elle se **découvre** en
+filtrant le registre (tout bloc solide est posable), via un nouvel
+itérateur en lecture seule `Registry::iter()`. Conséquence vérifiable :
+l'air n'y est pas (non solide), l'herbe y est, et le prochain bloc ajouté
+au registre apparaîtra dans la hotbar sans qu'aucun système ne change.
+
+**Molette.** `select_held_block` fait défiler un index cyclique dans la
+hotbar — le système ne manipule que des `ContentId`, il ne sait pas ce
+qu'il sélectionne. Le HUD affiche l'identifier du bloc en main, lu du
+registre au moment du changement (pas de table de noms côté UI). Bevy
+0.19 : les événements bufferisés se lisent via `MessageReader` (l'ancien
+`EventReader`, renommé) ; les crans de la frame sont sommés car un
+trackpad émet plusieurs petits événements là où une molette en émet un.
+
+**Au passage** : plein écran remappé F11 → **F** (les touches de fonction
+sont souvent interceptées par l'hôte ou le terminal, surtout via WSLg).

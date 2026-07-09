@@ -10,6 +10,7 @@
 //! largement assez rapide pour la slice — et c'est le *même* chemin de
 //! meshing que la génération : un seul code à faire évoluer vers le greedy.
 
+use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 
 use voxel_core::chunk::ChunkPos;
@@ -18,7 +19,31 @@ use voxel_core::physics::Aabb;
 use voxel_core::raycast::raycast;
 
 use crate::player::{CursorCaptured, Player, PLAYER_HEIGHT_M, PLAYER_WIDTH_M, PlayerCamera};
-use crate::{to_bevy_mesh, ChunkMesh, GameWorld};
+use crate::{held_label, to_bevy_mesh, ChunkMesh, GameWorld, HeldBlockText};
+
+/// Molette : fait défiler la hotbar (cyclique). La hotbar est découverte
+/// depuis le registre au setup — ce système ne connaît aucun bloc, il ne
+/// fait que déplacer un index.
+pub fn select_held_block(
+    mut wheel: MessageReader<MouseWheel>,
+    captured: Res<CursorCaptured>,
+    mut game: ResMut<GameWorld>,
+    mut hud: Query<&mut Text, With<HeldBlockText>>,
+) {
+    // Somme des crans de la frame (trackpads : plusieurs petits événements).
+    let scroll: f32 = wheel.read().map(|w| w.y).sum();
+    if !captured.0 || scroll == 0.0 {
+        return;
+    }
+    let n = game.hotbar.len();
+    // rem_euclid : modulo toujours positif, même en reculant depuis 0.
+    let step = if scroll > 0.0 { 1 } else { n - 1 };
+    game.held_idx = (game.held_idx + step).rem_euclid(n);
+
+    if let Ok(mut text) = hud.single_mut() {
+        text.0 = held_label(&game.world.registry, game.held());
+    }
+}
 
 /// Portée de la main, en mètres (§2 — jamais « en blocs »).
 const REACH_M: f32 = 5.0;
@@ -76,7 +101,7 @@ pub fn interact(
         {
             return;
         }
-        let held = game.held;
+        let held = game.held();
         game.world.set_voxel(target, held)
     };
 

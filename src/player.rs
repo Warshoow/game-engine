@@ -40,7 +40,10 @@ impl Plugin for PlayerPlugin {
                 Update,
                 (mouse_look, crate::interact::interact, cursor_grab).chain(),
             )
-            .add_systems(Update, toggle_fullscreen);
+            .add_systems(
+                Update,
+                (toggle_fullscreen, crate::interact::select_held_block),
+            );
     }
 }
 
@@ -167,7 +170,7 @@ const WARP_ECHO_FRAMES: u8 = 30;
 /// mouvement suivant → à-coups) et le masquage est ignoré. Mesuré au
 /// diagnostic du 2026-07-09 — voir docs/journal.md. Dans ce cas : pas de
 /// recentrage du tout, on s'appuie sur le confinement (qui, lui, marche) et
-/// le plein écran (F11) pour donner de l'amplitude au regard.
+/// le plein écran (touche F) pour donner de l'amplitude au regard.
 fn recentering_works() -> bool {
     std::fs::read_to_string("/proc/version")
         .map(|v| !v.to_lowercase().contains("microsoft"))
@@ -269,14 +272,15 @@ fn mouse_look(
     }
 }
 
-/// F11 : bascule fenêtré ↔ plein écran sans bordure. Sous WSLg (pas de
+/// F : bascule fenêtré ↔ plein écran sans bordure. Sous WSLg (pas de
 /// recentrage possible), le plein écran donne au regard l'amplitude de
-/// l'écran entier avant de buter au bord.
+/// l'écran entier avant de buter au bord. (Lettre plutôt que F11 : les
+/// touches de fonction sont souvent interceptées par l'hôte/le terminal.)
 fn toggle_fullscreen(
     keys: Res<ButtonInput<KeyCode>>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
 ) {
-    if !keys.just_pressed(KeyCode::F11) {
+    if !keys.just_pressed(KeyCode::KeyF) {
         return;
     }
     if let Ok(mut window) = windows.single_mut() {
