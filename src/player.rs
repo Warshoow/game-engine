@@ -35,7 +35,8 @@ impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
         // `interact` avant `cursor_grab` : le clic qui capture le curseur ne
         // doit pas aussi casser un bloc (interact ne voit pas encore le grab).
-        app.add_systems(FixedUpdate, physics_step)
+        app.init_resource::<CursorCaptured>()
+            .add_systems(FixedUpdate, physics_step)
             .add_systems(
                 Update,
                 (mouse_look, crate::interact::interact, cursor_grab).chain(),
@@ -55,6 +56,16 @@ pub struct Player {
 
 #[derive(Component)]
 pub struct PlayerCamera;
+
+/// « Mode FPS » voulu par le joueur — découplé de l'état réel du grab OS.
+///
+/// Sous certains compositeurs (WSLg notamment), le pointer lock échoue et
+/// `bevy_winit` remet `CursorOptions::grab_mode` à `None` — si le regard et
+/// les clics étaient conditionnés à cet état, tout resterait mort. Les
+/// mouvements *relatifs* de souris arrivent même sans lock : on suit donc
+/// notre intention à nous, et le grab OS n'est qu'un confort en plus.
+#[derive(Resource, Default)]
+pub struct CursorCaptured(pub bool);
 
 pub fn spawn_player(mut commands: Commands, game: Res<GameWorld>) {
     // Spawn posé sur le terrain, interrogé en mètres — jamais en blocs.
@@ -132,17 +143,14 @@ fn physics_step(
     }
 }
 
-/// Regard souris — frame variable, uniquement quand le curseur est capturé.
+/// Regard souris — frame variable, uniquement en mode FPS.
 fn mouse_look(
     motion: Res<AccumulatedMouseMotion>,
-    cursor: Query<&CursorOptions, With<PrimaryWindow>>,
+    captured: Res<CursorCaptured>,
     mut player_query: Query<&mut Player>,
     mut camera_query: Query<&mut Transform, With<PlayerCamera>>,
 ) {
-    let grabbed = cursor
-        .single()
-        .is_ok_and(|c| c.grab_mode != CursorGrabMode::None);
-    if !grabbed || motion.delta == Vec2::ZERO {
+    if !captured.0 || motion.delta == Vec2::ZERO {
         return;
     }
     for mut player in &mut player_query {
@@ -155,20 +163,25 @@ fn mouse_look(
     }
 }
 
-/// Clic gauche : capture le curseur (FPS). Échap : le relâche.
+/// Clic gauche : passe en mode FPS (et demande le grab OS). Échap : sort.
 fn cursor_grab(
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
+    mut captured: ResMut<CursorCaptured>,
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     let Ok(mut options) = cursor.single_mut() else {
         return;
     };
-    if mouse.just_pressed(MouseButton::Left) && options.grab_mode == CursorGrabMode::None {
+    if mouse.just_pressed(MouseButton::Left) && !captured.0 {
+        captured.0 = true;
+        // Peut échouer (WSLg…) : bevy_winit loggue et remet grab_mode à
+        // None — pas grave, `CursorCaptured` reste notre source de vérité.
         options.grab_mode = CursorGrabMode::Locked;
         options.visible = false;
     }
-    if keys.just_pressed(KeyCode::Escape) {
+    if keys.just_pressed(KeyCode::Escape) && captured.0 {
+        captured.0 = false;
         options.grab_mode = CursorGrabMode::None;
         options.visible = true;
     }

@@ -11,14 +11,13 @@
 //! meshing que la génération : un seul code à faire évoluer vers le greedy.
 
 use bevy::prelude::*;
-use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 
 use voxel_core::chunk::ChunkPos;
 use voxel_core::mesher::mesh_chunk;
 use voxel_core::physics::Aabb;
 use voxel_core::raycast::raycast;
 
-use crate::player::{Player, PLAYER_HEIGHT_M, PLAYER_WIDTH_M, PlayerCamera};
+use crate::player::{CursorCaptured, Player, PLAYER_HEIGHT_M, PLAYER_WIDTH_M, PlayerCamera};
 use crate::{to_bevy_mesh, ChunkMesh, GameWorld};
 
 /// Portée de la main, en mètres (§2 — jamais « en blocs »).
@@ -27,22 +26,19 @@ const REACH_M: f32 = 5.0;
 pub fn interact(
     mut commands: Commands,
     mouse: Res<ButtonInput<MouseButton>>,
-    cursor: Query<&CursorOptions, With<PrimaryWindow>>,
+    captured: Res<CursorCaptured>,
     mut game: ResMut<GameWorld>,
     camera: Query<&GlobalTransform, With<PlayerCamera>>,
     player: Query<&Transform, With<Player>>,
     mut meshes: ResMut<Assets<Mesh>>,
     chunk_meshes: Query<(Entity, &ChunkMesh, &Mesh3d)>,
 ) {
-    // On n'interagit que curseur capturé — et comme ce système tourne AVANT
-    // `cursor_grab` (voir l'ordre dans main), le clic qui capture le curseur
+    // On n'interagit qu'en mode FPS — et comme ce système tourne AVANT
+    // `cursor_grab` (voir l'ordre du plugin), le clic qui active le mode
     // ne casse pas de bloc au passage.
-    let grabbed = cursor
-        .single()
-        .is_ok_and(|c| c.grab_mode != CursorGrabMode::None);
     let breaking = mouse.just_pressed(MouseButton::Left);
     let placing = mouse.just_pressed(MouseButton::Right);
-    if !grabbed || (!breaking && !placing) {
+    if !captured.0 || (!breaking && !placing) {
         return;
     }
     let Ok(cam) = camera.single() else { return };

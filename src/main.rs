@@ -125,13 +125,22 @@ fn setup_world(
         material,
     });
 
-    // Crosshair minimal (HUD debug — §7 : pas d'UI riche).
+    // Crosshair + aide minimale (HUD debug — §7 : pas d'UI riche).
     commands.spawn((
         Text::new("+"),
         Node {
             position_type: PositionType::Absolute,
             left: Val::Percent(50.0),
             top: Val::Percent(50.0),
+            ..default()
+        },
+    ));
+    commands.spawn((
+        Text::new("Clic gauche : jouer (souris capturée) · Échap : libérer la souris\nWASD/Espace : bouger · gauche : casser · droit : poser"),
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(12.0),
+            bottom: Val::Px(12.0),
             ..default()
         },
     ));
