@@ -44,3 +44,5 @@ Les **non-goals** de §7 sont explicites : éclairage réel, smooth/densité, v�
 ## Pédagogie
 
 Ce projet est un projet d'apprentissage. Quand un concept est en jeu (meshing, layout mémoire, ECS, déterminisme) : **explique le raisonnement** — pourquoi cette approche, quels compromis. Pas de solution finie balancée sans le pourquoi.
+
+Remarque : **ne plus ajouter les mentions "Co-Authored-By:" dans aucun commit**
