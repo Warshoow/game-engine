@@ -1,0 +1,152 @@
+//! Registre de contenu — §3.1 du design doc.
+//!
+//! Un registre **unique**, **append-only**, à **kinds unifiés**, destiné à être
+//! **sérialisé dans la save** (world-owned). Les IDs entiers sont stables :
+//! une fois attribués, ils ne bougent jamais — c'est eux que les palettes de
+//! chunk référencent.
+//!
+//! Append-only par *construction* : l'API n'expose ni suppression ni
+//! réordonnancement. C'est le type qui porte l'invariant, pas la discipline.
+
+/// ID entier stable d'une entrée du registre.
+///
+/// `u32` : la palette de chunk mappe ses indices locaux (`u16`) vers ces IDs
+/// globaux, donc l'ID global peut être large sans coût mémoire per-voxel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ContentId(pub u32);
+
+/// Catégorie d'entrée — kinds unifiés (§3.1) : une seule table pour tout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    Block,
+    Item,
+    EntityType,
+}
+
+/// Données spécifiques aux blocs, lues par le mesher et la physique.
+///
+/// Volontairement minimal pour la tranche verticale : le comportement riche
+/// viendra par la couche script/data (§3.6), pas en gonflant cette struct.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BlockData {
+    /// Un bloc non-solide (air…) n'est ni meshé ni collidable.
+    pub solid: bool,
+    /// Couleur de base RGB — suffit pour la slice (pas de textures encore).
+    pub color: [f32; 3],
+}
+
+/// Une entrée de contenu : identifier stable + kind + données par kind.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContentEntry {
+    /// Identifiant namespacé, ex. `core:air`, `core:stone`.
+    pub identifier: String,
+    pub kind: Kind,
+    /// Présent si `kind == Block`.
+    pub block: Option<BlockData>,
+}
+
+/// Registre append-only. L'ID d'une entrée est son index d'insertion.
+#[derive(Debug, Default)]
+pub struct Registry {
+    entries: Vec<ContentEntry>,
+}
+
+impl Registry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Ajoute une entrée et retourne son ID stable.
+    ///
+    /// Erreur si l'identifier existe déjà : un identifier est unique à vie
+    /// (le remapper casserait les saves qui le référencent).
+    pub fn register(&mut self, entry: ContentEntry) -> Result<ContentId, RegistryError> {
+        if self.lookup(&entry.identifier).is_some() {
+            return Err(RegistryError::DuplicateIdentifier(entry.identifier));
+        }
+        let id = ContentId(self.entries.len() as u32);
+        self.entries.push(entry);
+        Ok(id)
+    }
+
+    pub fn get(&self, id: ContentId) -> Option<&ContentEntry> {
+        self.entries.get(id.0 as usize)
+    }
+
+    /// Résout un identifier vers son ID (scan linéaire : le registre est
+    /// petit et le lookup par nom est rare — le hot path passe par les IDs).
+    pub fn lookup(&self, identifier: &str) -> Option<ContentId> {
+        self.entries
+            .iter()
+            .position(|e| e.identifier == identifier)
+            .map(|i| ContentId(i as u32))
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum RegistryError {
+    DuplicateIdentifier(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn block(identifier: &str, solid: bool) -> ContentEntry {
+        ContentEntry {
+            identifier: identifier.to_string(),
+            kind: Kind::Block,
+            block: Some(BlockData {
+                solid,
+                color: [1.0, 1.0, 1.0],
+            }),
+        }
+    }
+
+    #[test]
+    fn ids_follow_insertion_order() {
+        let mut reg = Registry::new();
+        let air = reg.register(block("core:air", false)).unwrap();
+        let stone = reg.register(block("core:stone", true)).unwrap();
+        assert_eq!(air, ContentId(0));
+        assert_eq!(stone, ContentId(1));
+    }
+
+    #[test]
+    fn ids_are_stable_after_appends() {
+        let mut reg = Registry::new();
+        let stone = reg.register(block("core:stone", true)).unwrap();
+        // On ajoute d'autres entrées : l'ID et la def de stone ne bougent pas.
+        for i in 0..100 {
+            reg.register(block(&format!("core:gen_{i}"), true)).unwrap();
+        }
+        assert_eq!(reg.lookup("core:stone"), Some(stone));
+        assert_eq!(reg.get(stone).unwrap().identifier, "core:stone");
+    }
+
+    #[test]
+    fn duplicate_identifier_is_rejected() {
+        let mut reg = Registry::new();
+        reg.register(block("core:stone", true)).unwrap();
+        let err = reg.register(block("core:stone", true)).unwrap_err();
+        assert_eq!(
+            err,
+            RegistryError::DuplicateIdentifier("core:stone".to_string())
+        );
+    }
+
+    #[test]
+    fn lookup_missing_returns_none() {
+        let reg = Registry::new();
+        assert_eq!(reg.lookup("core:nope"), None);
+        assert_eq!(reg.get(ContentId(42)), None);
+    }
+}

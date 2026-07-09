@@ -1,0 +1,8 @@
+[package]
+name = "voxel_core"
+version = "0.1.0"
+edition = "2024"
+
+# Logique voxel pure : AUCUNE dépendance Bevy.
+# Tout ici doit être testable en headless (`cargo test -p voxel_core`).
+[dependencies]

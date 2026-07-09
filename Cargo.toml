@@ -1,0 +1,26 @@
+[workspace]
+members = ["crates/voxel_core"]
+resolver = "3"
+
+[package]
+name = "voxel_engine"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+voxel_core = { path = "crates/voxel_core" }
+bevy = "0.19"
+
+[features]
+# `cargo run` de tous les jours = linking dynamique (itération rapide).
+# Pour un build de release : `cargo build --release --no-default-features`.
+default = ["dev"]
+dev = ["bevy/dynamic_linking"]
+
+# Recos Bevy : un peu d'opt sur notre code, plein régime sur les dépendances
+# (compilées une fois, puis cachées) — sinon le debug est injouable.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
