@@ -80,14 +80,16 @@ retourne le code de `tail`). Vérifier `EXIT=$?` explicitement.
   dans `docs/journal.md`, tenu à jour à chaque étape.
 - Le design doc est canonique : le modifier AVANT de coder toute entorse.
 
-## Prochaines étapes (discutées, non arbitrées)
+## Prochaines étapes
 
-Choix proposé à Joffrey (en attente de sa préférence) :
-1. **Greedy meshing** — étape 2 du mesher (fusion des faces coplanaires),
-   le gros morceau pédagogique restant. Le chemin est prêt : un seul code de
-   meshing (génération ET re-mesh passent par `mesh_chunk`).
-2. **Sélection de blocs** — 2ᵉ bloc dans le registre + molette pour choisir
-   ce qu'on pose (prouve le data-driven en action, rapide).
+**Fait depuis** : le greedy meshing (étape 2 du mesher) est implémenté et
+committé — `mesh_chunk` est greedy, le naïf reste comme oracle de test
+(`mesh_chunk_naive`), gain mesuré ×12,8 (voir `docs/journal.md` et
+`cargo run -p voxel_core --example mesh_stats`).
+
+Candidat suivant discuté, non arbitré :
+- **Sélection de blocs** — 2ᵉ bloc dans le registre + molette pour choisir
+  ce qu'on pose (prouve le data-driven en action, rapide).
 
 Pistes notées plus loin : surbrillance du voxel visé, interpolation caméra
 entre ticks (si le 64 Hz se sent), HUD debug egui, **build Windows natif**
