@@ -26,24 +26,25 @@ F plein écran.
 Cargo.toml            workspace + binaire voxel_engine (Bevy 0.19)
 src/main.rs           setup : registre → worldgen → mesher → entités ; GameWorld (Resource)
 src/player.rs         contrôleur FPS : simu en FixedUpdate, regard/curseur en Update
-src/interact.rs       pose/casse : raycast depuis la caméra, re-mesh du chunk touché
+src/interact.rs       pose/casse : raycast depuis la caméra, re-mesh du chunk touché (+ voisin si bordure)
+src/streaming.rs      charge/décharge les chunks autour du joueur (budget/frame, hystérésis)
 crates/voxel_core/    TOUT le cœur voxel, PUR (zéro dépendance Bevy, testable headless)
   registry.rs         registre append-only §3.1 (IDs = index d'insertion)
   chunk.rs            chunk paletté §3.2 (dense u16 + palette locale)
   world.rs            VoxelWorld : registre + chunks + conversions voxel↔mètres
   worldgen.rs         trait WorldGenerator + HeightmapGenerator (value noise/fBm maison)
-  mesher.rs           culling naïf → MeshData (tampons purs)
+  mesher.rs           greedy meshing (naïf conservé en oracle) → MeshData (tampons purs)
   physics.rs          AABB vs grille, région balayée (anti-tunneling)
   raycast.rs          DDA Amanatides & Woo (visée voxel + face d'entrée)
 ```
 
-Règle de séparation stricte : logique voxel → `voxel_core` (40 tests
+Règle de séparation stricte : logique voxel → `voxel_core` (42 tests
 headless, ~0 s), le binaire ne fait que brancher dans l'ECS.
 
 ## Vérifications avant de conclure une étape
 
 ```bash
-cargo test -p voxel_core                  # 40 tests, doivent passer
+cargo test -p voxel_core                  # 42 tests, doivent passer
 cargo clippy --workspace --all-targets    # zéro warning exigé
 cargo run                                 # smoke test à l'occasion
 ```
@@ -91,13 +92,23 @@ committé — `mesh_chunk` est greedy, le naïf reste comme oracle de test
 **Fait aussi** : la sélection de blocs — 3 blocs de plus dans le registre,
 hotbar découverte depuis le registre (`Registry::iter()`, tout bloc
 solide), molette pour changer, HUD du bloc en main. Plein écran remappé
-F11 → F. Prochaine étape : non arbitrée (voir pistes ci-dessous).
+F11 → F.
+
+**Fait aussi** : le streaming de chunks (§3.4) — monde qui démarre vide,
+`stream_chunks` génère/meshe autour du joueur (rayon en mètres, budget
+4 chunks/frame, hystérésis de déchargement), culling inter-chunks
+(`mesh_chunk_in_world` ; le mesh d'un chunk dépend de ses voisins → les
+voisins sont re-meshés à l'apparition d'un chunk et à l'édit en bordure),
+garde physique (pas de simu dans du non-chargé), données conservées en
+mémoire au déchargement (les édits survivent). Voir `docs/journal.md`.
+
+Prochaine étape : non arbitrée (voir pistes ci-dessous).
 
 Pistes notées plus loin : surbrillance du voxel visé, interpolation caméra
 entre ticks (si le 64 Hz se sent), HUD debug egui, **build Windows natif**
 pour les tests de feel (proposé — demande mingw-w64, non mis en place).
 
-Limitations assumées de la slice (ne pas « corriger » sans besoin) :
-faces de bordure de chunk toujours émises (raccord viendra avec le
-streaming), palette non compactée, re-mesh complet du chunk au moindre
-voxel, un seul bloc posable, full-bright.
+Limitations assumées (ne pas « corriger » sans besoin) : palette non
+compactée, re-mesh complet du chunk au moindre voxel, une seule couche
+verticale de chunks (y = 0, le terrain tient dedans), pas de persistance
+disque (les édits vivent en mémoire), full-bright.

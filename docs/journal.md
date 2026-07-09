@@ -276,3 +276,55 @@ trackpad émet plusieurs petits événements là où une molette en émet un.
 
 **Au passage** : plein écran remappé F11 → **F** (les touches de fonction
 sont souvent interceptées par l'hôte ou le terminal, surtout via WSLg).
+
+## 2026-07-09 (suite) — Streaming de chunks + raccord inter-chunks
+
+**Le pilier 3.** Stockage ✓, meshing ✓ — restait le streaming (§3.4 :
+« identique à l'infini » — charger/décharger autour du joueur, les bornes
+du monde ne seront qu'un check en plus). Le monde ne pré-génère plus
+rien : il démarre **vide**, et `stream_chunks` (Update) fait tout.
+
+**Le raccord d'abord.** Le streaming rendait le problème des bordures
+inévitable : jusqu'ici « hors chunk = air » était codé en dur, chaque
+chunk émettait ses 4 murs de bordure sous le terrain. La solidité hors
+chunk devient une **fermeture injectée** : `mesh_chunk` garde le
+comportement « chunk isolé » (les tests headless restent purs), et
+`mesh_chunk_in_world(world, pos)` branche la fermeture sur le monde —
+les faces au contact d'un voisin solide disparaissent. Corollaire assumé :
+le mesh d'un chunk **dépend de ses voisins**. Deux conséquences en
+cascade, faciles à oublier :
+
+1. Quand un chunk *apparaît*, ses voisins déjà affichés doivent être
+   re-meshés (leur couture se referme).
+2. Quand on édite un voxel *en bordure*, le chunk voisin doit être
+   re-meshé aussi (sa face culled doit (ré)apparaître). Sinon : trou.
+
+**La boucle de streaming.** Chaque frame : (1) l'ensemble voulu = un
+disque de chunks autour du joueur, rayon en **mètres** (`VIEW_DISTANCE_M`,
+§2 — la conversion en chunks se fait dans le système, nulle part
+ailleurs) ; (2) génération du plus proche au plus loin sous un **budget
+par frame** (4) — le coût se lisse, pas de hitch en franchissant une
+frontière ; (3) meshing différé en fin de passe et dédupliqué — piège
+ECS : les entités spawnées via `Commands` ne sont visibles dans les
+`Query` qu'à la frame suivante, re-mesher au fil de l'eau aurait dupliqué
+des meshes ; (4) déchargement au-delà du rayon + **hystérésis** (32 m),
+sinon un joueur qui oscille sur une frontière fait charger/décharger en
+boucle.
+
+**Ce qu'on décharge — et ce qu'on garde.** On despawn l'entité et on
+libère l'asset GPU (`meshes.remove` — sinon fuite : despawner l'entité ne
+libère pas l'asset). Les **données** du chunk restent en mémoire : les
+édits du joueur survivent à l'aller-retour. La persistance *disque* reste
+un non-goal (§7) ; la persistance *mémoire* est du bon sens.
+
+**La garde physique.** `is_solid` traite un chunk absent comme de l'air —
+la doc de `world.rs` prévenait déjà : « quand le streaming arrivera, la
+physique devra refuser de simuler dans du non-chargé ». C'est fait : si
+le chunk sous les pieds n'a pas de données, le tick ne simule pas ce
+joueur. Figé ≠ cassé — la simu reprend dès que le sol existe. C'est aussi
+ce qui rend le démarrage « monde vide » sûr : le joueur flotte une
+fraction de seconde, le temps que le budget génère son chunk.
+
+**Vertical.** Une seule couche de chunks (y = 0) : le terrain de la
+heightmap tient dans [0, 32). La verticalité (caves, ciel) élargira la
+boucle de l'ensemble voulu, pas la logique.

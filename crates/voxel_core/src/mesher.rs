@@ -30,8 +30,9 @@
 //! voxel_size_m`, dans le repère local du chunk (l'origine du chunk est
 //! placée par l'ECS, pas par le mesher).
 
-use crate::chunk::Chunk;
+use crate::chunk::{Chunk, ChunkPos};
 use crate::registry::{ContentId, Registry};
+use crate::world::VoxelWorld;
 
 /// Tampons de mesh bruts, agnostiques du moteur de rendu.
 #[derive(Debug, Default, Clone)]
@@ -61,17 +62,52 @@ impl MeshData {
 /// (pas une fois par voxel) via le registre — c'est le chemin data-driven :
 /// le mesher ne connaît aucun bloc par son nom.
 ///
-/// Hors du chunk, le voisin est traité comme de l'air : les faces de bordure
-/// sont émises même si le chunk adjacent les cache. Assumé pour la slice —
-/// le raccord inter-chunks viendra avec le streaming.
+/// Hors du chunk, le voisin est traité comme de l'air : chaque face de
+/// bordure est émise. C'est la variante « chunk isolé » (tests, outillage) —
+/// en jeu, préférer [`mesh_chunk_in_world`] qui raccorde les chunks entre eux.
 pub fn mesh_chunk(chunk: &Chunk, registry: &Registry, voxel_size_m: f32) -> MeshData {
+    mesh_chunk_with(chunk, registry, voxel_size_m, |_| false)
+}
+
+/// Meshe le chunk `pos` en interrogeant le **monde** pour la solidité hors
+/// chunk : les faces au contact d'un voisin solide d'un autre chunk sont
+/// culled — c'est le raccord inter-chunks. Un chunk voisin **non chargé**
+/// compte comme de l'air : ses faces de bordure sont émises, et il faudra
+/// re-mesher ce chunk quand le voisin apparaîtra (streaming).
+///
+/// `None` si le chunk n'est pas chargé.
+pub fn mesh_chunk_in_world(world: &VoxelWorld, pos: ChunkPos, voxel_size_m: f32) -> Option<MeshData> {
+    let chunk = world.chunk(pos)?;
+    let size = world.chunk_size() as i64;
+    let base = [
+        pos.x as i64 * size,
+        pos.y as i64 * size,
+        pos.z as i64 * size,
+    ];
+    Some(mesh_chunk_with(chunk, &world.registry, voxel_size_m, |p| {
+        world.is_solid([
+            base[0] + p[0] as i64,
+            base[1] + p[1] as i64,
+            base[2] + p[2] as i64,
+        ])
+    }))
+}
+
+/// Cœur du greedy : `outside_solid` décide la solidité des coordonnées
+/// (locales au chunk) hors bornes — c'est là que se joue le raccord.
+fn mesh_chunk_with(
+    chunk: &Chunk,
+    registry: &Registry,
+    voxel_size_m: f32,
+    outside_solid: impl Fn([i32; 3]) -> bool,
+) -> MeshData {
     let size = chunk.size() as i32;
     let n = chunk.size() as usize;
     let resolved = resolve_palette(chunk, registry);
 
     let solid_at = |p: [i32; 3]| -> bool {
         if p.iter().any(|&c| c < 0 || c >= size) {
-            return false; // hors chunk = air (voir doc de fonction)
+            return outside_solid(p); // hors chunk : décidé par l'appelant
         }
         resolved[chunk.get_local(p[0] as u32, p[1] as u32, p[2] as u32) as usize].0
     };
@@ -471,6 +507,34 @@ mod tests {
         assert_eq!(area_by_normal(&greedy), area_by_normal(&naive));
         // Et le gain existe bel et bien.
         assert!(greedy.face_count() < naive.face_count());
+    }
+
+    #[test]
+    fn world_meshing_culls_chunk_border_faces() {
+        // Deux chunks 8³ pleins côte à côte : la face commune (celle que le
+        // meshing « chunk isolé » émet toujours) doit disparaître des deux
+        // côtés. 6 quads seul → 5 quads chacun une fois raccordés.
+        let (reg, _, stone) = test_registry();
+        let mut world = VoxelWorld::new(reg, 8, 1.0);
+        let a = ChunkPos { x: 0, y: 0, z: 0 };
+        let b = ChunkPos { x: 1, y: 0, z: 0 };
+        world.insert_chunk(a, Chunk::filled(8, stone));
+
+        // Seul : 6 faces, comme mesh_chunk.
+        assert_eq!(mesh_chunk_in_world(&world, a, 1.0).unwrap().face_count(), 6);
+
+        world.insert_chunk(b, Chunk::filled(8, stone));
+        for pos in [a, b] {
+            let mesh = mesh_chunk_in_world(&world, pos, 1.0).unwrap();
+            assert_eq!(mesh.face_count(), 5, "face de bordure non culled en {pos:?}");
+        }
+    }
+
+    #[test]
+    fn world_meshing_of_missing_chunk_is_none() {
+        let (reg, _, _) = test_registry();
+        let world = VoxelWorld::new(reg, 8, 1.0);
+        assert!(mesh_chunk_in_world(&world, ChunkPos { x: 0, y: 0, z: 0 }, 1.0).is_none());
     }
 
     #[test]

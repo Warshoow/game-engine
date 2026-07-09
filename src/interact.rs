@@ -14,12 +14,11 @@ use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 
 use voxel_core::chunk::ChunkPos;
-use voxel_core::mesher::mesh_chunk;
 use voxel_core::physics::Aabb;
 use voxel_core::raycast::raycast;
 
 use crate::player::{CursorCaptured, Player, PLAYER_HEIGHT_M, PLAYER_WIDTH_M, PlayerCamera};
-use crate::{held_label, to_bevy_mesh, ChunkMesh, GameWorld, HeldBlockText};
+use crate::{held_label, remesh_chunk, ChunkMesh, GameWorld, HeldBlockText};
 
 /// Molette : fait défiler la hotbar (cyclique). La hotbar est découverte
 /// depuis le registre au setup — ce système ne connaît aucun bloc, il ne
@@ -80,8 +79,10 @@ pub fn interact(
         return;
     };
 
+    let edited: [i64; 3];
     let touched: Option<ChunkPos> = if breaking {
         let air = game.air;
+        edited = hit.voxel;
         game.world.set_voxel(hit.voxel, air)
     } else {
         // Poser : sur la face d'entrée du rayon. Normale nulle = l'œil est
@@ -102,11 +103,30 @@ pub fn interact(
             return;
         }
         let held = game.held();
+        edited = target;
         game.world.set_voxel(target, held)
     };
 
     if let Some(pos) = touched {
         remesh_chunk(&mut commands, &game, pos, &mut meshes, &chunk_meshes);
+        // Culling inter-chunks : un voxel en bordure change aussi les faces
+        // du chunk voisin (sa face culled peut devoir (ré)apparaître).
+        let size = game.world.chunk_size();
+        let (_, local) = game.world.split(edited);
+        for (axis, &l) in local.iter().enumerate() {
+            let offset: i32 = match l {
+                0 => -1,
+                l if l == size - 1 => 1,
+                _ => continue,
+            };
+            let mut npos = pos;
+            match axis {
+                0 => npos.x += offset,
+                1 => npos.y += offset,
+                _ => npos.z += offset,
+            }
+            remesh_chunk(&mut commands, &game, npos, &mut meshes, &chunk_meshes);
+        }
     }
 }
 
@@ -126,42 +146,4 @@ fn voxel_overlaps_player(
     (0..3).all(|a| vmin[a] < p.max[a] && vmax[a] > p.min[a])
 }
 
-/// Reconstruit le mesh du chunk `pos` : met à jour l'asset existant, ou
-/// spawn/despawn l'entité si le chunk passe de/à vide.
-fn remesh_chunk(
-    commands: &mut Commands,
-    game: &GameWorld,
-    pos: ChunkPos,
-    meshes: &mut Assets<Mesh>,
-    chunk_meshes: &Query<(Entity, &ChunkMesh, &Mesh3d)>,
-) {
-    let Some(chunk) = game.world.chunk(pos) else { return };
-    let voxel_size_m = 1.0 / game.world.voxels_per_meter;
-    let data = mesh_chunk(chunk, &game.world.registry, voxel_size_m);
-    let existing = chunk_meshes.iter().find(|(_, cm, _)| cm.0 == pos);
-
-    match (existing, data.is_empty()) {
-        (Some((entity, _, _)), true) => commands.entity(entity).despawn(),
-        (Some((_, _, mesh3d)), false) => {
-            // Remplace le contenu de l'asset : l'entité et son handle ne
-            // bougent pas, le GPU reçoit les nouveaux tampons.
-            if let Err(err) = meshes.insert(mesh3d.id(), to_bevy_mesh(data)) {
-                error!("re-mesh du chunk {pos:?} impossible : {err}");
-            }
-        }
-        (None, false) => {
-            let extent = game.world.chunk_size() as f32 * voxel_size_m;
-            commands.spawn((
-                ChunkMesh(pos),
-                Mesh3d(meshes.add(to_bevy_mesh(data))),
-                MeshMaterial3d(game.material.clone()),
-                Transform::from_xyz(
-                    pos.x as f32 * extent,
-                    pos.y as f32 * extent,
-                    pos.z as f32 * extent,
-                ),
-            ));
-        }
-        (None, true) => {}
-    }
-}
+// (remesh_chunk vit dans main.rs : partagé entre pose/casse et streaming.)

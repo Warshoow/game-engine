@@ -4,6 +4,7 @@
 
 mod interact;
 mod player;
+mod streaming;
 
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, Mesh};
@@ -11,10 +12,10 @@ use bevy::prelude::*;
 use bevy::render::render_resource::PrimitiveTopology;
 
 use voxel_core::chunk::{ChunkPos, CHUNK_SIZE};
-use voxel_core::mesher::{mesh_chunk, MeshData};
+use voxel_core::mesher::{mesh_chunk_in_world, MeshData};
 use voxel_core::registry::{BlockData, ContentEntry, ContentId, Kind, Registry};
 use voxel_core::world::VoxelWorld;
-use voxel_core::worldgen::{HeightmapGenerator, WorldGenerator};
+use voxel_core::worldgen::HeightmapGenerator;
 
 /// Le monde côté app : le `VoxelWorld` (qui possède registre + chunks, §3.1)
 /// et le générateur. Ressource ECS : physique, pose/casse et remeshing y
@@ -68,14 +69,11 @@ fn main() {
         }))
         .add_plugins(player::PlayerPlugin)
         .add_systems(Startup, (setup_world, player::spawn_player).chain())
+        .add_systems(Update, streaming::stream_chunks)
         .run();
 }
 
-fn setup_world(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
+fn setup_world(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
     // --- Le monde possède son contenu (§3.1) : tout part du registre. ---
     let mut registry = Registry::new();
     let air = registry
@@ -122,36 +120,11 @@ fn setup_world(
         voxels_per_meter,
     };
 
-    // --- Génère la grille de chunks DANS le monde (la physique la lira),
-    //     puis meshe depuis le monde. ---
-    let mut world = VoxelWorld::new(registry, CHUNK_SIZE, voxels_per_meter);
-    for cx in -2..=2 {
-        for cz in -2..=2 {
-            let pos = ChunkPos { x: cx, y: 0, z: cz };
-            world.insert_chunk(pos, generator.generate_chunk(pos, CHUNK_SIZE));
-        }
-    }
-
-    let voxel_size_m = 1.0 / voxels_per_meter;
-    let chunk_extent_m = CHUNK_SIZE as f32 * voxel_size_m;
+    // --- Le monde démarre VIDE : c'est le streaming (Update) qui génère et
+    //     meshe les chunks autour du joueur, dès la première frame. La
+    //     physique se fige tant que le sol sous le joueur n'est pas chargé.
+    let world = VoxelWorld::new(registry, CHUNK_SIZE, voxels_per_meter);
     let material = materials.add(Color::WHITE); // blanc : les couleurs viennent des sommets
-
-    for (pos, chunk) in world.chunks() {
-        let data = mesh_chunk(chunk, &world.registry, voxel_size_m);
-        if data.is_empty() {
-            continue;
-        }
-        commands.spawn((
-            ChunkMesh(pos),
-            Mesh3d(meshes.add(to_bevy_mesh(data))),
-            MeshMaterial3d(material.clone()),
-            Transform::from_xyz(
-                pos.x as f32 * chunk_extent_m,
-                pos.y as f32 * chunk_extent_m,
-                pos.z as f32 * chunk_extent_m,
-            ),
-        ));
-    }
 
     // La hotbar se **découvre** : tout bloc solide du registre est posable.
     // Ajouter un bloc au registre suffit à le rendre disponible — aucun
@@ -210,6 +183,51 @@ fn setup_world(
         DirectionalLight::default(),
         Transform::from_xyz(50.0, 80.0, 30.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
+}
+
+/// (Re)construit le mesh du chunk `pos` : met à jour l'asset existant, ou
+/// spawn/despawn l'entité si le chunk passe de/à vide. Utilisé par la
+/// pose/casse ET le streaming — un seul chemin de meshing.
+pub fn remesh_chunk(
+    commands: &mut Commands,
+    game: &GameWorld,
+    pos: ChunkPos,
+    meshes: &mut Assets<Mesh>,
+    chunk_meshes: &Query<(Entity, &ChunkMesh, &Mesh3d)>,
+) {
+    let voxel_size_m = 1.0 / game.world.voxels_per_meter;
+    let Some(data) = mesh_chunk_in_world(&game.world, pos, voxel_size_m) else {
+        return; // chunk non chargé : rien à mesher
+    };
+    let existing = chunk_meshes.iter().find(|(_, cm, _)| cm.0 == pos);
+
+    match (existing, data.is_empty()) {
+        (Some((entity, _, mesh3d)), true) => {
+            meshes.remove(mesh3d.id());
+            commands.entity(entity).despawn();
+        }
+        (Some((_, _, mesh3d)), false) => {
+            // Remplace le contenu de l'asset : l'entité et son handle ne
+            // bougent pas, le GPU reçoit les nouveaux tampons.
+            if let Err(err) = meshes.insert(mesh3d.id(), to_bevy_mesh(data)) {
+                error!("re-mesh du chunk {pos:?} impossible : {err}");
+            }
+        }
+        (None, false) => {
+            let extent = game.world.chunk_size() as f32 * voxel_size_m;
+            commands.spawn((
+                ChunkMesh(pos),
+                Mesh3d(meshes.add(to_bevy_mesh(data))),
+                MeshMaterial3d(game.material.clone()),
+                Transform::from_xyz(
+                    pos.x as f32 * extent,
+                    pos.y as f32 * extent,
+                    pos.z as f32 * extent,
+                ),
+            ));
+        }
+        (None, true) => {}
+    }
 }
 
 /// Libellé HUD du bloc en main — l'identifier vient du registre, le HUD ne

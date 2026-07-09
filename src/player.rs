@@ -102,6 +102,16 @@ fn physics_step(
 ) {
     let dt = time.delta_secs(); // dans FixedUpdate : le pas fixe
     for (mut transform, mut player) in &mut query {
+        // Streaming : on ne simule PAS dans du non-chargé. `is_solid` traite
+        // un chunk absent comme de l'air — sans cette garde, le joueur
+        // tomberait à travers un monde pas encore généré (premières frames,
+        // ou si la génération ne suit pas). Figé ≠ cassé : la simu reprend
+        // dès que le sol existe.
+        let feet_voxel = game.world.voxel_at_m(transform.translation.to_array());
+        let (chunk_pos, _) = game.world.split(feet_voxel);
+        if game.world.chunk(chunk_pos).is_none() {
+            continue;
+        }
         // Intention de déplacement dans le plan horizontal, repère joueur.
         let mut wish = Vec3::ZERO;
         if keys.pressed(KeyCode::KeyW) {
