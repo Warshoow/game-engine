@@ -38,6 +38,13 @@ pub struct GameWorld {
 pub struct ChunkMesh(pub ChunkPos);
 
 fn main() {
+    // WSLg : le compositeur Wayland ne fournit ni pointer lock ni mouvements
+    // relatifs de souris → caméra FPS morte. On masque WAYLAND_DISPLAY pour
+    // que winit retombe sur X11 (XWayland), qui gère les deux. À retirer le
+    // jour où WSLg le supporte (ou hors WSL).
+    // SAFETY: avant la création de tout thread (première ligne de main).
+    unsafe { std::env::remove_var("WAYLAND_DISPLAY") };
+
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
@@ -136,7 +143,7 @@ fn setup_world(
         },
     ));
     commands.spawn((
-        Text::new("Clic gauche : jouer (souris capturée) · Échap : libérer la souris\nWASD/Espace : bouger · gauche : casser · droit : poser"),
+        Text::new("Clic gauche : jouer · Échap : libérer la souris · F11 : plein écran\nWASD/Espace : bouger · gauche : casser · droit : poser"),
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(12.0),

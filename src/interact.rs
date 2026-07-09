@@ -23,6 +23,9 @@ use crate::{to_bevy_mesh, ChunkMesh, GameWorld};
 /// Portée de la main, en mètres (§2 — jamais « en blocs »).
 const REACH_M: f32 = 5.0;
 
+// Les systèmes ECS prennent leurs dépendances en paramètres : 8 arguments
+// est normal ici, pas un smell de design.
+#[allow(clippy::too_many_arguments)]
 pub fn interact(
     mut commands: Commands,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -117,7 +120,9 @@ fn remesh_chunk(
         (Some((_, _, mesh3d)), false) => {
             // Remplace le contenu de l'asset : l'entité et son handle ne
             // bougent pas, le GPU reçoit les nouveaux tampons.
-            meshes.insert(mesh3d.id(), to_bevy_mesh(data));
+            if let Err(err) = meshes.insert(mesh3d.id(), to_bevy_mesh(data)) {
+                error!("re-mesh du chunk {pos:?} impossible : {err}");
+            }
         }
         (None, false) => {
             let extent = game.world.chunk_size() as f32 * voxel_size_m;

@@ -69,8 +69,7 @@ pub fn move_and_collide(world: &VoxelWorld, aabb: Aabb, delta: [f32; 3]) -> Move
         collided: [false; 3],
     };
 
-    for axis in 0..3 {
-        let d = delta[axis];
+    for (axis, &d) in delta.iter().enumerate() {
         if d == 0.0 {
             continue;
         }
@@ -158,7 +157,7 @@ fn first_blocking_face(
 mod tests {
     use super::*;
     use crate::chunk::{Chunk, ChunkPos};
-    use crate::registry::{BlockData, ContentEntry, ContentId, Kind, Registry};
+    use crate::registry::{BlockData, ContentEntry, Kind, Registry};
 
     /// Monde 16³ (1 vox/m) avec un sol solide en y ∈ [0, 4) et un mur x = 8.
     fn world() -> VoxelWorld {

@@ -154,3 +154,49 @@ déplacement dessus ✓. 35 tests headless, clippy clean.
 **Prochaines pistes** (après validation en jeu) : greedy meshing (étape 2),
 interpolation caméra entre ticks si le 64 Hz se sent, curseur pointé sur le
 voxel visé (surbrillance), HUD debug egui.
+
+## 2026-07-09 (suite) — La saga de la souris sous WSLg
+
+Faire tourner une caméra FPS sous WSLg s'est révélé être une enquête en
+cinq actes. Documenté en détail parce que chaque acte est un piège générique.
+
+**Acte 1 — Wayland WSLg : aucun delta.** Le compositeur Wayland de WSLg ne
+fournit ni pointer lock ni mouvements relatifs. Fix : masquer
+`WAYLAND_DISPLAY` au début de `main()` pour forcer winit sur X11/XWayland
+(Bevy compile les deux backends et préfère Wayland).
+
+**Acte 2 — Lock émulé : rétroaction.** Sous XWayland, `CursorGrabMode::
+Locked` est émulé par téléportations au centre… comptées comme des
+mouvements → deltas géants, caméra qui plonge et spinne. Fix : abandonner
+les deltas « raw » pour la position absolue + recentrage manuel.
+
+**Acte 3 — Cache bevy_winit : warp fantôme.** `Window::set_cursor_position`
+n'est poussé vers l'OS que si la *demande* diffère de la demande précédente
+(comparaison au cache, pas à l'état réel — `bevy_winit/src/system.rs`).
+Redemander « pile le centre » chaque frame n'est appliqué qu'une fois → le
+curseur dérive, delta persistant ∝ distance au centre : caméra-joystick.
+Fix : cible alternée d'un ±½ px.
+
+**Acte 4 — Warp lent : recomptage.** Mesurer le delta « depuis le centre »
+recompte le même offset à chaque frame de latence du warp → accélération
+fantôme. Fix : delta entre deux positions *successives* (correct quelle que
+soit la latence), recentrage seulement près du bord, écho du warp d'abord
+avalé… ce qui mangeait du mouvement réel (atténuation perçue). Raffiné en
+*soustraction* de l'écho (signature : saut colinéaire au warp émis,
+amplitude comparable) — le mouvement n'est plus jamais avalé.
+
+**Acte 5 — Le verdict WSLg (diagnostic instrumenté).** Logs à l'appui :
+les deltas raw sont ~1000× trop grands (périphérique *absolu* émulé par
+RDP — inutilisables), et les warps ne déplacent que l'état interne de
+XWayland : le curseur **hôte Windows** se réimpose au premier mouvement
+physique (à-coup), et le masquage du curseur est ignoré. Conclusion : sous
+WSL, on ne warp **pas du tout** (détection `/proc/version`) ; on s'appuie
+sur le confinement (qui marche) + F11 plein écran sans bordure pour donner
+de l'amplitude. Sur Linux natif, le recentrage se réactive tout seul.
+
+**Leçons.** (1) Instrumenter avant de raffiner : le diagnostic d'une heure
+a invalidé deux « fixes » plausibles. (2) La chaîne
+souris→RDP→WSLg→XWayland→winit→Bevy a six maillons ; chaque symptôme
+(« joystick », « accélération », « atténuation ») désignait un maillon
+différent. (3) Pour le vrai test de feel, un build Windows natif reste la
+solution propre — WSL est l'environnement de dev, pas de jeu.
