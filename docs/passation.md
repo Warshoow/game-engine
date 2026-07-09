@@ -7,18 +7,43 @@
 
 ## Où en est le projet
 
-**La tranche verticale (§7 du design doc) est fonctionnellement complète**
-et validée en jeu par Warshow. Dernier commit : `5259461`. Les quatre
-critères tiennent :
+**La tranche verticale (§7) est complète et dépassée** : les trois piliers
+d'apprentissage du cœur voxel sont construits — stockage (chunk paletté),
+meshing (greedy, ×12,8 vs naïf, fluidité validée en jeu par Warshow même
+sous llvmpipe), et **streaming** (§3.4 : monde qui démarre vide, chunks
+générés/déchargés autour du joueur). Dernier commit : `34e7aa1`.
 
-1. Chunk généré depuis la seed (heightmap fBm maison, déterministe).
-2. Mesher blocky (culling naïf) → mesh Bevy affiché.
-3. Pose/casse data-driven (raycast DDA + écriture registre + re-mesh).
-4. Déplacement FPS avec collision (AABB balayée, axe par axe).
+1. Chunk généré depuis la seed (heightmap fBm maison, déterministe),
+   **en continu autour du joueur** (budget 4 chunks/frame, hystérésis).
+2. Mesher blocky **greedy** avec **raccord inter-chunks** (le naïf reste
+   comme oracle de test).
+3. Pose/casse data-driven + **sélection à la molette** (hotbar découverte
+   depuis le registre — tout bloc solide est posable).
+4. Déplacement FPS avec collision (AABB balayée), **figé si le chunk sous
+   les pieds n'est pas chargé**.
 
 `cargo run` → clic gauche pour jouer, WASD/Espace, clic gauche casse,
 clic droit pose, molette change le bloc en main, Échap libère la souris,
 F plein écran.
+
+## Invariants à ne pas casser (au-delà du design doc)
+
+- **Le mesh d'un chunk dépend de ses voisins** (culling inter-chunks).
+  Deux obligations en découlent, déjà codées mais faciles à casser :
+  un chunk qui apparaît → re-mesh de ses voisins affichés ; un voxel
+  édité en bordure → re-mesh du chunk voisin. Oublier l'une = trous.
+- **La solidité hors chunk est une fermeture injectée** dans le mesher :
+  `mesh_chunk` = chunk isolé (air dehors, pour les tests purs),
+  `mesh_chunk_in_world` = raccordé au monde. Ne pas re-hardcoder.
+- **La physique ne simule jamais dans du non-chargé** (chunk absent =
+  air pour `is_solid` → sans la garde, on tombe à travers le monde).
+- **Décharger un mesh ≠ oublier le chunk** : l'entité et l'asset GPU
+  (`meshes.remove`, sinon fuite) partent, les données restent en mémoire —
+  les édits du joueur survivent. Pas de persistance disque (non-goal §7).
+- **La hotbar se découvre** (`Registry::iter()`, filtre solide) : ajouter
+  un bloc au registre suffit à le rendre posable. Aucune liste en dur.
+- **Un seul chemin de meshing** : génération, streaming et pose/casse
+  passent tous par `remesh_chunk` (main.rs) → `mesh_chunk_in_world`.
 
 ## Architecture (résumé)
 
@@ -69,7 +94,11 @@ retourne le code de `tail`). Vérifier `EXIT=$?` explicitement.
   (`~/.cargo/registry/src/*/bevy-0.19.0/examples/`), pas contre sa mémoire —
   la notation BSN est arrivée mais `commands.spawn` classique reste valable.
   Piège découvert : `Window::set_cursor_position` ignoré si la demande égale
-  la précédente (cache bevy_winit).
+  la précédente (cache bevy_winit). Autre renommage 0.19 : les événements
+  bufferisés se lisent via `MessageReader` (ex-`EventReader`).
+- **Piège ECS** : les entités spawnées via `Commands` ne sont visibles dans
+  les `Query` qu'à la frame suivante — d'où le meshing différé/dédupliqué en
+  fin de passe dans `streaming.rs` (sinon meshes dupliqués).
 
 ## Conventions de travail avec Warshow
 
@@ -82,31 +111,30 @@ retourne le code de `tail`). Vérifier `EXIT=$?` explicitement.
   dans `docs/journal.md`, tenu à jour à chaque étape.
 - Le design doc est canonique : le modifier AVANT de coder toute entorse.
 
-## Prochaines étapes
+## Fait dans la session du 2026-07-09 (après-midi)
 
-**Fait depuis** : le greedy meshing (étape 2 du mesher) est implémenté et
-committé — `mesh_chunk` est greedy, le naïf reste comme oracle de test
-(`mesh_chunk_naive`), gain mesuré ×12,8 (voir `docs/journal.md` et
-`cargo run -p voxel_core --example mesh_stats`).
+Trois jalons, chacun committé et détaillé dans `docs/journal.md` :
 
-**Fait aussi** : la sélection de blocs — 3 blocs de plus dans le registre,
-hotbar découverte depuis le registre (`Registry::iter()`, tout bloc
-solide), molette pour changer, HUD du bloc en main. Plein écran remappé
-F11 → F.
+1. **Greedy meshing** (`3ebeca4`) — fusion des faces coplanaires par
+   matériau (clé = index de palette), le naïf conservé comme oracle
+   (égalité d'aire par direction). Gain mesuré ×12,8 sur les chunks réels
+   (`cargo run -p voxel_core --example mesh_stats`). Fluidité confirmée
+   en jeu.
+2. **Sélection de blocs** (`04ab52a`) — dirt/stone/sand en donnée, hotbar
+   découverte, molette, HUD du bloc en main. Plein écran F11 → F (les
+   touches de fonction sont souvent interceptées par l'hôte).
+3. **Streaming + raccord inter-chunks** (`34e7aa1`) — voir les invariants
+   ci-dessus. Rayon de vue 96 m + marge 32 m, exprimés en mètres (§2), la
+   conversion en chunks reste locale à `streaming.rs`.
 
-**Fait aussi** : le streaming de chunks (§3.4) — monde qui démarre vide,
-`stream_chunks` génère/meshe autour du joueur (rayon en mètres, budget
-4 chunks/frame, hystérésis de déchargement), culling inter-chunks
-(`mesh_chunk_in_world` ; le mesh d'un chunk dépend de ses voisins → les
-voisins sont re-meshés à l'apparition d'un chunk et à l'édit en bordure),
-garde physique (pas de simu dans du non-chargé), données conservées en
-mémoire au déchargement (les édits survivent). Voir `docs/journal.md`.
+## Prochaines étapes (non arbitrées)
 
-Prochaine étape : non arbitrée (voir pistes ci-dessous).
-
-Pistes notées plus loin : surbrillance du voxel visé, interpolation caméra
-entre ticks (si le 64 Hz se sent), HUD debug egui, **build Windows natif**
-pour les tests de feel (proposé — demande mingw-w64, non mis en place).
+Pistes discutées : surbrillance du voxel visé, HUD debug (FPS, chunks
+chargés — egui), interpolation caméra entre ticks (si le 64 Hz se sent),
+**verticalité** (plusieurs couches de chunks — la porte vers les caves ;
+la boucle « ensemble voulu » de `streaming.rs` est le seul endroit à
+élargir), **build Windows natif** pour les tests de feel (demande
+mingw-w64, non mis en place).
 
 Limitations assumées (ne pas « corriger » sans besoin) : palette non
 compactée, re-mesh complet du chunk au moindre voxel, une seule couche
