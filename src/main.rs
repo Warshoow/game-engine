@@ -1,6 +1,8 @@
 //! Binaire du moteur : l'app Bevy. Toute la logique voxel pure vit dans
 //! `voxel_core` (testable headless) ; ici on ne fait que brancher :
-//! registre → worldgen → mesher → entités Bevy.
+//! registre → worldgen → mesher → entités Bevy, et le contrôleur joueur.
+
+mod player;
 
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, Mesh};
@@ -10,15 +12,22 @@ use bevy::render::render_resource::PrimitiveTopology;
 use voxel_core::chunk::{ChunkPos, CHUNK_SIZE};
 use voxel_core::mesher::{mesh_chunk, MeshData};
 use voxel_core::registry::{BlockData, ContentEntry, Kind, Registry};
+use voxel_core::world::VoxelWorld;
 use voxel_core::worldgen::{HeightmapGenerator, WorldGenerator};
 
-/// Le monde côté app : registre world-owned + paramètres de génération.
-/// Resource ECS pour que les systèmes suivants (pose/casse) y accèdent.
+/// Le monde côté app : le `VoxelWorld` (qui possède registre + chunks, §3.1)
+/// et le générateur. Ressource ECS : physique, pose/casse et remeshing y
+/// accèdent.
 #[derive(Resource)]
-struct VoxelWorld {
-    registry: Registry,
-    generator: HeightmapGenerator,
+pub struct GameWorld {
+    pub world: VoxelWorld,
+    pub generator: HeightmapGenerator,
 }
+
+/// Marque l'entité-mesh d'un chunk — pour retrouver quoi re-mesher quand un
+/// voxel change (pose/casse, prochaine étape).
+#[derive(Component)]
+pub struct ChunkMesh(pub ChunkPos);
 
 fn main() {
     App::new()
@@ -29,11 +38,12 @@ fn main() {
             }),
             ..default()
         }))
-        .add_systems(Startup, setup)
+        .add_plugins(player::PlayerPlugin)
+        .add_systems(Startup, (setup_world, player::spawn_player).chain())
         .run();
 }
 
-fn setup(
+fn setup_world(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -68,44 +78,43 @@ fn setup(
         voxels_per_meter,
     };
 
-    // --- Génère + meshe une grille de chunks autour de l'origine. ---
+    // --- Génère la grille de chunks DANS le monde (la physique la lira),
+    //     puis meshe depuis le monde. ---
+    let mut world = VoxelWorld::new(registry, CHUNK_SIZE, voxels_per_meter);
+    for cx in -2..=2 {
+        for cz in -2..=2 {
+            let pos = ChunkPos { x: cx, y: 0, z: cz };
+            world.insert_chunk(pos, generator.generate_chunk(pos, CHUNK_SIZE));
+        }
+    }
+
     let voxel_size_m = 1.0 / voxels_per_meter;
     let chunk_extent_m = CHUNK_SIZE as f32 * voxel_size_m;
     let material = materials.add(Color::WHITE); // blanc : les couleurs viennent des sommets
 
-    for cx in -2..=2 {
-        for cz in -2..=2 {
-            let pos = ChunkPos { x: cx, y: 0, z: cz };
-            let chunk = generator.generate_chunk(pos, CHUNK_SIZE);
-            let data = mesh_chunk(&chunk, &registry, voxel_size_m);
-            if data.is_empty() {
-                continue;
-            }
-            commands.spawn((
-                Mesh3d(meshes.add(to_bevy_mesh(data))),
-                MeshMaterial3d(material.clone()),
-                Transform::from_xyz(
-                    pos.x as f32 * chunk_extent_m,
-                    pos.y as f32 * chunk_extent_m,
-                    pos.z as f32 * chunk_extent_m,
-                ),
-            ));
+    for (pos, chunk) in world.chunks() {
+        let data = mesh_chunk(chunk, &world.registry, voxel_size_m);
+        if data.is_empty() {
+            continue;
         }
+        commands.spawn((
+            ChunkMesh(pos),
+            Mesh3d(meshes.add(to_bevy_mesh(data))),
+            MeshMaterial3d(material.clone()),
+            Transform::from_xyz(
+                pos.x as f32 * chunk_extent_m,
+                pos.y as f32 * chunk_extent_m,
+                pos.z as f32 * chunk_extent_m,
+            ),
+        ));
     }
 
-    commands.insert_resource(VoxelWorld { registry, generator });
+    commands.insert_resource(GameWorld { world, generator });
 
     // --- Éclairage full-bright-ish (non-goal §7 : pas de vrai éclairage). ---
     commands.spawn((
         DirectionalLight::default(),
         Transform::from_xyz(50.0, 80.0, 30.0).looking_at(Vec3::ZERO, Vec3::Y),
-    ));
-
-    // Caméra fixe en surplomb pour l'instant — le contrôleur de déplacement
-    // est l'étape suivante de la slice.
-    commands.spawn((
-        Camera3d::default(),
-        Transform::from_xyz(-40.0, 45.0, -40.0).looking_at(Vec3::new(0.0, 14.0, 0.0), Vec3::Y),
     ));
 }
 

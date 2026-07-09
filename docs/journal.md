@@ -90,7 +90,39 @@ lent mais suffisant pour la slice. Piste : `mesa-vulkan-drivers` (driver
 « dozen » D3D12) pour l'accélération GPU. Erreurs ALSA au lancement =
 bénignes (pas de périphérique audio WSL).
 
-**Prochaine étape.** Au choix : greedy meshing (étape 2 du mesher), ou
-d'abord le déplacement (caméra contrôlable + collision basique, §7.4) pour
-rendre la scène explorable avant d'optimiser. Puis pose/casse data-driven
-(§7.3) qui fermera la slice.
+## 2026-07-09 (suite) — Déplacement : monde, collision, contrôleur FPS
+
+**`VoxelWorld` (§3.1, §3.10).** La structure qui *possède* registre + chunks
++ métadonnées — celle que la save sérialisera et que physique/pose/casse
+interrogent. Elle parle deux langues avec une frontière nette : coordonnées
+voxel monde (`i64`, la grille) et mètres (`f32`, le world-space) ;
+`voxels_per_meter` est l'unique pont. Piège classique traité et testé : la
+conversion voxel → chunk exige la division **euclidienne** (`div_euclid`) —
+avec `/` tronqué, x = −1 donnerait chunk 0/local −1 au lieu de chunk −1/31.
+
+**Collision AABB (§7.4).** Résolution **axe par axe** façon Minecraft :
+trois passes 1D au lieu d'un solveur 3D, et le glissement le long des murs
+tombe gratuitement. Leçon du jour : la première version ne testait que la
+*position d'arrivée* — les 4 tests de chute/mur ont échoué d'un coup, parce
+qu'une chute de 10 m en un tick « saute » par-dessus le sol sans jamais le
+chevaucher (tunneling). Le fix : tester la **région balayée** départ →
+arrivée et clamper contre la première face dans le sens du mouvement (avec
+une marge de peau pour que les floats ne re-collent pas la boîte au tick
+suivant — régression testée aussi). Les tests headless ont attrapé le bug
+avant la première partie ; c'est exactement leur travail.
+
+**Contrôleur FPS (`src/player.rs`).** La répartition suit §3.9 à la lettre :
+la *simulation* (WASD → intention, gravité 22 m/s², saut, collision) vit en
+`FixedUpdate` ; le *regard* (souris, capture curseur) en `Update`, frame
+variable — la caméra n'influence la simu qu'à travers le yaw stocké. Tout
+est en mètres : joueur 0,6 × 1,8 m, yeux à 1,62 m, marche 5 m/s. Clic gauche
+capture le curseur, Échap le relâche. Pas encore d'interpolation visuelle
+entre ticks (le rendu échantillonne le dernier état simulé) — viendra si le
+64 Hz se voit.
+
+28 tests headless, clippy clean workspace.
+
+**Prochaine étape.** Pose/casse data-driven (§7.3) : raycast voxel (DDA)
+depuis la caméra, écriture via le registre, re-mesh du chunk touché — ça
+fermera les critères de la slice. Ensuite : greedy meshing (étape 2 du
+mesher) et l'interpolation caméra si besoin.

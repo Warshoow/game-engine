@@ -7,5 +7,7 @@
 
 pub mod chunk;
 pub mod mesher;
+pub mod physics;
 pub mod registry;
 pub mod worldgen;
+pub mod world;
