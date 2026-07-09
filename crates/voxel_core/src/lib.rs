@@ -6,4 +6,6 @@
 //! - Voxel-space ≠ world-space : le monde vit en mètres (§2).
 
 pub mod chunk;
+pub mod mesher;
 pub mod registry;
+pub mod worldgen;

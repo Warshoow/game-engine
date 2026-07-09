@@ -65,6 +65,14 @@ impl Chunk {
         self.palette[self.voxels[self.index(x, y, z)] as usize]
     }
 
+    /// Index **local** (dans la palette) du voxel — pour les chemins chauds
+    /// (mesher) qui résolvent la palette une fois puis travaillent en local,
+    /// au lieu de re-mapper local → global → local à chaque voxel.
+    #[inline]
+    pub fn get_local(&self, x: u32, y: u32, z: u32) -> u16 {
+        self.voxels[self.index(x, y, z)]
+    }
+
     /// Écrit un matériau. La palette grandit à la demande (lookup-or-append).
     ///
     /// Note : on ne compacte pas la palette quand un matériau disparaît du
