@@ -200,3 +200,55 @@ souris→RDP→WSLg→XWayland→winit→Bevy a six maillons ; chaque symptôme
 (« joystick », « accélération », « atténuation ») désignait un maillon
 différent. (3) Pour le vrai test de feel, un build Windows natif reste la
 solution propre — WSL est l'environnement de dev, pas de jeu.
+
+## 2026-07-09 (suite) — Mesher, étape 2 : greedy meshing
+
+**Le problème du naïf.** Un quad 1×1 par face visible : un sol plat 32×32,
+géométriquement *un* rectangle, coûte 1024 quads. Le GPU s'en moque un peu
+(il avale des millions de triangles), mais chaque quad = 4 sommets à
+transformer, de la bande passante, de la mémoire — et sous llvmpipe (rendu
+CPU en WSL), chaque triangle compte vraiment.
+
+**L'algo (Lysenko, 2012).** Trois idées :
+
+1. **Balayer par tranches.** Pour chacune des 6 directions de face, le chunk
+   est découpé en tranches perpendiculaires à la normale. Les faces visibles
+   d'une tranche sont coplanaires par construction → le problème 3D devient
+   32 problèmes 2D (un masque `size × size` par tranche).
+2. **Clé de fusion.** Chaque case du masque porte l'index de palette du
+   voxel, ou rien. Deux faces ne fusionnent que si leur clé est identique —
+   c'est ce qui préserve le data-driven : pierre et terre adjacentes restent
+   deux quads, chacun sa couleur. (Plus tard, la clé s'enrichira : lumière,
+   UV… tout ce qui distingue visuellement deux faces doit la casser.)
+3. **Croissance gourmande.** Première case non consommée → étendre en
+   largeur tant que la clé matche → étendre en hauteur tant que la *ligne
+   entière* matche → émettre UN quad w×h → effacer le rectangle du masque.
+   « Gourmand » = localement optimal : on ne cherche pas le pavage minimal
+   (NP-difficile), et c'est très bien comme ça.
+
+**Le piège de l'enroulement.** Avec un quad de taille variable sur 6
+orientations, l'erreur classique est un winding CW → face mangée par le
+back-face culling. Solution structurelle plutôt que 6 cas particuliers :
+(d, u, v) reste une permutation *cyclique* de (x, y, z), donc û × v̂ = d̂ ;
+parcourir les coins u-d'abord est CCW pour la face +d, v-d'abord pour −d.
+Le test `winding_is_ccw_seen_from_outside` (produit vectoriel vs normale
+déclarée, sur une dalle qui exerce les 6 directions) verrouille ça.
+
+**L'oracle.** Le naïf reste dans le code (`mesh_chunk_naive`) comme
+*oracle de test* : sur un terrain irrégulier à deux matériaux, greedy et
+naïf doivent couvrir **exactement la même aire, direction par direction**
+(`greedy_covers_same_surface_as_naive`). Toute face manquante, dupliquée ou
+débordante casse cette égalité — c'est un test bien plus puissant que
+compter des quads sur des cas simples. Pattern général : quand on optimise,
+garder la version lente comme référence exécutable.
+
+**Le gain, mesuré** (`cargo run -p voxel_core --example mesh_stats`, les
+25 chunks réels du binaire, seed 42) : 110 500 quads naïfs → **8 661 quads
+greedy, ×12,8** (−92 %). Et rien à changer dans le binaire : génération et
+re-mesh passaient déjà tous deux par `mesh_chunk` — l'intérêt d'avoir un
+seul point d'entrée de meshing.
+
+**Limitation assumée** (comme pour le naïf) : les faces de bordure de chunk
+sont toujours émises, et fusionnées entre elles sous le terrain — des quads
+invisibles subsistent aux frontières. Le raccord inter-chunks viendra avec
+le streaming.

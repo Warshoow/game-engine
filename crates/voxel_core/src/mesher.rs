@@ -1,10 +1,26 @@
-//! Mesher blocky — étape 1 : culling naïf par faces visibles.
+//! Mesher blocky — étape 2 : greedy meshing (fusion des faces coplanaires).
 //!
-//! L'idée : un chunk plein de pierre n'a pas besoin de 32³ cubes — seules les
-//! faces **au contact de l'air** existent visuellement. On parcourt chaque
-//! voxel solide et on émet une face uniquement si le voisin dans cette
-//! direction est non-solide. C'est le « face culling » ; le greedy meshing
-//! (étape 2) fusionnera ensuite les faces coplanaires adjacentes.
+//! **Étape 1 (culling naïf)** : un chunk plein de pierre n'a pas besoin de
+//! 32³ cubes — seules les faces **au contact de l'air** existent
+//! visuellement. On émet une face uniquement si le voisin dans cette
+//! direction est non-solide. Conservé ici sous [`mesh_chunk_naive`] : il
+//! sert d'oracle dans les tests (même surface, découpage différent).
+//!
+//! **Étape 2 (greedy, algo de Lysenko)** : le culling émet un quad 1×1 par
+//! face visible — un sol plat 32×32 coûte 1024 quads pour ce qui est
+//! géométriquement *un* rectangle. Le greedy balaie le chunk en tranches
+//! perpendiculaires à chaque direction de face, projette les faces visibles
+//! de la tranche dans un masque 2D, puis fusionne les cases adjacentes de
+//! **même matériau** en rectangles maximaux (largeur d'abord, puis hauteur
+//! tant que la ligne entière matche). Un rectangle = un quad, quelle que
+//! soit sa taille. « Gourmand » : localement optimal, pas globalement — le
+//! premier rectangle trouvé est pris, sans chercher le pavage minimal
+//! (NP-difficile) ; en pratique le gain est déjà massif.
+//!
+//! La clé de fusion est l'**index de palette locale** du voxel : deux faces
+//! ne fusionnent que si elles portent le même contenu. C'est ce qui garde le
+//! résultat data-driven correct — pierre et terre adjacentes restent deux
+//! quads, chacun avec sa couleur.
 //!
 //! Le mesher est pur et sans Bevy : il produit des tampons bruts
 //! ([`MeshData`]) que l'app convertit en `Mesh` Bevy. Ça le rend testable
@@ -39,6 +55,172 @@ impl MeshData {
     }
 }
 
+/// Meshe un chunk par greedy meshing — le chemin de production.
+///
+/// La solidité et la couleur sont résolues **une fois par entrée de palette**
+/// (pas une fois par voxel) via le registre — c'est le chemin data-driven :
+/// le mesher ne connaît aucun bloc par son nom.
+///
+/// Hors du chunk, le voisin est traité comme de l'air : les faces de bordure
+/// sont émises même si le chunk adjacent les cache. Assumé pour la slice —
+/// le raccord inter-chunks viendra avec le streaming.
+pub fn mesh_chunk(chunk: &Chunk, registry: &Registry, voxel_size_m: f32) -> MeshData {
+    let size = chunk.size() as i32;
+    let n = chunk.size() as usize;
+    let resolved = resolve_palette(chunk, registry);
+
+    let solid_at = |p: [i32; 3]| -> bool {
+        if p.iter().any(|&c| c < 0 || c >= size) {
+            return false; // hors chunk = air (voir doc de fonction)
+        }
+        resolved[chunk.get_local(p[0] as u32, p[1] as u32, p[2] as u32) as usize].0
+    };
+
+    let mut mesh = MeshData::default();
+    // Masque 2D réutilisé pour chaque tranche : None = pas de face visible,
+    // Some(idx) = face visible portant l'index de palette `idx` (la clé de
+    // fusion).
+    let mut mask: Vec<Option<u16>> = vec![None; n * n];
+
+    // `d` est l'axe de la normale ; `u`/`v` les deux axes du plan de la
+    // tranche. (d, u, v) reste une permutation cyclique de (x, y, z) pour
+    // que û × v̂ = d̂ — c'est ce qui rend l'enroulement CCW prévisible.
+    for d in 0..3 {
+        let u = (d + 1) % 3;
+        let v = (d + 2) % 3;
+        for positive in [true, false] {
+            let step: i32 = if positive { 1 } else { -1 };
+            let mut normal = [0.0f32; 3];
+            normal[d] = step as f32;
+
+            for layer in 0..size {
+                // 1. Projeter les faces visibles de la tranche dans le masque.
+                let mut any = false;
+                for iv in 0..size {
+                    for iu in 0..size {
+                        let mut p = [0i32; 3];
+                        p[d] = layer;
+                        p[u] = iu;
+                        p[v] = iv;
+                        let mut q = p;
+                        q[d] += step;
+                        let cell = (solid_at(p) && !solid_at(q)).then(|| {
+                            chunk.get_local(p[0] as u32, p[1] as u32, p[2] as u32)
+                        });
+                        any |= cell.is_some();
+                        mask[(iu + iv * size) as usize] = cell;
+                    }
+                }
+                if !any {
+                    continue;
+                }
+
+                // 2. Fusion gourmande : rectangles maximaux de même clé.
+                for iv in 0..n {
+                    for iu in 0..n {
+                        let Some(key) = mask[iu + iv * n] else { continue };
+                        // Largeur : étendre le long de u tant que la clé matche.
+                        let mut w = 1;
+                        while iu + w < n && mask[iu + w + iv * n] == Some(key) {
+                            w += 1;
+                        }
+                        // Hauteur : étendre le long de v tant que la *ligne
+                        // entière* [iu, iu+w) matche — condition nécessaire
+                        // pour que le résultat reste un rectangle.
+                        let mut h = 1;
+                        'grow: while iv + h < n {
+                            for k in 0..w {
+                                if mask[iu + k + (iv + h) * n] != Some(key) {
+                                    break 'grow;
+                                }
+                            }
+                            h += 1;
+                        }
+                        // Consommer le rectangle pour ne pas le réémettre.
+                        for dv in 0..h {
+                            for du in 0..w {
+                                mask[iu + du + (iv + dv) * n] = None;
+                            }
+                        }
+                        let quad = SliceQuad {
+                            axes: [d, u, v],
+                            positive,
+                            layer,
+                            origin: [iu as i32, iv as i32],
+                            extent: [w as i32, h as i32],
+                        };
+                        emit_rect(&mut mesh, &quad, normal, resolved[key as usize].1, voxel_size_m);
+                    }
+                }
+            }
+        }
+    }
+    mesh
+}
+
+/// Un rectangle fusionné dans le plan d'une tranche, avant projection en 3D.
+struct SliceQuad {
+    /// (d, u, v) : axe de la normale puis les deux axes du plan.
+    axes: [usize; 3],
+    /// Sens de la normale le long de `d`.
+    positive: bool,
+    /// Index de la tranche le long de `d` (coordonnée voxel).
+    layer: i32,
+    /// Coin bas du rectangle, en (u, v).
+    origin: [i32; 2],
+    /// Largeur/hauteur du rectangle, en (u, v).
+    extent: [i32; 2],
+}
+
+fn emit_rect(mesh: &mut MeshData, quad: &SliceQuad, normal: [f32; 3], color: [f32; 4], scale: f32) {
+    let [d, u, v] = quad.axes;
+    // La face d'un voxel `layer` côté +d est dans le plan `layer + 1` ;
+    // côté -d, dans le plan `layer`.
+    let plane = quad.layer + i32::from(quad.positive);
+    let [w, h] = quad.extent;
+    // Ordre des coins pour un enroulement CCW vu de l'extérieur : comme
+    // û × v̂ = d̂ (permutation cyclique), parcourir u puis v est CCW pour la
+    // face +d ; pour -d on parcourt v puis u (miroir).
+    let corners: [[i32; 2]; 4] = if quad.positive {
+        [[0, 0], [w, 0], [w, h], [0, h]]
+    } else {
+        [[0, 0], [0, h], [w, h], [w, 0]]
+    };
+    let base = mesh.positions.len() as u32;
+    for [cu, cv] in corners {
+        let mut p = [0i32; 3];
+        p[d] = plane;
+        p[u] = quad.origin[0] + cu;
+        p[v] = quad.origin[1] + cv;
+        mesh.positions
+            .push([p[0] as f32 * scale, p[1] as f32 * scale, p[2] as f32 * scale]);
+        mesh.normals.push(normal);
+        mesh.colors.push(color);
+    }
+    // Deux triangles CCW sur les coins [0,1,2] et [0,2,3].
+    mesh.indices
+        .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+}
+
+/// Palette résolue : index local → (solide, couleur).
+fn resolve_palette(chunk: &Chunk, registry: &Registry) -> Vec<(bool, [f32; 4])> {
+    chunk.palette().iter().map(|&id| resolve(registry, id)).collect()
+}
+
+fn resolve(registry: &Registry, id: ContentId) -> (bool, [f32; 4]) {
+    match registry.get(id).and_then(|e| e.block.as_ref()) {
+        Some(b) => (b.solid, [b.color[0], b.color[1], b.color[2], 1.0]),
+        // ID inconnu du registre : on le rend visible et criard plutôt
+        // qu'invisible — un bug de contenu doit se voir.
+        None => (true, [1.0, 0.0, 1.0, 1.0]),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Étape 1 conservée : culling naïf. Sert d'oracle aux tests du greedy —
+// les deux meshers doivent couvrir exactement la même surface.
+// ---------------------------------------------------------------------------
+
 /// Les 6 directions de face d'un cube. L'ordre des 4 coins de chaque face
 /// est choisi pour un enroulement CCW vu de l'extérieur.
 const FACES: [Face; 6] = [
@@ -68,27 +250,13 @@ struct Face {
     corners: [[u32; 3]; 4],
 }
 
-/// Meshe un chunk par culling naïf.
-///
-/// La solidité et la couleur sont résolues **une fois par entrée de palette**
-/// (pas une fois par voxel) via le registre — c'est le chemin data-driven :
-/// le mesher ne connaît aucun bloc par son nom.
-///
-/// Hors du chunk, le voisin est traité comme de l'air : les faces de bordure
-/// sont émises même si le chunk adjacent les cache. Assumé pour la slice —
-/// le raccord inter-chunks viendra avec le streaming.
-pub fn mesh_chunk(chunk: &Chunk, registry: &Registry, voxel_size_m: f32) -> MeshData {
+/// Meshe un chunk par culling naïf : un quad 1×1 par face visible.
+pub fn mesh_chunk_naive(chunk: &Chunk, registry: &Registry, voxel_size_m: f32) -> MeshData {
     let size = chunk.size();
-
-    // Palette résolue : index local → (solide, couleur).
-    let resolved: Vec<(bool, [f32; 4])> = chunk
-        .palette()
-        .iter()
-        .map(|&id| resolve(registry, id))
-        .collect();
+    let resolved = resolve_palette(chunk, registry);
     let solid_at = |x: i32, y: i32, z: i32| -> bool {
         if x < 0 || y < 0 || z < 0 || x >= size as i32 || y >= size as i32 || z >= size as i32 {
-            return false; // hors chunk = air (voir doc de fonction)
+            return false; // hors chunk = air
         }
         resolved[chunk.get_local(x as u32, y as u32, z as u32) as usize].0
     };
@@ -113,15 +281,6 @@ pub fn mesh_chunk(chunk: &Chunk, registry: &Registry, voxel_size_m: f32) -> Mesh
         }
     }
     mesh
-}
-
-fn resolve(registry: &Registry, id: ContentId) -> (bool, [f32; 4]) {
-    match registry.get(id).and_then(|e| e.block.as_ref()) {
-        Some(b) => (b.solid, [b.color[0], b.color[1], b.color[2], 1.0]),
-        // ID inconnu du registre : on le rend visible et criard plutôt
-        // qu'invisible — un bug de contenu doit se voir.
-        None => (true, [1.0, 0.0, 1.0, 1.0]),
-    }
 }
 
 fn emit_quad(mesh: &mut MeshData, voxel: [u32; 3], face: &Face, color: [f32; 4], scale: f32) {
@@ -164,11 +323,56 @@ mod tests {
         (reg, air, stone)
     }
 
+    /// Registre à deux blocs solides distincts, pour tester la clé de fusion.
+    fn test_registry_two_solids() -> (Registry, ContentId, ContentId, ContentId) {
+        let (mut reg, air, stone) = test_registry();
+        let dirt = reg
+            .register(ContentEntry {
+                identifier: "core:dirt".into(),
+                kind: Kind::Block,
+                block: Some(BlockData { solid: true, color: [0.4, 0.25, 0.1] }),
+            })
+            .unwrap();
+        (reg, air, stone, dirt)
+    }
+
+    /// Aire d'un quad du mesh (produit vectoriel des deux côtés).
+    fn quad_area(mesh: &MeshData, quad_idx: usize) -> f32 {
+        let base = quad_idx * 4;
+        let (p0, p1, p3) = (
+            mesh.positions[base],
+            mesh.positions[base + 1],
+            mesh.positions[base + 3],
+        );
+        let e1 = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+        let e2 = [p3[0] - p0[0], p3[1] - p0[1], p3[2] - p0[2]];
+        let cross = [
+            e1[1] * e2[2] - e1[2] * e2[1],
+            e1[2] * e2[0] - e1[0] * e2[2],
+            e1[0] * e2[1] - e1[1] * e2[0],
+        ];
+        (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt()
+    }
+
+    /// Aire totale par direction de normale — la signature géométrique d'un
+    /// mesh blocky. Deux meshers corrects doivent produire la même.
+    fn area_by_normal(mesh: &MeshData) -> std::collections::BTreeMap<[i32; 3], i64> {
+        let mut map = std::collections::BTreeMap::new();
+        for i in 0..mesh.face_count() {
+            let n = mesh.normals[i * 4];
+            let key = [n[0] as i32, n[1] as i32, n[2] as i32];
+            // Aires entières (voxel_size 1.0) : pas de flottant dans la clé.
+            *map.entry(key).or_insert(0) += quad_area(mesh, i).round() as i64;
+        }
+        map
+    }
+
     #[test]
     fn empty_chunk_produces_empty_mesh() {
         let (reg, air, _) = test_registry();
         let chunk = Chunk::filled(8, air);
         assert!(mesh_chunk(&chunk, &reg, 1.0).is_empty());
+        assert!(mesh_chunk_naive(&chunk, &reg, 1.0).is_empty());
     }
 
     #[test]
@@ -176,25 +380,60 @@ mod tests {
         let (reg, air, stone) = test_registry();
         let mut chunk = Chunk::filled(8, air);
         chunk.set(3, 3, 3, stone);
-        let mesh = mesh_chunk(&chunk, &reg, 1.0);
-        assert_eq!(mesh.face_count(), 6);
-        assert_eq!(mesh.positions.len(), 24); // 6 faces × 4 sommets
+        for mesh in [mesh_chunk(&chunk, &reg, 1.0), mesh_chunk_naive(&chunk, &reg, 1.0)] {
+            assert_eq!(mesh.face_count(), 6);
+            assert_eq!(mesh.positions.len(), 24); // 6 faces × 4 sommets
+        }
     }
 
     #[test]
-    fn touching_faces_are_culled() {
+    fn naive_touching_faces_are_culled() {
         // Deux voxels côte à côte : 12 faces − 2 au contact = 10.
         let (reg, air, stone) = test_registry();
         let mut chunk = Chunk::filled(8, air);
         chunk.set(3, 3, 3, stone);
         chunk.set(4, 3, 3, stone);
-        assert_eq!(mesh_chunk(&chunk, &reg, 1.0).face_count(), 10);
+        assert_eq!(mesh_chunk_naive(&chunk, &reg, 1.0).face_count(), 10);
+    }
+
+    #[test]
+    fn greedy_merges_coplanar_faces() {
+        // Deux voxels côte à côte, même matériau : les 4 faces latérales
+        // fusionnent chacune en un quad 2×1 → 6 quads au lieu de 10.
+        let (reg, air, stone) = test_registry();
+        let mut chunk = Chunk::filled(8, air);
+        chunk.set(3, 3, 3, stone);
+        chunk.set(4, 3, 3, stone);
+        assert_eq!(mesh_chunk(&chunk, &reg, 1.0).face_count(), 6);
+    }
+
+    #[test]
+    fn greedy_full_chunk_is_six_quads() {
+        // Un chunk 8³ plein : le naïf émet 6×8×8 = 384 quads de surface,
+        // le greedy exactement 6 (un par face du cube).
+        let (reg, _, stone) = test_registry();
+        let chunk = Chunk::filled(8, stone);
+        assert_eq!(mesh_chunk(&chunk, &reg, 1.0).face_count(), 6);
+        assert_eq!(mesh_chunk_naive(&chunk, &reg, 1.0).face_count(), 384);
+    }
+
+    #[test]
+    fn greedy_does_not_merge_different_materials() {
+        // Pierre et terre côte à côte : la clé de fusion (index de palette)
+        // interdit la fusion à travers la frontière de matériau. 2 faces en
+        // bout + 4×2 faces latérales non fusionnables = 10 quads.
+        let (reg, air, stone, dirt) = test_registry_two_solids();
+        let mut chunk = Chunk::filled(8, air);
+        chunk.set(3, 3, 3, stone);
+        chunk.set(4, 3, 3, dirt);
+        let mesh = mesh_chunk(&chunk, &reg, 1.0);
+        assert_eq!(mesh.face_count(), 10);
     }
 
     #[test]
     fn buried_voxel_emits_nothing() {
-        // Cube 3×3×3 plein : seule la surface (54 faces) est émise —
-        // le voxel central ne contribue à rien.
+        // Cube 3×3×3 plein : seule la surface est émise — le voxel central
+        // ne contribue à rien. Naïf : 54 quads 1×1 ; greedy : 6 quads 3×3.
         let (reg, air, stone) = test_registry();
         let mut chunk = Chunk::filled(8, air);
         for z in 0..3 {
@@ -204,7 +443,34 @@ mod tests {
                 }
             }
         }
-        assert_eq!(mesh_chunk(&chunk, &reg, 1.0).face_count(), 54);
+        assert_eq!(mesh_chunk_naive(&chunk, &reg, 1.0).face_count(), 54);
+        assert_eq!(mesh_chunk(&chunk, &reg, 1.0).face_count(), 6);
+    }
+
+    #[test]
+    fn greedy_covers_same_surface_as_naive() {
+        // L'oracle : sur un terrain irrégulier (motif déterministe mélangeant
+        // air, pierre et terre), le greedy doit couvrir exactement la même
+        // aire que le naïf, direction par direction. Toute face manquante,
+        // dupliquée ou débordante casse cette égalité.
+        let (reg, air, stone, dirt) = test_registry_two_solids();
+        let mut chunk = Chunk::filled(8, air);
+        for z in 0..8u32 {
+            for y in 0..8u32 {
+                for x in 0..8u32 {
+                    match (x * 3 + y * 5 + z * 7) % 5 {
+                        0 | 1 => chunk.set(x, y, z, stone),
+                        2 => chunk.set(x, y, z, dirt),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        let greedy = mesh_chunk(&chunk, &reg, 1.0);
+        let naive = mesh_chunk_naive(&chunk, &reg, 1.0);
+        assert_eq!(area_by_normal(&greedy), area_by_normal(&naive));
+        // Et le gain existe bel et bien.
+        assert!(greedy.face_count() < naive.face_count());
     }
 
     #[test]
@@ -224,24 +490,30 @@ mod tests {
     fn winding_is_ccw_seen_from_outside() {
         // Pour chaque triangle, la normale géométrique (produit vectoriel)
         // doit pointer dans le même sens que la normale déclarée — sinon
-        // le back-face culling du GPU mangera la face.
+        // le back-face culling du GPU mangera la face. Testé sur une dalle
+        // 2×1×3 pour exercer des quads fusionnés dans les 6 directions.
         let (reg, air, stone) = test_registry();
-        let mut chunk = Chunk::filled(4, air);
-        chunk.set(1, 1, 1, stone);
-        let mesh = mesh_chunk(&chunk, &reg, 1.0);
-        for tri in mesh.indices.chunks(3) {
-            let [a, b, c] = [tri[0] as usize, tri[1] as usize, tri[2] as usize];
-            let (pa, pb, pc) = (mesh.positions[a], mesh.positions[b], mesh.positions[c]);
-            let e1 = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]];
-            let e2 = [pc[0] - pa[0], pc[1] - pa[1], pc[2] - pa[2]];
-            let cross = [
-                e1[1] * e2[2] - e1[2] * e2[1],
-                e1[2] * e2[0] - e1[0] * e2[2],
-                e1[0] * e2[1] - e1[1] * e2[0],
-            ];
-            let n = mesh.normals[a];
-            let dot = cross[0] * n[0] + cross[1] * n[1] + cross[2] * n[2];
-            assert!(dot > 0.0, "triangle enroulé à l'envers");
+        let mut chunk = Chunk::filled(8, air);
+        for z in 1..4 {
+            for x in 1..3 {
+                chunk.set(x, 1, z, stone);
+            }
+        }
+        for mesh in [mesh_chunk(&chunk, &reg, 1.0), mesh_chunk_naive(&chunk, &reg, 1.0)] {
+            for tri in mesh.indices.chunks(3) {
+                let [a, b, c] = [tri[0] as usize, tri[1] as usize, tri[2] as usize];
+                let (pa, pb, pc) = (mesh.positions[a], mesh.positions[b], mesh.positions[c]);
+                let e1 = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]];
+                let e2 = [pc[0] - pa[0], pc[1] - pa[1], pc[2] - pa[2]];
+                let cross = [
+                    e1[1] * e2[2] - e1[2] * e2[1],
+                    e1[2] * e2[0] - e1[0] * e2[2],
+                    e1[0] * e2[1] - e1[1] * e2[0],
+                ];
+                let n = mesh.normals[a];
+                let dot = cross[0] * n[0] + cross[1] * n[1] + cross[2] * n[2];
+                assert!(dot > 0.0, "triangle enroulé à l'envers");
+            }
         }
     }
 }
