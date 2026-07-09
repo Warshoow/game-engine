@@ -25,13 +25,13 @@ Les décisions de §5 sont **ouvertes** : suis les recos, signale si tu veux tra
 
 ## Objectif courant
 
-**La tranche verticale (§7).** Rien d'autre.
+**La tranche verticale (§7) est faite et dépassée** : les trois piliers du cœur voxel sont construits — stockage paletté, greedy meshing (raccord inter-chunks), streaming autour du joueur. L'état exact, les invariants à ne pas casser et les pistes ouvertes sont dans **`docs/passation.md`** (à lire en début de session) ; l'historique raisonné dans `docs/journal.md`.
 
-Générer un chunk → mesher blocky → poser/casser un voxel data-driven (défini via le registre, pas hardcodé) → s'y déplacer.
+On avance maintenant **jalon par jalon, arbitré avec Warshow** — propose, ne décide pas seul d'un gros chantier.
 
-Les **non-goals** de §7 sont explicites : éclairage réel, smooth/densité, véhicules, script runtime complet, persistance disque, UI riche, multi. Le data model les **prévoit** ; la slice ne les **implémente pas**. Ne les code pas, même si l'occasion se présente.
+Les **non-goals** de §7 restent non-goals tant que non arbitrés : éclairage réel, smooth/densité, véhicules, script runtime complet, persistance disque, UI riche, multi. Le data model les **prévoit** ; ne les code pas, même si l'occasion se présente.
 
-**Règle d'or :** le socle se prouve en portant du concret, pas en ajoutant une couche d'abstraction. Si une abstraction ne sert pas la tranche verticale, elle attend.
+**Règle d'or :** le socle se prouve en portant du concret, pas en ajoutant une couche d'abstraction. Si une abstraction ne sert pas le jalon en cours, elle attend.
 
 ## Stack & conventions
 
