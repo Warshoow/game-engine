@@ -1,85 +1,85 @@
-# Moteur Voxel
+# Voxel engine
 
-Un moteur voxel construit **à la main** en Rust + [Bevy 0.19](https://bevy.org),
-comme projet d'apprentissage : le cœur voxel (stockage de chunk, meshing,
-streaming) est écrit soi-même, pas délégué à une crate — c'est là qu'est
-l'apprentissage. Bevy fournit la boucle ECS, le rendu et la fenêtre.
+A voxel engine built **by hand** in Rust on [Bevy 0.19](https://bevy.org), as a
+learning project. The voxel core (chunk storage, meshing, streaming) is written
+from scratch rather than pulled from a crate, because that is where the learning
+is. Bevy provides the ECS loop, rendering and the window.
 
-## Ce qui existe
+## What exists
 
-- **Terrain procédural déterministe** — heightmap fBm maison (value noise,
-  hash SplitMix64 de `(seed, coordonnées)`) : même seed → même monde,
-  cross-machine, sans état.
-- **Chunks palettés** — tableau dense d'indices `u16` + palette locale
-  mappant vers un registre de contenu append-only (le monde possède son
-  contenu ; les blocs sont de la *donnée*, jamais du code).
-- **Greedy meshing** — fusion des faces coplanaires de même matériau
-  (×12,8 de quads en moins vs le culling naïf, conservé comme oracle de
-  test), avec raccord inter-chunks (pas de faces cachées aux frontières).
-- **Streaming** — le monde démarre vide ; les chunks se génèrent et se
-  meshent autour du joueur (budget par frame, hystérésis de déchargement),
-  les modifications survivent en mémoire au déchargement.
-- **Contrôleur FPS** — simulation à tick fixe, collision AABB balayée
-  (anti-tunneling), gameplay exprimé en **mètres** (jamais en blocs).
-- **Pose/casse data-driven** — raycast DDA (Amanatides & Woo), hotbar
-  *découverte* depuis le registre : ajouter un bloc au registre suffit à le
-  rendre posable, aucun système à modifier.
+- **Deterministic procedural terrain.** Hand-written fBm heightmap (value noise,
+  SplitMix64 hash of `(seed, coordinates)`): same seed, same world, on any
+  machine, with no state.
+- **Palette chunks.** A dense array of `u16` indices plus a local palette mapping
+  to an append-only content registry. The world owns its content; blocks are
+  *data*, never code.
+- **Greedy meshing.** Coplanar faces of the same material are merged (12.8× fewer
+  quads than naive culling, which is kept as a test oracle), with seams handled
+  across chunks so no hidden faces are left at the borders.
+- **Streaming.** The world starts empty; chunks are generated and meshed around
+  the player (per-frame budget, unload hysteresis), and edits survive unloading
+  in memory.
+- **FPS controller.** Fixed-tick simulation, swept AABB collision
+  (no tunnelling), gameplay expressed in **metres**, never in blocks.
+- **Data-driven place/break.** DDA raycast (Amanatides & Woo), and a hotbar
+  *discovered* from the registry: adding a block to the registry is enough to
+  make it placeable, no system to change.
 
-## Lancer
+## Run
 
 ```bash
 cargo run
 ```
 
-| Entrée | Action |
+| Input | Action |
 |---|---|
-| Clic gauche | entrer en mode FPS / casser un bloc |
-| Clic droit | poser le bloc en main |
-| Molette | changer le bloc en main |
-| WASD + Espace | se déplacer / sauter |
-| F | plein écran |
-| Échap | libérer la souris |
+| Left click | enter FPS mode / break a block |
+| Right click | place the held block |
+| Mouse wheel | change the held block |
+| WASD + Space | move / jump |
+| F | fullscreen |
+| Esc | release the mouse |
 
-Sous WSL2 : le rendu passe par llvmpipe (CPU) et la souris a ses
-particularités (voir `docs/journal.md`, « La saga de la souris ») — le jeu
-force X11 et désactive le recentrage curseur automatiquement.
+On WSL2, rendering goes through llvmpipe (CPU) and the mouse has its quirks
+(see `docs/journal.md`, "La saga de la souris"). The game forces X11 and turns
+off cursor recentring automatically.
 
-## Architecture
+## Layout
 
 ```
-src/                  binaire Bevy : branche le cœur dans l'ECS
-  main.rs             setup (registre → monde), conversion mesh, HUD
-  player.rs           contrôleur FPS (simu en FixedUpdate)
-  interact.rs         pose/casse + sélection de bloc
-  streaming.rs        chargement/déchargement des chunks autour du joueur
-crates/voxel_core/    TOUT le cœur voxel — pur, zéro dépendance Bevy
-  registry.rs         registre de contenu append-only
-  chunk.rs            chunk paletté
-  world.rs            VoxelWorld (registre + chunks + conversions voxel↔mètres)
-  worldgen.rs         génération procédurale (trait + heightmap fBm)
-  mesher.rs           greedy meshing → tampons purs
-  physics.rs          collision AABB vs grille
-  raycast.rs          DDA (visée voxel)
-docs/
-  brief/voxel-engine-design.md   le design doc — canonique
-  journal.md                     l'historique raisonné (le *pourquoi*)
-  passation.md                   état courant + invariants (reprise de session)
+src/                  Bevy binary: plugs the core into the ECS
+  main.rs             setup (registry → world), mesh conversion, HUD
+  player.rs           FPS controller (simulated in FixedUpdate)
+  interact.rs         place/break + block selection
+  streaming.rs        loading/unloading chunks around the player
+crates/voxel_core/    the WHOLE voxel core: pure, no Bevy dependency
+  registry.rs         append-only content registry
+  chunk.rs            palette chunk
+  world.rs            VoxelWorld (registry + chunks + voxel↔metre conversions)
+  worldgen.rs         procedural generation (trait + fBm heightmap)
+  mesher.rs           greedy meshing → plain buffers
+  physics.rs          AABB collision against the grid
+  raycast.rs          DDA (voxel picking)
+docs/                 in French
+  brief/voxel-engine-design.md   the design doc, the reference
+  journal.md                     the reasoned history (the *why*)
+  passation.md                   current state + invariants, to resume a session
 ```
 
-La séparation est stricte : toute la logique voxel vit dans `voxel_core`,
-testable sans fenêtre.
+The split is strict: all voxel logic lives in `voxel_core` and can be tested
+without a window.
 
 ```bash
-cargo test -p voxel_core                  # tests headless (~0 s)
-cargo clippy --workspace --all-targets    # zéro warning
-cargo run -p voxel_core --example mesh_stats   # stats naïf vs greedy
+cargo test -p voxel_core                        # headless tests (~0 s)
+cargo clippy --workspace --all-targets          # zero warnings
+cargo run -p voxel_core --example mesh_stats    # naive vs greedy stats
 ```
 
-## Principes (résumé du design doc)
+## Principles (from the design doc)
 
-1. Le contenu est de la **donnée**, jamais du code hardcodé.
-2. Le **monde possède son contenu** (registre embarqué).
-3. **Voxel-space ≠ world-space** : physique, entités et gameplay en
-   **mètres** ; la résolution voxel n'est qu'un facteur de conversion.
-4. La **simulation est déterministe** (tick fixe, seedé).
-5. **Fige le data model, laisse le reste mou.**
+1. Content is **data**, never hardcoded.
+2. The **world owns its content** (embedded registry).
+3. **Voxel space ≠ world space**: physics, entities and gameplay are in
+   **metres**; the voxel resolution is only a conversion factor.
+4. The **simulation is deterministic** (fixed tick, seeded).
+5. **Freeze the data model, keep the rest soft.**
