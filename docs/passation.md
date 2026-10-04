@@ -43,7 +43,16 @@ F plein écran.
 - **La hotbar se découvre** (`Registry::iter()`, filtre solide) : ajouter
   un bloc au registre suffit à le rendre posable. Aucune liste en dur.
 - **Un seul chemin de meshing** : génération, streaming et pose/casse
-  passent tous par `remesh_chunk` (main.rs) → `mesh_chunk_in_world`.
+  notent les chunks à re-mesher dans `DirtyChunks` ; seul `remesh_dirty`
+  (main.rs) meshe (→ `mesh_chunk_in_world`) et crée les entités-chunk.
+  Ne pas re-mesher ailleurs : deux systèmes qui spawnent la même frame
+  créent deux entités pour un chunk (spawn invisible aux `Query` avant la
+  frame suivante).
+- **Un chunk chargé a toujours une entité `ChunkMesh`**, même au mesh
+  vide (alors sans `Mesh3d`). Sinon un chunk d'air passe pour non chargé
+  et est re-meshé à chaque frame (test `streaming::tests`).
+- **`voxels_per_meter` n'existe qu'une fois** : `VoxelWorld::voxels_per_meter()`
+  (gelé, §3.5). Le générateur le reçoit en paramètre.
 
 ## Architecture (résumé)
 
@@ -69,7 +78,7 @@ headless, ~0 s), le binaire ne fait que brancher dans l'ECS.
 ## Vérifications avant de conclure une étape
 
 ```bash
-cargo test -p voxel_core                  # 42 tests, doivent passer
+cargo test --workspace                    # 42 tests cœur + 1 streaming (headless)
 cargo clippy --workspace --all-targets    # zéro warning exigé
 cargo run                                 # smoke test à l'occasion
 ```

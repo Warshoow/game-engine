@@ -328,3 +328,43 @@ fraction de seconde, le temps que le budget génère son chunk.
 **Vertical.** Une seule couche de chunks (y = 0) : le terrain de la
 heightmap tient dans [0, 32). La verticalité (caves, ciel) élargira la
 boucle de l'ensemble voulu, pas la logique.
+
+## 2026-10-05 — Passe de relecture
+
+Relecture complète du code à froid. Tests et clippy étaient verts ; quatre
+corrections.
+
+**Chunk vide = re-meshé à chaque frame.** Le streaming jugeait « affiché »
+un chunk qui a une entité-mesh, et `remesh_chunk` n'en créait pas pour un
+mesh vide. Un chunk d'air n'était donc jamais vu comme chargé : re-meshé
+(32³ voxels) à chaque frame, et il mangeait le budget de 4. Invisible tant
+qu'on ne charge que y = 0 (le sol est toujours dans ce chunk), bloquant
+dès la verticalité. Correctif : l'entité `ChunkMesh` existe toujours, le
+`Mesh3d` seulement si le mesh n'est pas vide. Test headless dans
+`streaming.rs` (monde tout en air), vérifié en échec sur l'ancien
+comportement.
+
+**Deux entités pour un chunk.** `interact` et `stream_chunks` meshaient
+chacun de leur côté, dans `Update`, sans ordre. Une entité spawnée via
+`Commands` n'est visible des `Query` qu'à la frame suivante : si les deux
+touchaient le même chunk la même frame, chacun spawnait la sienne, et la
+seconde gardait une géométrie périmée. Correctif : ils ne meshent plus, ils
+notent dans une ressource `DirtyChunks` (un `HashSet`, donc dédoublonné), et
+un seul système, `remesh_dirty`, ordonné après eux, meshe. Le dédoublonnage
+manuel du streaming disparaît.
+
+**`voxels_per_meter` en double.** Il vivait dans `VoxelWorld` (champ `pub`,
+modifiable alors que §3.5 le veut gelé) ET dans `HeightmapGenerator` —
+rien n'empêchait les deux de diverger. Désormais champ privé + accesseur ;
+le générateur le reçoit en paramètre de `generate_chunk`, comme
+`chunk_size`.
+
+**`Kind` porte ses données.** `ContentEntry { kind, block: Option<BlockData> }`
+autorisait `Kind::Block` sans données ou un `Item` avec. Devenu
+`Kind::Block(BlockData)` : l'incohérence ne s'écrit plus. Registre toujours
+unique à kinds unifiés (§3.1 inchangé) ; lecture via `entry.block()`.
+
+**Laissé de côté (noté, pas urgent)** : seed, version de format et bord du
+monde ne sont pas encore dans `VoxelWorld` (à ranger avant la persistance) ;
+les données de chunk ne sont jamais libérées (~64 Kio/chunk, tient jusqu'à
+la persistance disque) ; `WAYLAND_DISPLAY` retiré même hors WSL.

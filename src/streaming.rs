@@ -9,13 +9,12 @@
 //!    sont générés (du plus proche au plus loin), sous un **budget par
 //!    frame** — le coût se lisse sur plusieurs frames au lieu d'un gros
 //!    hitch quand on franchit une frontière de chunk.
-//! 2. **Mesher** : les chunks générés ET leurs voisins déjà affichés sont
-//!    (re)meshés — le culling inter-chunks fait que la bordure d'un chunk
-//!    dépend de ses voisins ; quand un voisin apparaît, la couture doit se
-//!    refermer. Le meshing est différé en fin de passe, dédupliqué : les
-//!    entités spawnées via `Commands` ne sont visibles dans la `Query` qu'à
-//!    la frame suivante, re-mesher au fil de l'eau dupliquerait des meshes.
-//! 3. **Décharger** : les entités-mesh au-delà du rayon + une marge
+//! 2. **Noter à mesher** ([`DirtyChunks`]) : les chunks générés ET leurs
+//!    voisins déjà affichés — le culling inter-chunks fait que la bordure
+//!    d'un chunk dépend de ses voisins ; quand un voisin apparaît, la couture
+//!    doit se refermer. Le meshing lui-même est fait après, par
+//!    `remesh_dirty` (main.rs), une fois par chunk.
+//! 3. **Décharger** : les entités-chunk au-delà du rayon + une marge
 //!    d'hystérésis sont despawnées (et leur asset GPU libéré). Les
 //!    **données** du chunk restent en mémoire : les modifications du joueur
 //!    survivent à l'aller-retour — la persistance *disque* est un non-goal
@@ -33,7 +32,7 @@ use voxel_core::chunk::ChunkPos;
 use voxel_core::worldgen::WorldGenerator;
 
 use crate::player::Player;
-use crate::{remesh_chunk, ChunkMesh, GameWorld};
+use crate::{ChunkMesh, DirtyChunks, GameWorld};
 
 /// Rayon de vue, en **mètres** (§2 : le gameplay ne parle jamais « en
 /// chunks » — la conversion se fait ici et nulle part ailleurs).
@@ -46,15 +45,16 @@ const GEN_BUDGET_PER_FRAME: usize = 4;
 pub fn stream_chunks(
     mut commands: Commands,
     mut game: ResMut<GameWorld>,
+    mut dirty: ResMut<DirtyChunks>,
     player: Query<&Transform, With<Player>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    chunk_meshes: Query<(Entity, &ChunkMesh, &Mesh3d)>,
+    chunk_meshes: Query<(Entity, &ChunkMesh, Option<&Mesh3d>)>,
 ) {
     let Ok(player) = player.single() else { return };
     let p = player.translation;
     let extent_m = game.world.chunk_size() as f32 / game.world.voxels_per_meter();
 
-    // Chunks ayant actuellement une entité-mesh (affichés).
+    // Chunks ayant une entité (affichés — y compris ceux au mesh vide).
     let displayed: HashSet<ChunkPos> = chunk_meshes.iter().map(|(_, cm, _)| cm.0).collect();
 
     // Distance horizontale (mètres) du joueur au centre d'une colonne de chunk.
@@ -86,7 +86,6 @@ pub fn stream_chunks(
     desired.sort_by(|a, b| dist_m(*a).total_cmp(&dist_m(*b)));
 
     // --- 2. Générer (budget), en notant tout ce qui devra être meshé. ---
-    let mut need_mesh: Vec<ChunkPos> = Vec::new();
     let mut budget = GEN_BUDGET_PER_FRAME;
     for pos in desired {
         if budget == 0 {
@@ -107,29 +106,25 @@ pub fn stream_chunks(
             // ce nouveau chunk (culling inter-chunks).
             for n in neighbors(pos) {
                 if displayed.contains(&n) {
-                    need_mesh.push(n);
+                    dirty.0.insert(n);
                 }
             }
         }
         // Chunk fraîchement généré, ou données conservées d'un passage
         // précédent (édits du joueur inclus) qui revient dans le rayon.
-        need_mesh.push(pos);
+        dirty.0.insert(pos);
         budget -= 1;
     }
 
-    // --- 3. Mesher, une seule fois par chunk. ---
-    let mut seen = HashSet::new();
-    for pos in need_mesh {
-        if seen.insert(pos) {
-            remesh_chunk(&mut commands, &game, pos, &mut meshes, &chunk_meshes);
-        }
-    }
-
-    // --- 4. Décharger les meshes trop loin (les données restent). ---
+    // --- 3. Décharger les chunks trop loin (les données restent). ---
     for (entity, cm, mesh3d) in &chunk_meshes {
         if dist_m(cm.0) > VIEW_DISTANCE_M + UNLOAD_MARGIN_M {
-            meshes.remove(mesh3d.id());
+            if let Some(mesh3d) = mesh3d {
+                meshes.remove(mesh3d.id());
+            }
             commands.entity(entity).despawn();
+            // Plus d'entité : ne pas le re-mesher (ça la recréerait).
+            dirty.0.remove(&cm.0);
         }
     }
 }
@@ -145,4 +140,69 @@ fn neighbors(pos: ChunkPos) -> [ChunkPos; 6] {
         ChunkPos { x, y, z: z + 1 },
         ChunkPos { x, y, z: z - 1 },
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::ecs::system::RunSystemOnce;
+    use bevy::prelude::*;
+    use voxel_core::chunk::CHUNK_SIZE;
+    use voxel_core::registry::{BlockData, ContentEntry, Kind, Registry};
+    use voxel_core::world::VoxelWorld;
+    use voxel_core::worldgen::HeightmapGenerator;
+
+    use super::*;
+    use crate::remesh_dirty;
+
+    /// Monde **tout en air** (sol à −100 m) : chaque chunk a un mesh vide.
+    /// Régression : un chunk vide n'avait pas d'entité, passait pour jamais
+    /// chargé, et était re-meshé à chaque frame en mangeant le budget.
+    #[test]
+    fn empty_chunks_load_once_and_stay_loaded() {
+        let mut registry = Registry::new();
+        let air = registry
+            .register(ContentEntry {
+                identifier: "core:air".into(),
+                kind: Kind::Block(BlockData { solid: false, color: [0.0; 3] }),
+            })
+            .unwrap();
+        let generator = HeightmapGenerator {
+            seed: 1,
+            air,
+            ground: air,
+            ground_level_m: -100.0,
+            amplitude_m: 1.0,
+            feature_size_m: 24.0,
+        };
+        let mut app = App::new();
+        app.init_resource::<Assets<Mesh>>()
+            .init_resource::<DirtyChunks>()
+            .insert_resource(GameWorld {
+                world: VoxelWorld::new(registry, CHUNK_SIZE, 1.0),
+                generator,
+                air,
+                hotbar: vec![air],
+                held_idx: 0,
+                material: Handle::default(),
+            })
+            .add_systems(Update, (stream_chunks, remesh_dirty).chain());
+        app.world_mut().spawn((
+            Player::default(),
+            Transform::from_xyz(0.5, 0.0, 0.5),
+        ));
+
+        // Assez de frames pour vider le disque au budget de 4/frame.
+        for _ in 0..30 {
+            app.update();
+        }
+        let mut q = app.world_mut().query::<&ChunkMesh>();
+        let loaded: Vec<ChunkPos> = q.iter(app.world()).map(|c| c.0).collect();
+        let unique: HashSet<ChunkPos> = loaded.iter().copied().collect();
+        assert!(!loaded.is_empty());
+        assert_eq!(loaded.len(), unique.len(), "entité-chunk en double");
+
+        // Une fois tout chargé, le streaming ne doit plus rien demander.
+        app.world_mut().run_system_once(stream_chunks).unwrap();
+        assert!(app.world().resource::<DirtyChunks>().0.is_empty());
+    }
 }

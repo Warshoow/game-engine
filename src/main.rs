@@ -6,6 +6,8 @@ mod interact;
 mod player;
 mod streaming;
 
+use std::collections::{HashMap, HashSet};
+
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, Mesh};
 use bevy::prelude::*;
@@ -42,10 +44,21 @@ impl GameWorld {
     }
 }
 
-/// Marque l'entité-mesh d'un chunk — pour retrouver quoi re-mesher quand un
-/// voxel change (pose/casse, prochaine étape).
+/// Marque l'entité d'un chunk **chargé** (côté affichage). L'entité existe
+/// même quand le mesh est vide (chunk d'air) : elle n'a alors pas de
+/// `Mesh3d`. « Chargé » = « a une entité », sans exception — sinon un chunk
+/// vide passerait pour jamais chargé et serait re-meshé à chaque frame.
 #[derive(Component)]
 pub struct ChunkMesh(pub ChunkPos);
+
+/// Chunks à (re)mesher cette frame. La pose/casse et le streaming ne meshent
+/// pas eux-mêmes : ils notent ici, et [`remesh_dirty`] meshe une fois par
+/// chunk, en fin de frame. Un seul système crée les entités-chunk : deux
+/// systèmes ne peuvent plus spawner chacun la sienne pour le même chunk
+/// (une entité spawnée via `Commands` n'est visible des `Query` qu'à la
+/// frame suivante — chacun aurait cru qu'elle n'existait pas).
+#[derive(Resource, Default)]
+pub struct DirtyChunks(pub HashSet<ChunkPos>);
 
 /// Marque le texte HUD affichant le bloc en main.
 #[derive(Component)]
@@ -68,8 +81,16 @@ fn main() {
             ..default()
         }))
         .add_plugins(player::PlayerPlugin)
+        .init_resource::<DirtyChunks>()
         .add_systems(Startup, (setup_world, player::spawn_player).chain())
-        .add_systems(Update, streaming::stream_chunks)
+        // Pose/casse puis streaming notent les chunks sales ; on meshe après.
+        .add_systems(
+            Update,
+            (
+                streaming::stream_chunks.after(interact::interact),
+                remesh_dirty.after(streaming::stream_chunks),
+            ),
+        )
         .run();
 }
 
@@ -181,48 +202,67 @@ fn setup_world(mut commands: Commands, mut materials: ResMut<Assets<StandardMate
     ));
 }
 
-/// (Re)construit le mesh du chunk `pos` : met à jour l'asset existant, ou
-/// spawn/despawn l'entité si le chunk passe de/à vide. Utilisé par la
-/// pose/casse ET le streaming — un seul chemin de meshing.
-pub fn remesh_chunk(
-    commands: &mut Commands,
-    game: &GameWorld,
-    pos: ChunkPos,
-    meshes: &mut Assets<Mesh>,
-    chunk_meshes: &Query<(Entity, &ChunkMesh, &Mesh3d)>,
+/// (Re)meshe les chunks notés dans [`DirtyChunks`] — l'unique chemin de
+/// meshing (génération, streaming, pose/casse). Met à jour l'asset existant,
+/// ajoute/retire le `Mesh3d` si le chunk passe de/à vide, ou spawn l'entité
+/// d'un chunk qui n'en a pas encore.
+pub fn remesh_dirty(
+    mut commands: Commands,
+    game: Res<GameWorld>,
+    mut dirty: ResMut<DirtyChunks>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    chunk_meshes: Query<(Entity, &ChunkMesh, Option<&Mesh3d>)>,
 ) {
+    if dirty.0.is_empty() {
+        return;
+    }
+    let existing: HashMap<ChunkPos, (Entity, Option<&Mesh3d>)> =
+        chunk_meshes.iter().map(|(e, cm, m)| (cm.0, (e, m))).collect();
     let voxel_size_m = 1.0 / game.world.voxels_per_meter();
-    let Some(data) = mesh_chunk_in_world(&game.world, pos, voxel_size_m) else {
-        return; // chunk non chargé : rien à mesher
-    };
-    let existing = chunk_meshes.iter().find(|(_, cm, _)| cm.0 == pos);
 
-    match (existing, data.is_empty()) {
-        (Some((entity, _, mesh3d)), true) => {
-            meshes.remove(mesh3d.id());
-            commands.entity(entity).despawn();
-        }
-        (Some((_, _, mesh3d)), false) => {
-            // Remplace le contenu de l'asset : l'entité et son handle ne
-            // bougent pas, le GPU reçoit les nouveaux tampons.
-            if let Err(err) = meshes.insert(mesh3d.id(), to_bevy_mesh(data)) {
-                error!("re-mesh du chunk {pos:?} impossible : {err}");
+    for pos in dirty.0.drain() {
+        let Some(data) = mesh_chunk_in_world(&game.world, pos, voxel_size_m) else {
+            continue; // pas de données : rien à mesher
+        };
+        match (existing.get(&pos), data.is_empty()) {
+            (Some(&(_, Some(mesh3d))), false) => {
+                // Remplace le contenu de l'asset : l'entité et son handle ne
+                // bougent pas, le GPU reçoit les nouveaux tampons.
+                if let Err(err) = meshes.insert(mesh3d.id(), to_bevy_mesh(data)) {
+                    error!("re-mesh du chunk {pos:?} impossible : {err}");
+                }
+            }
+            (Some(&(entity, Some(mesh3d))), true) => {
+                meshes.remove(mesh3d.id());
+                commands
+                    .entity(entity)
+                    .remove::<(Mesh3d, MeshMaterial3d<StandardMaterial>)>();
+            }
+            (Some(&(entity, None)), false) => {
+                commands.entity(entity).insert((
+                    Mesh3d(meshes.add(to_bevy_mesh(data))),
+                    MeshMaterial3d(game.material.clone()),
+                ));
+            }
+            (Some(&(_, None)), true) => {}
+            (None, empty) => {
+                let extent = game.world.chunk_size() as f32 * voxel_size_m;
+                let mut entity = commands.spawn((
+                    ChunkMesh(pos),
+                    Transform::from_xyz(
+                        pos.x as f32 * extent,
+                        pos.y as f32 * extent,
+                        pos.z as f32 * extent,
+                    ),
+                ));
+                if !empty {
+                    entity.insert((
+                        Mesh3d(meshes.add(to_bevy_mesh(data))),
+                        MeshMaterial3d(game.material.clone()),
+                    ));
+                }
             }
         }
-        (None, false) => {
-            let extent = game.world.chunk_size() as f32 * voxel_size_m;
-            commands.spawn((
-                ChunkMesh(pos),
-                Mesh3d(meshes.add(to_bevy_mesh(data))),
-                MeshMaterial3d(game.material.clone()),
-                Transform::from_xyz(
-                    pos.x as f32 * extent,
-                    pos.y as f32 * extent,
-                    pos.z as f32 * extent,
-                ),
-            ));
-        }
-        (None, true) => {}
     }
 }
 

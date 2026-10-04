@@ -49,7 +49,7 @@ impl Plugin for PlayerPlugin {
 
 /// L'état simulation du joueur. La translation du `Transform` est la
 /// position des **pieds** (centre de la boîte au sol).
-#[derive(Component)]
+#[derive(Component, Default)]
 pub struct Player {
     velocity: Vec3,
     yaw: f32,
@@ -75,12 +75,7 @@ pub fn spawn_player(mut commands: Commands, game: Res<GameWorld>) {
     let ground = game.generator.height_m(0.5, 0.5);
     commands
         .spawn((
-            Player {
-                velocity: Vec3::ZERO,
-                yaw: 0.0,
-                pitch: 0.0,
-                grounded: false,
-            },
+            Player::default(),
             Transform::from_xyz(0.5, ground + 1.0, 0.5),
             Visibility::default(),
         ))

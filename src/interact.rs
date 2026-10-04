@@ -5,10 +5,10 @@
 //! `ContentId` du registre (`GameWorld::held`), jamais un type en dur — le
 //! système ne sait pas ce qu'il pose.
 //!
-//! Après une écriture, le chunk touché est re-meshé intégralement. C'est
-//! brut (on reconstruit 32³ voxels pour un changement d'un seul) mais
-//! largement assez rapide pour la slice — et c'est le *même* chemin de
-//! meshing que la génération : un seul code à faire évoluer vers le greedy.
+//! Après une écriture, le chunk touché est noté à re-mesher intégralement
+//! ([`DirtyChunks`]). C'est brut (on reconstruit 32³ voxels pour un
+//! changement d'un seul) mais largement assez rapide — et c'est le *même*
+//! chemin de meshing que le streaming (`remesh_dirty`, main.rs).
 
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
@@ -18,7 +18,7 @@ use voxel_core::physics::Aabb;
 use voxel_core::raycast::raycast;
 
 use crate::player::{CursorCaptured, Player, PLAYER_HEIGHT_M, PLAYER_WIDTH_M, PlayerCamera};
-use crate::{held_label, remesh_chunk, ChunkMesh, GameWorld, HeldBlockText};
+use crate::{held_label, DirtyChunks, GameWorld, HeldBlockText};
 
 /// Molette : fait défiler la hotbar (cyclique). La hotbar est découverte
 /// depuis le registre au setup — ce système ne connaît aucun bloc, il ne
@@ -47,18 +47,13 @@ pub fn select_held_block(
 /// Portée de la main, en mètres (§2 — jamais « en blocs »).
 const REACH_M: f32 = 5.0;
 
-// Les systèmes ECS prennent leurs dépendances en paramètres : 8 arguments
-// est normal ici, pas un smell de design.
-#[allow(clippy::too_many_arguments)]
 pub fn interact(
-    mut commands: Commands,
     mouse: Res<ButtonInput<MouseButton>>,
     captured: Res<CursorCaptured>,
     mut game: ResMut<GameWorld>,
+    mut dirty: ResMut<DirtyChunks>,
     camera: Query<&GlobalTransform, With<PlayerCamera>>,
     player: Query<&Transform, With<Player>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    chunk_meshes: Query<(Entity, &ChunkMesh, &Mesh3d)>,
 ) {
     // On n'interagit qu'en mode FPS — et comme ce système tourne AVANT
     // `cursor_grab` (voir l'ordre du plugin), le clic qui active le mode
@@ -108,7 +103,7 @@ pub fn interact(
     };
 
     if let Some(pos) = touched {
-        remesh_chunk(&mut commands, &game, pos, &mut meshes, &chunk_meshes);
+        dirty.0.insert(pos);
         // Culling inter-chunks : un voxel en bordure change aussi les faces
         // du chunk voisin (sa face culled peut devoir (ré)apparaître).
         let size = game.world.chunk_size();
@@ -125,7 +120,7 @@ pub fn interact(
                 1 => npos.y += offset,
                 _ => npos.z += offset,
             }
-            remesh_chunk(&mut commands, &game, npos, &mut meshes, &chunk_meshes);
+            dirty.0.insert(npos);
         }
     }
 }
@@ -145,5 +140,3 @@ fn voxel_overlaps_player(
     let p = Aabb::from_feet(player_feet.to_array(), PLAYER_WIDTH_M, PLAYER_HEIGHT_M);
     (0..3).all(|a| vmin[a] < p.max[a] && vmax[a] > p.min[a])
 }
-
-// (remesh_chunk vit dans main.rs : partagé entre pose/casse et streaming.)
