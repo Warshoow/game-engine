@@ -147,7 +147,7 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
     use bevy::prelude::*;
     use voxel_core::chunk::CHUNK_SIZE;
-    use voxel_core::registry::{BlockData, ContentEntry, Kind, Registry};
+    use voxel_core::registry::{ContentEntry, Registry};
     use voxel_core::world::VoxelWorld;
     use voxel_core::worldgen::HeightmapGenerator;
 
@@ -161,10 +161,7 @@ mod tests {
     fn empty_chunks_load_once_and_stay_loaded() {
         let mut registry = Registry::new();
         let air = registry
-            .register(ContentEntry {
-                identifier: "core:air".into(),
-                kind: Kind::Block(BlockData { solid: false, color: [0.0; 3] }),
-            })
+            .register(ContentEntry::new_block("core:air", false, [0.0; 3]))
             .unwrap();
         let generator = HeightmapGenerator {
             seed: 1,

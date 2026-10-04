@@ -157,22 +157,16 @@ fn first_blocking_face(
 mod tests {
     use super::*;
     use crate::chunk::{Chunk, ChunkPos};
-    use crate::registry::{BlockData, ContentEntry, Kind, Registry};
+    use crate::registry::{ContentEntry, Registry};
 
     /// Monde 16³ (1 vox/m) avec un sol solide en y ∈ [0, 4) et un mur x = 8.
     fn world() -> VoxelWorld {
         let mut reg = Registry::new();
         let air = reg
-            .register(ContentEntry {
-                identifier: "core:air".into(),
-                kind: Kind::Block(BlockData { solid: false, color: [0.0; 3] }),
-            })
+            .register(ContentEntry::new_block("core:air", false, [0.0; 3]))
             .unwrap();
         let stone = reg
-            .register(ContentEntry {
-                identifier: "core:stone".into(),
-                kind: Kind::Block(BlockData { solid: true, color: [0.5; 3] }),
-            })
+            .register(ContentEntry::new_block("core:stone", true, [0.5; 3]))
             .unwrap();
 
         let mut chunk = Chunk::filled(16, air);

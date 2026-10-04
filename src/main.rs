@@ -15,7 +15,7 @@ use bevy::render::render_resource::PrimitiveTopology;
 
 use voxel_core::chunk::{ChunkPos, CHUNK_SIZE};
 use voxel_core::mesher::{mesh_chunk_in_world, MeshData};
-use voxel_core::registry::{BlockData, ContentEntry, ContentId, Kind, Registry};
+use voxel_core::registry::{ContentEntry, ContentId, Registry};
 use voxel_core::world::VoxelWorld;
 use voxel_core::worldgen::HeightmapGenerator;
 
@@ -98,16 +98,10 @@ fn setup_world(mut commands: Commands, mut materials: ResMut<Assets<StandardMate
     // --- Le monde possède son contenu (§3.1) : tout part du registre. ---
     let mut registry = Registry::new();
     let air = registry
-        .register(ContentEntry {
-            identifier: "core:air".into(),
-            kind: Kind::Block(BlockData { solid: false, color: [0.0; 3] }),
-        })
+        .register(ContentEntry::new_block("core:air", false, [0.0; 3]))
         .expect("registre vide");
     let grass = registry
-        .register(ContentEntry {
-            identifier: "core:grass".into(),
-            kind: Kind::Block(BlockData { solid: true, color: [0.35, 0.6, 0.25] }),
-        })
+        .register(ContentEntry::new_block("core:grass", true, [0.35, 0.6, 0.25]))
         .expect("identifier unique");
     // Du contenu, pas du code (§0) : ces blocs n'existent qu'ici, en donnée.
     // Aucun système ne les connaît — ils arrivent dans la hotbar par
@@ -118,10 +112,7 @@ fn setup_world(mut commands: Commands, mut materials: ResMut<Assets<StandardMate
         ("core:sand", [0.85, 0.78, 0.55]),
     ] {
         registry
-            .register(ContentEntry {
-                identifier: identifier.into(),
-                kind: Kind::Block(BlockData { solid: true, color }),
-            })
+            .register(ContentEntry::new_block(identifier, true, color))
             .expect("identifier unique");
     }
 

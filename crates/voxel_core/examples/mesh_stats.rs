@@ -5,22 +5,16 @@
 
 use voxel_core::chunk::{ChunkPos, CHUNK_SIZE};
 use voxel_core::mesher::{mesh_chunk, mesh_chunk_naive};
-use voxel_core::registry::{BlockData, ContentEntry, Kind, Registry};
+use voxel_core::registry::{ContentEntry, Registry};
 use voxel_core::worldgen::{HeightmapGenerator, WorldGenerator};
 
 fn main() {
     let mut registry = Registry::new();
     let air = registry
-        .register(ContentEntry {
-            identifier: "core:air".into(),
-            kind: Kind::Block(BlockData { solid: false, color: [0.0; 3] }),
-        })
+        .register(ContentEntry::new_block("core:air", false, [0.0; 3]))
         .unwrap();
     let grass = registry
-        .register(ContentEntry {
-            identifier: "core:grass".into(),
-            kind: Kind::Block(BlockData { solid: true, color: [0.35, 0.6, 0.25] }),
-        })
+        .register(ContentEntry::new_block("core:grass", true, [0.35, 0.6, 0.25]))
         .unwrap();
 
     // Mêmes paramètres que src/main.rs — on mesure le vrai terrain.

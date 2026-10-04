@@ -12,7 +12,7 @@
 ///
 /// `u32` : la palette de chunk mappe ses indices locaux (`u16`) vers ces IDs
 /// globaux, donc l'ID global peut être large sans coût mémoire per-voxel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ContentId(pub u32);
 
 /// Catégorie d'entrée — kinds unifiés (§3.1) : une seule table pour tout.
@@ -48,6 +48,14 @@ pub struct ContentEntry {
 }
 
 impl ContentEntry {
+    /// Raccourci pour l'entrée la plus courante : un bloc.
+    pub fn new_block(identifier: &str, solid: bool, color: [f32; 3]) -> Self {
+        Self {
+            identifier: identifier.to_string(),
+            kind: Kind::Block(BlockData { solid, color }),
+        }
+    }
+
     /// Les données de bloc, si l'entrée en est un.
     pub fn block(&self) -> Option<&BlockData> {
         match &self.kind {
@@ -104,14 +112,6 @@ impl Registry {
             .enumerate()
             .map(|(i, e)| (ContentId(i as u32), e))
     }
-
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -123,21 +123,11 @@ pub enum RegistryError {
 mod tests {
     use super::*;
 
-    fn block(identifier: &str, solid: bool) -> ContentEntry {
-        ContentEntry {
-            identifier: identifier.to_string(),
-            kind: Kind::Block(BlockData {
-                solid,
-                color: [1.0, 1.0, 1.0],
-            }),
-        }
-    }
-
     #[test]
     fn ids_follow_insertion_order() {
         let mut reg = Registry::new();
-        let air = reg.register(block("core:air", false)).unwrap();
-        let stone = reg.register(block("core:stone", true)).unwrap();
+        let air = reg.register(ContentEntry::new_block("core:air", false, [1.0; 3])).unwrap();
+        let stone = reg.register(ContentEntry::new_block("core:stone", true, [1.0; 3])).unwrap();
         assert_eq!(air, ContentId(0));
         assert_eq!(stone, ContentId(1));
     }
@@ -145,10 +135,10 @@ mod tests {
     #[test]
     fn ids_are_stable_after_appends() {
         let mut reg = Registry::new();
-        let stone = reg.register(block("core:stone", true)).unwrap();
+        let stone = reg.register(ContentEntry::new_block("core:stone", true, [1.0; 3])).unwrap();
         // On ajoute d'autres entrées : l'ID et la def de stone ne bougent pas.
         for i in 0..100 {
-            reg.register(block(&format!("core:gen_{i}"), true)).unwrap();
+            reg.register(ContentEntry::new_block(&format!("core:gen_{i}"), true, [1.0; 3])).unwrap();
         }
         assert_eq!(reg.lookup("core:stone"), Some(stone));
         assert_eq!(reg.get(stone).unwrap().identifier, "core:stone");
@@ -157,8 +147,8 @@ mod tests {
     #[test]
     fn duplicate_identifier_is_rejected() {
         let mut reg = Registry::new();
-        reg.register(block("core:stone", true)).unwrap();
-        let err = reg.register(block("core:stone", true)).unwrap_err();
+        reg.register(ContentEntry::new_block("core:stone", true, [1.0; 3])).unwrap();
+        let err = reg.register(ContentEntry::new_block("core:stone", true, [1.0; 3])).unwrap_err();
         assert_eq!(
             err,
             RegistryError::DuplicateIdentifier("core:stone".to_string())
@@ -168,8 +158,8 @@ mod tests {
     #[test]
     fn iter_yields_ids_in_insertion_order() {
         let mut reg = Registry::new();
-        let air = reg.register(block("core:air", false)).unwrap();
-        let stone = reg.register(block("core:stone", true)).unwrap();
+        let air = reg.register(ContentEntry::new_block("core:air", false, [1.0; 3])).unwrap();
+        let stone = reg.register(ContentEntry::new_block("core:stone", true, [1.0; 3])).unwrap();
         let ids: Vec<ContentId> = reg.iter().map(|(id, _)| id).collect();
         assert_eq!(ids, vec![air, stone]);
         // Le cas d'usage : découvrir les blocs solides sans les nommer.

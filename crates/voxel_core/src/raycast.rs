@@ -96,22 +96,16 @@ pub fn raycast(world: &VoxelWorld, origin_m: [f32; 3], dir: [f32; 3], max_m: f32
 mod tests {
     use super::*;
     use crate::chunk::{Chunk, ChunkPos};
-    use crate::registry::{BlockData, ContentEntry, Kind, Registry};
+    use crate::registry::{ContentEntry, Registry};
 
     /// Monde 16³ (1 vox/m), sol plein pour y < 4.
     fn world() -> VoxelWorld {
         let mut reg = Registry::new();
         let air = reg
-            .register(ContentEntry {
-                identifier: "core:air".into(),
-                kind: Kind::Block(BlockData { solid: false, color: [0.0; 3] }),
-            })
+            .register(ContentEntry::new_block("core:air", false, [0.0; 3]))
             .unwrap();
         let stone = reg
-            .register(ContentEntry {
-                identifier: "core:stone".into(),
-                kind: Kind::Block(BlockData { solid: true, color: [0.5; 3] }),
-            })
+            .register(ContentEntry::new_block("core:stone", true, [0.5; 3]))
             .unwrap();
         let mut chunk = Chunk::filled(16, air);
         for z in 0..16 {
@@ -184,16 +178,10 @@ mod tests {
         // ne change pas (invariant §2 — la résolution ne fuit pas).
         let mut reg = Registry::new();
         let air = reg
-            .register(ContentEntry {
-                identifier: "core:air".into(),
-                kind: Kind::Block(BlockData { solid: false, color: [0.0; 3] }),
-            })
+            .register(ContentEntry::new_block("core:air", false, [0.0; 3]))
             .unwrap();
         let stone = reg
-            .register(ContentEntry {
-                identifier: "core:stone".into(),
-                kind: Kind::Block(BlockData { solid: true, color: [0.5; 3] }),
-            })
+            .register(ContentEntry::new_block("core:stone", true, [0.5; 3]))
             .unwrap();
         // 2 vox/m : le sol y < 4 voxels = y < 2 m.
         let mut chunk = Chunk::filled(16, air);

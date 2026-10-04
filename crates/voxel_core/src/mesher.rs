@@ -338,21 +338,15 @@ fn emit_quad(mesh: &mut MeshData, voxel: [u32; 3], face: &Face, color: [f32; 4],
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::{BlockData, ContentEntry, Kind, Registry};
+    use crate::registry::{ContentEntry, Registry};
 
     fn test_registry() -> (Registry, ContentId, ContentId) {
         let mut reg = Registry::new();
         let air = reg
-            .register(ContentEntry {
-                identifier: "core:air".into(),
-                kind: Kind::Block(BlockData { solid: false, color: [0.0; 3] }),
-            })
+            .register(ContentEntry::new_block("core:air", false, [0.0; 3]))
             .unwrap();
         let stone = reg
-            .register(ContentEntry {
-                identifier: "core:stone".into(),
-                kind: Kind::Block(BlockData { solid: true, color: [0.5, 0.5, 0.5] }),
-            })
+            .register(ContentEntry::new_block("core:stone", true, [0.5, 0.5, 0.5]))
             .unwrap();
         (reg, air, stone)
     }
@@ -361,12 +355,21 @@ mod tests {
     fn test_registry_two_solids() -> (Registry, ContentId, ContentId, ContentId) {
         let (mut reg, air, stone) = test_registry();
         let dirt = reg
-            .register(ContentEntry {
-                identifier: "core:dirt".into(),
-                kind: Kind::Block(BlockData { solid: true, color: [0.4, 0.25, 0.1] }),
-            })
+            .register(ContentEntry::new_block("core:dirt", true, [0.4, 0.25, 0.1]))
             .unwrap();
         (reg, air, stone, dirt)
+    }
+
+    fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+        [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+    }
+
+    fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
     }
 
     /// Aire d'un quad du mesh (produit vectoriel des deux côtés).
@@ -377,14 +380,8 @@ mod tests {
             mesh.positions[base + 1],
             mesh.positions[base + 3],
         );
-        let e1 = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
-        let e2 = [p3[0] - p0[0], p3[1] - p0[1], p3[2] - p0[2]];
-        let cross = [
-            e1[1] * e2[2] - e1[2] * e2[1],
-            e1[2] * e2[0] - e1[0] * e2[2],
-            e1[0] * e2[1] - e1[1] * e2[0],
-        ];
-        (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt()
+        let c = cross(sub(p1, p0), sub(p3, p0));
+        (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt()
     }
 
     /// Aire totale par direction de normale — la signature géométrique d'un
@@ -564,15 +561,9 @@ mod tests {
             for tri in mesh.indices.chunks(3) {
                 let [a, b, c] = [tri[0] as usize, tri[1] as usize, tri[2] as usize];
                 let (pa, pb, pc) = (mesh.positions[a], mesh.positions[b], mesh.positions[c]);
-                let e1 = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]];
-                let e2 = [pc[0] - pa[0], pc[1] - pa[1], pc[2] - pa[2]];
-                let cross = [
-                    e1[1] * e2[2] - e1[2] * e2[1],
-                    e1[2] * e2[0] - e1[0] * e2[2],
-                    e1[0] * e2[1] - e1[1] * e2[0],
-                ];
+                let c = cross(sub(pb, pa), sub(pc, pa));
                 let n = mesh.normals[a];
-                let dot = cross[0] * n[0] + cross[1] * n[1] + cross[2] * n[2];
+                let dot = c[0] * n[0] + c[1] * n[1] + c[2] * n[2];
                 assert!(dot > 0.0, "triangle enroulé à l'envers");
             }
         }

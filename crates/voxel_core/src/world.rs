@@ -51,10 +51,6 @@ impl VoxelWorld {
         self.chunks.get(&pos)
     }
 
-    pub fn chunks(&self) -> impl Iterator<Item = (ChunkPos, &Chunk)> {
-        self.chunks.iter().map(|(&p, c)| (p, c))
-    }
-
     /// Coordonnée voxel monde → (chunk, coordonnée locale).
     ///
     /// Division **euclidienne** obligatoire : pour x = −1 avec des chunks de
@@ -117,7 +113,7 @@ impl VoxelWorld {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::{BlockData, ContentEntry, Kind};
+    use crate::registry::ContentEntry;
 
     fn world() -> (VoxelWorld, ContentId, ContentId) {
         world_with(1.0)
@@ -126,16 +122,10 @@ mod tests {
     fn world_with(voxels_per_meter: f32) -> (VoxelWorld, ContentId, ContentId) {
         let mut reg = Registry::new();
         let air = reg
-            .register(ContentEntry {
-                identifier: "core:air".into(),
-                kind: Kind::Block(BlockData { solid: false, color: [0.0; 3] }),
-            })
+            .register(ContentEntry::new_block("core:air", false, [0.0; 3]))
             .unwrap();
         let stone = reg
-            .register(ContentEntry {
-                identifier: "core:stone".into(),
-                kind: Kind::Block(BlockData { solid: true, color: [0.5; 3] }),
-            })
+            .register(ContentEntry::new_block("core:stone", true, [0.5; 3]))
             .unwrap();
         let mut w = VoxelWorld::new(reg, 8, voxels_per_meter);
         w.insert_chunk(ChunkPos { x: 0, y: 0, z: 0 }, Chunk::filled(8, air));

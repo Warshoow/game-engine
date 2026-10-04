@@ -368,3 +368,41 @@ unique à kinds unifiés (§3.1 inchangé) ; lecture via `entry.block()`.
 monde ne sont pas encore dans `VoxelWorld` (à ranger avant la persistance) ;
 les données de chunk ne sont jamais libérées (~64 Kio/chunk, tient jusqu'à
 la persistance disque) ; `WAYLAND_DISPLAY` retiré même hors WSL.
+
+## 2026-10-05 (suite) — Passe « moins de code » (audit de complexité)
+
+Audit du dépôt entier à la recherche de code en trop. Plan, écrit avant
+de toucher au code :
+
+1. **Regard souris hors WSL** (`player.rs`) : toute la mécanique de warp
+   (recentrage près du bord, détection de l'écho du warp, cible alternée
+   d'un demi-pixel) ne servait que hors WSL — chemin jamais exécuté, le
+   jeu n'ayant tourné que sous WSLg. Hors WSL, Bevy fournit déjà le
+   déplacement relatif de la souris (`AccumulatedMouseMotion`) avec le
+   curseur verrouillé (`CursorGrabMode::Locked`, qui retombe tout seul
+   sur `Confined` sous X11). Sous WSL, rien ne change : différence entre
+   deux positions successives du curseur, sans warp, en `Confined`.
+2. **Constructeur `ContentEntry::new_block(identifier, solid, color)`** :
+   remplace les ~17 littéraux `ContentEntry { kind: Kind::Block(BlockData
+   { … }) }` des tests, de `main.rs` et de l'example.
+3. **Tests du mesher** : le produit vectoriel, écrit deux fois, devient une
+   fonction `cross`.
+4. **Supprimés car jamais appelés** : `Registry::len` / `is_empty`,
+   `VoxelWorld::chunks()`, `PartialOrd`/`Ord` sur `ContentId`.
+
+Gardés exprès : le trait `WorldGenerator` (une seule implémentation, mais
+§4 fige la forme « pipeline pluggable » — l'enlever demande d'abord de
+modifier le doc), le mesher naïf (oracle des tests du greedy et de
+`mesh_stats`), `Kind::Item` / `Kind::EntityType` (§3.1).
+
+Contrôle de non-régression : `cargo test --workspace` et `cargo clippy
+--workspace --all-targets` identiques avant/après (43 tests, 0 warning),
+`mesh_stats` donne les mêmes chiffres, smoke test `cargo run`. Le regard
+souris sous WSL est vérifié par lecture : son chemin de code doit rester
+le même qu'avant.
+
+**Résultat.** −105 lignes nettes. 43 tests verts, clippy `-D warnings`
+propre, `mesh_stats` à l'identique (8661 quads greedy, ×12,8), `cargo run`
+démarre avec les mêmes logs qu'avant (avertissements d'environnement
+seulement : rendu logiciel, pas d'audio). Non vérifié faute de build
+natif : le regard souris hors WSL — à tester au premier build Windows.
