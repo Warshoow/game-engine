@@ -52,7 +52,7 @@ pub fn stream_chunks(
 ) {
     let Ok(player) = player.single() else { return };
     let p = player.translation;
-    let extent_m = game.world.chunk_size() as f32 / game.world.voxels_per_meter;
+    let extent_m = game.world.chunk_size() as f32 / game.world.voxels_per_meter();
 
     // Chunks ayant actuellement une entité-mesh (affichés).
     let displayed: HashSet<ChunkPos> = chunk_meshes.iter().map(|(_, cm, _)| cm.0).collect();
@@ -97,7 +97,11 @@ pub fn stream_chunks(
             continue; // déjà chargé et affiché : rien à faire
         }
         if !has_data {
-            let chunk = game.generator.generate_chunk(pos, game.world.chunk_size());
+            let chunk = game.generator.generate_chunk(
+                pos,
+                game.world.chunk_size(),
+                game.world.voxels_per_meter(),
+            );
             game.world.insert_chunk(pos, chunk);
             // La bordure des voisins déjà affichés doit se recoudre contre
             // ce nouveau chunk (culling inter-chunks).

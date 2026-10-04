@@ -16,7 +16,10 @@ use crate::registry::ContentId;
 /// La forme figée du pipeline : un générateur produit un chunk depuis sa
 /// position, de façon pure (pas d'état mutable → parallélisable, déterministe).
 pub trait WorldGenerator {
-    fn generate_chunk(&self, pos: ChunkPos, chunk_size: u32) -> Chunk;
+    /// `chunk_size` et `voxels_per_meter` sont des métadonnées du monde (§3.5),
+    /// passées par l'appelant : le générateur n'en garde pas de copie qui
+    /// pourrait diverger de celle du monde.
+    fn generate_chunk(&self, pos: ChunkPos, chunk_size: u32, voxels_per_meter: f32) -> Chunk;
 }
 
 /// Générateur de la tranche verticale : heightmap fBm → sol/air.
@@ -32,8 +35,6 @@ pub struct HeightmapGenerator {
     pub amplitude_m: f32,
     /// Largeur caractéristique des collines, en **mètres**.
     pub feature_size_m: f32,
-    /// Densité voxel du monde (métadonnée de monde, §3.5).
-    pub voxels_per_meter: f32,
 }
 
 impl HeightmapGenerator {
@@ -48,10 +49,10 @@ impl HeightmapGenerator {
 }
 
 impl WorldGenerator for HeightmapGenerator {
-    fn generate_chunk(&self, pos: ChunkPos, chunk_size: u32) -> Chunk {
+    fn generate_chunk(&self, pos: ChunkPos, chunk_size: u32, voxels_per_meter: f32) -> Chunk {
         let mut chunk = Chunk::filled(chunk_size, self.air);
         let size = chunk_size as i64;
-        let vpm = self.voxels_per_meter;
+        let vpm = voxels_per_meter;
 
         for z in 0..chunk_size {
             for x in 0..chunk_size {
@@ -163,7 +164,6 @@ mod tests {
             ground_level_m: 16.0,
             amplitude_m: 6.0,
             feature_size_m: 24.0,
-            voxels_per_meter: 1.0,
         }
     }
 
@@ -175,16 +175,16 @@ mod tests {
     #[test]
     fn same_seed_same_chunk() {
         let pos = ChunkPos { x: 3, y: 0, z: -2 };
-        let a = generator(42).generate_chunk(pos, 16);
-        let b = generator(42).generate_chunk(pos, 16);
+        let a = generator(42).generate_chunk(pos, 16, 1.0);
+        let b = generator(42).generate_chunk(pos, 16, 1.0);
         assert!(chunks_equal(&a, &b));
     }
 
     #[test]
     fn different_seeds_differ() {
         let pos = ChunkPos { x: 0, y: 0, z: 0 };
-        let a = generator(1).generate_chunk(pos, 16);
-        let b = generator(2).generate_chunk(pos, 16);
+        let a = generator(1).generate_chunk(pos, 16, 1.0);
+        let b = generator(2).generate_chunk(pos, 16, 1.0);
         assert!(!chunks_equal(&a, &b));
     }
 
@@ -193,8 +193,8 @@ mod tests {
         let generator = generator(42);
         // ground_level 16 m ± 6 m → y ∈ [10, 22]. Chunk y=-1 (y monde
         // [-16, 0)) : tout sous terre. Chunk y=2 (y monde [32, 48)) : tout ciel.
-        let deep = generator.generate_chunk(ChunkPos { x: 0, y: -1, z: 0 }, 16);
-        let sky = generator.generate_chunk(ChunkPos { x: 0, y: 2, z: 0 }, 16);
+        let deep = generator.generate_chunk(ChunkPos { x: 0, y: -1, z: 0 }, 16, 1.0);
+        let sky = generator.generate_chunk(ChunkPos { x: 0, y: 2, z: 0 }, 16, 1.0);
         assert!(chunks_equal(&deep, &Chunk::filled(16, GROUND)));
         assert!(chunks_equal(&sky, &Chunk::filled(16, AIR)));
     }
@@ -205,8 +205,8 @@ mod tests {
         // surface doit coller à celle de (x=15) — dernière du chunk x=0 —
         // à un voxel près, sinon le bruit est discontinu aux frontières.
         let generator = generator(42);
-        let left = generator.generate_chunk(ChunkPos { x: 0, y: 0, z: 0 }, 16);
-        let right = generator.generate_chunk(ChunkPos { x: 1, y: 0, z: 0 }, 16);
+        let left = generator.generate_chunk(ChunkPos { x: 0, y: 0, z: 0 }, 16, 1.0);
+        let right = generator.generate_chunk(ChunkPos { x: 1, y: 0, z: 0 }, 16, 1.0);
 
         let surface = |chunk: &Chunk, x: u32| -> i32 {
             (0..16).rev().find(|&y| chunk.get(x, y, 0) == GROUND).map_or(-1, |y| y as i32)
@@ -220,7 +220,7 @@ mod tests {
         // Le contenu du chunk doit être cohérent avec height_m : solide
         // sous la surface, air au-dessus.
         let generator = generator(7);
-        let chunk = generator.generate_chunk(ChunkPos { x: 0, y: 0, z: 0 }, 16);
+        let chunk = generator.generate_chunk(ChunkPos { x: 0, y: 0, z: 0 }, 16, 1.0);
         for (x, z) in [(0u32, 0u32), (5, 9), (15, 15)] {
             let h = generator.height_m(x as f32, z as f32);
             for y in 0..16u32 {

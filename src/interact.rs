@@ -135,7 +135,7 @@ fn voxel_overlaps_player(
     voxel: [i64; 3],
     player_feet: Vec3,
 ) -> bool {
-    let vpm = world.voxels_per_meter;
+    let vpm = world.voxels_per_meter();
     let vmin = [
         voxel[0] as f32 / vpm,
         voxel[1] as f32 / vpm,

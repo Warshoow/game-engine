@@ -244,7 +244,7 @@ fn resolve_palette(chunk: &Chunk, registry: &Registry) -> Vec<(bool, [f32; 4])> 
 }
 
 fn resolve(registry: &Registry, id: ContentId) -> (bool, [f32; 4]) {
-    match registry.get(id).and_then(|e| e.block.as_ref()) {
+    match registry.get(id).and_then(|e| e.block()) {
         Some(b) => (b.solid, [b.color[0], b.color[1], b.color[2], 1.0]),
         // ID inconnu du registre : on le rend visible et criard plutôt
         // qu'invisible — un bug de contenu doit se voir.
@@ -345,15 +345,13 @@ mod tests {
         let air = reg
             .register(ContentEntry {
                 identifier: "core:air".into(),
-                kind: Kind::Block,
-                block: Some(BlockData { solid: false, color: [0.0; 3] }),
+                kind: Kind::Block(BlockData { solid: false, color: [0.0; 3] }),
             })
             .unwrap();
         let stone = reg
             .register(ContentEntry {
                 identifier: "core:stone".into(),
-                kind: Kind::Block,
-                block: Some(BlockData { solid: true, color: [0.5, 0.5, 0.5] }),
+                kind: Kind::Block(BlockData { solid: true, color: [0.5, 0.5, 0.5] }),
             })
             .unwrap();
         (reg, air, stone)
@@ -365,8 +363,7 @@ mod tests {
         let dirt = reg
             .register(ContentEntry {
                 identifier: "core:dirt".into(),
-                kind: Kind::Block,
-                block: Some(BlockData { solid: true, color: [0.4, 0.25, 0.1] }),
+                kind: Kind::Block(BlockData { solid: true, color: [0.4, 0.25, 0.1] }),
             })
             .unwrap();
         (reg, air, stone, dirt)

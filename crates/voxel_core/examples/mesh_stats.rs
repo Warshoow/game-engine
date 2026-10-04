@@ -13,15 +13,13 @@ fn main() {
     let air = registry
         .register(ContentEntry {
             identifier: "core:air".into(),
-            kind: Kind::Block,
-            block: Some(BlockData { solid: false, color: [0.0; 3] }),
+            kind: Kind::Block(BlockData { solid: false, color: [0.0; 3] }),
         })
         .unwrap();
     let grass = registry
         .register(ContentEntry {
             identifier: "core:grass".into(),
-            kind: Kind::Block,
-            block: Some(BlockData { solid: true, color: [0.35, 0.6, 0.25] }),
+            kind: Kind::Block(BlockData { solid: true, color: [0.35, 0.6, 0.25] }),
         })
         .unwrap();
 
@@ -33,14 +31,13 @@ fn main() {
         ground_level_m: 16.0,
         amplitude_m: 6.0,
         feature_size_m: 24.0,
-        voxels_per_meter: 1.0,
     };
 
     let (mut naive_total, mut greedy_total) = (0usize, 0usize);
     for cx in -2..=2 {
         for cz in -2..=2 {
             let pos = ChunkPos { x: cx, y: 0, z: cz };
-            let chunk = generator.generate_chunk(pos, CHUNK_SIZE);
+            let chunk = generator.generate_chunk(pos, CHUNK_SIZE, 1.0);
             naive_total += mesh_chunk_naive(&chunk, &registry, 1.0).face_count();
             greedy_total += mesh_chunk(&chunk, &registry, 1.0).face_count();
         }

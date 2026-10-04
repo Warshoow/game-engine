@@ -16,9 +16,13 @@
 pub struct ContentId(pub u32);
 
 /// Catégorie d'entrée — kinds unifiés (§3.1) : une seule table pour tout.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Chaque variante porte ses propres données : un `Block` sans `BlockData`
+/// (ou un `Item` avec) est irreprésentable — c'est le type qui porte
+/// l'invariant, pas la discipline de l'appelant.
+#[derive(Debug, Clone, PartialEq)]
 pub enum Kind {
-    Block,
+    Block(BlockData),
     Item,
     EntityType,
 }
@@ -35,14 +39,22 @@ pub struct BlockData {
     pub color: [f32; 3],
 }
 
-/// Une entrée de contenu : identifier stable + kind + données par kind.
+/// Une entrée de contenu : identifier stable + kind (qui porte ses données).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ContentEntry {
     /// Identifiant namespacé, ex. `core:air`, `core:stone`.
     pub identifier: String,
     pub kind: Kind,
-    /// Présent si `kind == Block`.
-    pub block: Option<BlockData>,
+}
+
+impl ContentEntry {
+    /// Les données de bloc, si l'entrée en est un.
+    pub fn block(&self) -> Option<&BlockData> {
+        match &self.kind {
+            Kind::Block(data) => Some(data),
+            _ => None,
+        }
+    }
 }
 
 /// Registre append-only. L'ID d'une entrée est son index d'insertion.
@@ -114,8 +126,7 @@ mod tests {
     fn block(identifier: &str, solid: bool) -> ContentEntry {
         ContentEntry {
             identifier: identifier.to_string(),
-            kind: Kind::Block,
-            block: Some(BlockData {
+            kind: Kind::Block(BlockData {
                 solid,
                 color: [1.0, 1.0, 1.0],
             }),
@@ -164,7 +175,7 @@ mod tests {
         // Le cas d'usage : découvrir les blocs solides sans les nommer.
         let solids: Vec<ContentId> = reg
             .iter()
-            .filter(|(_, e)| e.block.as_ref().is_some_and(|b| b.solid))
+            .filter(|(_, e)| e.block().is_some_and(|b| b.solid))
             .map(|(id, _)| id)
             .collect();
         assert_eq!(solids, vec![stone]);

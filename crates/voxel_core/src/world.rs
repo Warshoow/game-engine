@@ -18,7 +18,9 @@ use crate::registry::{ContentId, Registry};
 pub struct VoxelWorld {
     pub registry: Registry,
     chunk_size: u32,
-    pub voxels_per_meter: f32,
+    /// Gelé à la création (§3.5) : privé, sans setter — c'est le type qui
+    /// porte l'invariant, pas la discipline. Changer la densité = autre monde.
+    voxels_per_meter: f32,
     chunks: HashMap<ChunkPos, Chunk>,
 }
 
@@ -30,6 +32,10 @@ impl VoxelWorld {
             voxels_per_meter,
             chunks: HashMap::new(),
         }
+    }
+
+    pub fn voxels_per_meter(&self) -> f32 {
+        self.voxels_per_meter
     }
 
     pub fn chunk_size(&self) -> u32 {
@@ -94,7 +100,7 @@ impl VoxelWorld {
     pub fn is_solid(&self, v: [i64; 3]) -> bool {
         self.voxel(v)
             .and_then(|id| self.registry.get(id))
-            .and_then(|e| e.block.as_ref())
+            .and_then(|e| e.block())
             .is_some_and(|b| b.solid)
     }
 
@@ -114,22 +120,24 @@ mod tests {
     use crate::registry::{BlockData, ContentEntry, Kind};
 
     fn world() -> (VoxelWorld, ContentId, ContentId) {
+        world_with(1.0)
+    }
+
+    fn world_with(voxels_per_meter: f32) -> (VoxelWorld, ContentId, ContentId) {
         let mut reg = Registry::new();
         let air = reg
             .register(ContentEntry {
                 identifier: "core:air".into(),
-                kind: Kind::Block,
-                block: Some(BlockData { solid: false, color: [0.0; 3] }),
+                kind: Kind::Block(BlockData { solid: false, color: [0.0; 3] }),
             })
             .unwrap();
         let stone = reg
             .register(ContentEntry {
                 identifier: "core:stone".into(),
-                kind: Kind::Block,
-                block: Some(BlockData { solid: true, color: [0.5; 3] }),
+                kind: Kind::Block(BlockData { solid: true, color: [0.5; 3] }),
             })
             .unwrap();
-        let mut w = VoxelWorld::new(reg, 8, 1.0);
+        let mut w = VoxelWorld::new(reg, 8, voxels_per_meter);
         w.insert_chunk(ChunkPos { x: 0, y: 0, z: 0 }, Chunk::filled(8, air));
         (w, air, stone)
     }
@@ -161,8 +169,7 @@ mod tests {
 
     #[test]
     fn meters_to_voxel_respects_resolution() {
-        let (mut w, _, _) = world();
-        w.voxels_per_meter = 2.0; // voxels de 0,5 m
+        let (w, _, _) = world_with(2.0); // voxels de 0,5 m
         assert_eq!(w.voxel_at_m([1.6, -0.2, 0.0]), [3, -1, 0]);
     }
 }

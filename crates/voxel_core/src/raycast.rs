@@ -35,7 +35,7 @@ pub fn raycast(world: &VoxelWorld, origin_m: [f32; 3], dir: [f32; 3], max_m: f32
         return None;
     }
     let dir = [dir[0] / len, dir[1] / len, dir[2] / len];
-    let vpm = world.voxels_per_meter;
+    let vpm = world.voxels_per_meter();
 
     // Tout le DDA travaille en espace voxel (1 unité = 1 voxel) ; les
     // distances t restent alors homogènes et se reconvertissent en mètres
@@ -104,15 +104,13 @@ mod tests {
         let air = reg
             .register(ContentEntry {
                 identifier: "core:air".into(),
-                kind: Kind::Block,
-                block: Some(BlockData { solid: false, color: [0.0; 3] }),
+                kind: Kind::Block(BlockData { solid: false, color: [0.0; 3] }),
             })
             .unwrap();
         let stone = reg
             .register(ContentEntry {
                 identifier: "core:stone".into(),
-                kind: Kind::Block,
-                block: Some(BlockData { solid: true, color: [0.5; 3] }),
+                kind: Kind::Block(BlockData { solid: true, color: [0.5; 3] }),
             })
             .unwrap();
         let mut chunk = Chunk::filled(16, air);
@@ -188,15 +186,13 @@ mod tests {
         let air = reg
             .register(ContentEntry {
                 identifier: "core:air".into(),
-                kind: Kind::Block,
-                block: Some(BlockData { solid: false, color: [0.0; 3] }),
+                kind: Kind::Block(BlockData { solid: false, color: [0.0; 3] }),
             })
             .unwrap();
         let stone = reg
             .register(ContentEntry {
                 identifier: "core:stone".into(),
-                kind: Kind::Block,
-                block: Some(BlockData { solid: true, color: [0.5; 3] }),
+                kind: Kind::Block(BlockData { solid: true, color: [0.5; 3] }),
             })
             .unwrap();
         // 2 vox/m : le sol y < 4 voxels = y < 2 m.

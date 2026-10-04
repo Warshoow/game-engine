@@ -79,15 +79,13 @@ fn setup_world(mut commands: Commands, mut materials: ResMut<Assets<StandardMate
     let air = registry
         .register(ContentEntry {
             identifier: "core:air".into(),
-            kind: Kind::Block,
-            block: Some(BlockData { solid: false, color: [0.0; 3] }),
+            kind: Kind::Block(BlockData { solid: false, color: [0.0; 3] }),
         })
         .expect("registre vide");
     let grass = registry
         .register(ContentEntry {
             identifier: "core:grass".into(),
-            kind: Kind::Block,
-            block: Some(BlockData { solid: true, color: [0.35, 0.6, 0.25] }),
+            kind: Kind::Block(BlockData { solid: true, color: [0.35, 0.6, 0.25] }),
         })
         .expect("identifier unique");
     // Du contenu, pas du code (§0) : ces blocs n'existent qu'ici, en donnée.
@@ -101,8 +99,7 @@ fn setup_world(mut commands: Commands, mut materials: ResMut<Assets<StandardMate
         registry
             .register(ContentEntry {
                 identifier: identifier.into(),
-                kind: Kind::Block,
-                block: Some(BlockData { solid: true, color }),
+                kind: Kind::Block(BlockData { solid: true, color }),
             })
             .expect("identifier unique");
     }
@@ -117,7 +114,6 @@ fn setup_world(mut commands: Commands, mut materials: ResMut<Assets<StandardMate
         ground_level_m: 16.0,
         amplitude_m: 6.0,
         feature_size_m: 24.0,
-        voxels_per_meter,
     };
 
     // --- Le monde démarre VIDE : c'est le streaming (Update) qui génère et
@@ -132,7 +128,7 @@ fn setup_world(mut commands: Commands, mut materials: ResMut<Assets<StandardMate
     let hotbar: Vec<ContentId> = world
         .registry
         .iter()
-        .filter(|(_, e)| e.block.as_ref().is_some_and(|b| b.solid))
+        .filter(|(_, e)| e.block().is_some_and(|b| b.solid))
         .map(|(id, _)| id)
         .collect();
     let held_idx = hotbar.iter().position(|&id| id == grass).unwrap_or(0);
@@ -195,7 +191,7 @@ pub fn remesh_chunk(
     meshes: &mut Assets<Mesh>,
     chunk_meshes: &Query<(Entity, &ChunkMesh, &Mesh3d)>,
 ) {
-    let voxel_size_m = 1.0 / game.world.voxels_per_meter;
+    let voxel_size_m = 1.0 / game.world.voxels_per_meter();
     let Some(data) = mesh_chunk_in_world(&game.world, pos, voxel_size_m) else {
         return; // chunk non chargé : rien à mesher
     };

@@ -113,7 +113,7 @@ fn first_blocking_face(
     axis: usize,
     d: f32,
 ) -> Option<f32> {
-    let vpm = world.voxels_per_meter;
+    let vpm = world.voxels_per_meter();
     // Plage de voxels chevauchés par la région. Borne haute : une boîte dont
     // le max tombe pile sur une frontière (x = 3.0) ne chevauche PAS le
     // voxel 3 — d'où le retrait d'un epsilon avant le floor.
@@ -165,15 +165,13 @@ mod tests {
         let air = reg
             .register(ContentEntry {
                 identifier: "core:air".into(),
-                kind: Kind::Block,
-                block: Some(BlockData { solid: false, color: [0.0; 3] }),
+                kind: Kind::Block(BlockData { solid: false, color: [0.0; 3] }),
             })
             .unwrap();
         let stone = reg
             .register(ContentEntry {
                 identifier: "core:stone".into(),
-                kind: Kind::Block,
-                block: Some(BlockData { solid: true, color: [0.5; 3] }),
+                kind: Kind::Block(BlockData { solid: true, color: [0.5; 3] }),
             })
             .unwrap();
 
