@@ -46,3 +46,17 @@ Les **non-goals** de §7 restent non-goals tant que non arbitrés : éclairage r
 Ce projet est un projet d'apprentissage. Quand un concept est en jeu (meshing, layout mémoire, ECS, déterminisme) : **explique le raisonnement** — pourquoi cette approche, quels compromis. Pas de solution finie balancée sans le pourquoi.
 
 Remarque : **ne plus ajouter les mentions "Co-Authored-By:" dans aucun commit**
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues (`Warshoow/game-engine`), via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context; the design doc `docs/brief/voxel-engine-design.md` stays canonical. See `docs/agents/domain.md`.
