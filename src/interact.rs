@@ -88,7 +88,7 @@ pub fn interact(
     mut game: ResMut<GameWorld>,
     mut dirty: ResMut<DirtyChunks>,
     camera: Query<&GlobalTransform, With<PlayerCamera>>,
-    player: Query<&Transform, With<Player>>,
+    player: Query<&Player>,
 ) {
     // On n'interagit qu'en mode FPS — et comme ce système tourne AVANT
     // `cursor_grab` (voir l'ordre du plugin), le clic qui active le mode
@@ -121,7 +121,7 @@ pub fn interact(
         // Refuse de poser un bloc dans le volume du joueur.
         if player
             .single()
-            .is_ok_and(|t| voxel_overlaps_player(&game.world, target, t.translation))
+            .is_ok_and(|p| voxel_overlaps_player(&game.world, target, p.feet()))
         {
             return;
         }

@@ -4,7 +4,8 @@
 //! - **`FixedUpdate`** : la simulation — intention de mouvement, gravité,
 //!   saut, collision (`voxel_core::physics`). Déterministe, cadence fixe.
 //! - **`Update`** : ce qui est purement visuel/input — regard souris,
-//!   capture du curseur. La rotation de caméra n'influence la simu qu'au
+//!   capture du curseur, et le `Transform` affiché (voir
+//!   [`smooth_transform`]). La rotation de caméra n'influence la simu qu'au
 //!   tick suivant, via le yaw stocké sur le joueur.
 //!
 //! Toutes les grandeurs sont en **mètres** (§2) : taille du joueur, vitesse,
@@ -41,7 +42,13 @@ impl Plugin for PlayerPlugin {
             .add_systems(FixedUpdate, physics_step)
             .add_systems(
                 Update,
-                (mouse_look, crate::interact::interact, cursor_grab).chain(),
+                (
+                    mouse_look,
+                    smooth_transform,
+                    crate::interact::interact,
+                    cursor_grab,
+                )
+                    .chain(),
             )
             .add_systems(
                 Update,
@@ -55,14 +62,29 @@ impl Plugin for PlayerPlugin {
     }
 }
 
-/// L'état simulation du joueur. La translation du `Transform` est la
-/// position des **pieds** (centre de la boîte au sol).
+/// L'état simulation du joueur. `feet` = position des **pieds** (centre de
+/// la boîte au sol). Le `Transform` n'est que l'affichage, interpolé entre
+/// `prev_feet` et `feet` par [`smooth_transform`] : la simu ne le lit pas.
 #[derive(Component, Default)]
 pub struct Player {
+    feet: Vec3,
+    /// `feet` au tick précédent.
+    prev_feet: Vec3,
     velocity: Vec3,
     yaw: f32,
     pitch: f32,
     grounded: bool,
+}
+
+impl Player {
+    fn at(feet: Vec3) -> Self {
+        Self { feet, prev_feet: feet, ..default() }
+    }
+
+    /// Position simulée des pieds (≠ `Transform`, qui est interpolé).
+    pub fn feet(&self) -> Vec3 {
+        self.feet
+    }
 }
 
 #[derive(Component)]
@@ -80,11 +102,11 @@ pub struct CursorCaptured(pub bool);
 
 pub fn spawn_player(mut commands: Commands, game: Res<GameWorld>) {
     // Spawn posé sur le terrain, interrogé en mètres — jamais en blocs.
-    let ground = game.generator.height_m(0.5, 0.5);
+    let feet = Vec3::new(0.5, game.generator.height_m(0.5, 0.5) + 1.0, 0.5);
     commands
         .spawn((
-            Player::default(),
-            Transform::from_xyz(0.5, ground + 1.0, 0.5),
+            Player::at(feet),
+            Transform::from_translation(feet),
             Visibility::default(),
         ))
         .with_children(|parent| {
@@ -101,16 +123,17 @@ fn physics_step(
     time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
     game: Res<GameWorld>,
-    mut query: Query<(&mut Transform, &mut Player)>,
+    mut query: Query<&mut Player>,
 ) {
     let dt = time.delta_secs(); // dans FixedUpdate : le pas fixe
-    for (mut transform, mut player) in &mut query {
+    for mut player in &mut query {
+        player.prev_feet = player.feet;
         // Streaming : on ne simule PAS dans du non-chargé. `is_solid` traite
         // un chunk absent comme de l'air — sans cette garde, le joueur
         // tomberait à travers un monde pas encore généré (premières frames,
         // ou si la génération ne suit pas). Figé ≠ cassé : la simu reprend
         // dès que le sol existe.
-        let feet_voxel = game.world.voxel_at_m(transform.translation.to_array());
+        let feet_voxel = game.world.voxel_at_m(player.feet.to_array());
         let (chunk_pos, _) = game.world.split(feet_voxel);
         if game.world.chunk(chunk_pos).is_none() {
             continue;
@@ -141,8 +164,7 @@ fn physics_step(
             player.velocity.y = JUMP_SPEED_M_S;
         }
 
-        let feet = transform.translation;
-        let aabb = Aabb::from_feet(feet.to_array(), PLAYER_WIDTH_M, PLAYER_HEIGHT_M);
+        let aabb = Aabb::from_feet(player.feet.to_array(), PLAYER_WIDTH_M, PLAYER_HEIGHT_M);
         let moved = move_and_collide(&game.world, aabb, (player.velocity * dt).to_array());
 
         // Un impact vertical annule la vitesse verticale ; vers le bas, il
@@ -154,7 +176,26 @@ fn physics_step(
             player.grounded = false;
         }
 
-        transform.translation = Vec3::from_array(moved.aabb.feet());
+        player.feet = Vec3::from_array(moved.aabb.feet());
+    }
+}
+
+/// Le `Transform` affiché, recalculé à chaque frame.
+///
+/// La simu avance par ticks de 1/64 s ; une frame tombe en général entre
+/// deux ticks. Afficher la position du dernier tick fait avancer le joueur
+/// par à-coups (une frame rattrape 1 tick, la suivante 2…). On affiche
+/// plutôt la position **interpolée** entre les deux derniers ticks, selon
+/// le temps écoulé depuis le dernier (`overstep_fraction`, 0 → 1). Coût :
+/// l'affichage a jusqu'à un tick de retard. La simu n'est pas touchée
+/// (déterminisme, §2).
+///
+/// Le yaw est appliqué ici aussi, pas au tick : sinon tourner la tête
+/// saccaderait à 64 Hz alors que le pitch suit chaque frame.
+fn smooth_transform(fixed: Res<Time<Fixed>>, mut query: Query<(&mut Transform, &Player)>) {
+    let t = fixed.overstep_fraction();
+    for (mut transform, player) in &mut query {
+        transform.translation = player.prev_feet.lerp(player.feet, t);
         transform.rotation = Quat::from_rotation_y(player.yaw);
     }
 }

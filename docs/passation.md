@@ -54,6 +54,9 @@ F plein écran.
 - **Un chunk chargé a toujours une entité `ChunkMesh`**, même au mesh
   vide (alors sans `Mesh3d`). Sinon un chunk d'air passe pour non chargé
   et est re-meshé à chaque frame (test `streaming::tests`).
+- **La position du joueur est `Player::feet`**, pas son `Transform` : le
+  `Transform` n'est que l'affichage, interpolé entre deux ticks
+  (`smooth_transform`). La simu et la pose de bloc lisent `feet()`.
 - **`voxels_per_meter` n'existe qu'une fois** : `VoxelWorld::voxels_per_meter()`
   (gelé, §3.5). Le générateur le reçoit en paramètre.
 
@@ -171,8 +174,8 @@ jeu ».
 ## Prochaines étapes (non arbitrées)
 
 Suivies en tickets GitHub : #1 verticalité (`c95e74b`, pas encore vue en
-jeu), #2 surbrillance du bloc visé (validée en jeu), #3 HUD debug (FPS, chunks chargés), #4 interpolation caméra entre
-ticks (si le 64 Hz se sent), #5 build Windows natif (mingw-w64).
+jeu), #2 surbrillance du bloc visé (validée en jeu), #3 HUD debug (FPS, chunks chargés — codé, pas encore vu en jeu), #4 interpolation caméra entre
+ticks + yaw appliqué à chaque frame (codé, pas encore vu en jeu), #5 build Windows natif (mingw-w64).
 
 Limitations assumées (ne pas « corriger » sans besoin) : palette non
 compactée, re-mesh complet du chunk au moindre voxel, pas de persistance
