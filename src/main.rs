@@ -9,6 +9,7 @@ mod streaming;
 use std::collections::{HashMap, HashSet};
 
 use bevy::asset::RenderAssetUsages;
+use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::mesh::{Indices, Mesh};
 use bevy::prelude::*;
 use bevy::render::render_resource::PrimitiveTopology;
@@ -64,6 +65,10 @@ pub struct DirtyChunks(pub HashSet<ChunkPos>);
 #[derive(Component)]
 pub struct HeldBlockText;
 
+/// Marque le texte HUD de debug (FPS, chunks chargés).
+#[derive(Component)]
+struct DebugText;
+
 fn main() {
     // WSLg : le compositeur Wayland ne fournit ni pointer lock ni mouvements
     // relatifs de souris → caméra FPS morte. On masque WAYLAND_DISPLAY pour
@@ -80,7 +85,7 @@ fn main() {
             }),
             ..default()
         }))
-        .add_plugins(player::PlayerPlugin)
+        .add_plugins((player::PlayerPlugin, FrameTimeDiagnosticsPlugin::default()))
         .init_resource::<DirtyChunks>()
         .add_systems(Startup, (setup_world, player::spawn_player).chain())
         // Pose/casse puis streaming notent les chunks sales ; on meshe après.
@@ -89,6 +94,7 @@ fn main() {
             (
                 streaming::stream_chunks.after(interact::interact),
                 remesh_dirty.after(streaming::stream_chunks),
+                update_debug_text,
             ),
         )
         .run();
@@ -177,6 +183,16 @@ fn setup_world(mut commands: Commands, mut materials: ResMut<Assets<StandardMate
             ..default()
         },
     ));
+    commands.spawn((
+        DebugText,
+        Text::default(),
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(12.0),
+            top: Val::Px(12.0),
+            ..default()
+        },
+    ));
     // Bloc en main (HUD debug — §7 : pas d'UI riche).
     commands.spawn((
         HeldBlockText,
@@ -258,6 +274,21 @@ pub fn remesh_dirty(
             }
         }
     }
+}
+
+/// HUD debug : FPS (moyenne glissante de Bevy) et nombre de chunks qui ont
+/// une entité — la zone chargée par le streaming.
+fn update_debug_text(
+    diagnostics: Res<DiagnosticsStore>,
+    chunks: Query<(), With<ChunkMesh>>,
+    mut text: Query<&mut Text, With<DebugText>>,
+) {
+    let Ok(mut text) = text.single_mut() else { return };
+    let fps = diagnostics
+        .get(&FrameTimeDiagnosticsPlugin::FPS)
+        .and_then(|d| d.smoothed())
+        .unwrap_or(0.0);
+    text.0 = format!("{fps:.0} FPS · {} chunks", chunks.iter().count());
 }
 
 /// Libellé HUD du bloc en main — l'identifier vient du registre, le HUD ne
