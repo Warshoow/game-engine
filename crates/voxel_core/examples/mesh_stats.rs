@@ -16,28 +16,39 @@ fn main() {
     let grass = registry
         .register(ContentEntry::new_block("core:grass", true, [0.35, 0.6, 0.25]))
         .unwrap();
+    let stone = registry
+        .register(ContentEntry::new_block("core:stone", true, [0.55, 0.55, 0.58]))
+        .unwrap();
 
     // Mêmes paramètres que src/main.rs — on mesure le vrai terrain.
     let generator = HeightmapGenerator {
         seed: 42,
         air,
         ground: grass,
+        stone,
         ground_level_m: 16.0,
         amplitude_m: 6.0,
         feature_size_m: 24.0,
     };
 
+    // Couche de surface (y = 0) et couche souterraine (y = -1, grottes).
     let (mut naive_total, mut greedy_total) = (0usize, 0usize);
-    for cx in -2..=2 {
-        for cz in -2..=2 {
-            let pos = ChunkPos { x: cx, y: 0, z: cz };
-            let chunk = generator.generate_chunk(pos, CHUNK_SIZE, 1.0);
-            naive_total += mesh_chunk_naive(&chunk, &registry, 1.0).face_count();
-            greedy_total += mesh_chunk(&chunk, &registry, 1.0).face_count();
+    let mut gen_time = std::time::Duration::ZERO;
+    for cy in -1..=0 {
+        for cx in -2..=2 {
+            for cz in -2..=2 {
+                let pos = ChunkPos { x: cx, y: cy, z: cz };
+                let start = std::time::Instant::now();
+                let chunk = generator.generate_chunk(pos, CHUNK_SIZE, 1.0);
+                gen_time += start.elapsed();
+                naive_total += mesh_chunk_naive(&chunk, &registry, 1.0).face_count();
+                greedy_total += mesh_chunk(&chunk, &registry, 1.0).face_count();
+            }
         }
     }
 
-    println!("25 chunks {CHUNK_SIZE}³ (seed 42) :");
+    println!("50 chunks {CHUNK_SIZE}³ (seed 42, couches y = -1 et 0) :");
+    println!("  génération   : {:.2} ms/chunk", gen_time.as_secs_f64() * 1000.0 / 50.0);
     println!("  culling naïf : {naive_total} quads ({} triangles)", naive_total * 2);
     println!("  greedy       : {greedy_total} quads ({} triangles)", greedy_total * 2);
     println!(

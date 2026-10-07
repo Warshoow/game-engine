@@ -103,12 +103,14 @@ fn setup_world(mut commands: Commands, mut materials: ResMut<Assets<StandardMate
     let grass = registry
         .register(ContentEntry::new_block("core:grass", true, [0.35, 0.6, 0.25]))
         .expect("identifier unique");
+    let stone = registry
+        .register(ContentEntry::new_block("core:stone", true, [0.55, 0.55, 0.58]))
+        .expect("identifier unique");
     // Du contenu, pas du code (§0) : ces blocs n'existent qu'ici, en donnée.
     // Aucun système ne les connaît — ils arrivent dans la hotbar par
     // découverte du registre, et le worldgen n'en pose aucun.
     for (identifier, color) in [
         ("core:dirt", [0.45, 0.30, 0.15]),
-        ("core:stone", [0.55, 0.55, 0.58]),
         ("core:sand", [0.85, 0.78, 0.55]),
     ] {
         registry
@@ -123,6 +125,7 @@ fn setup_world(mut commands: Commands, mut materials: ResMut<Assets<StandardMate
         seed: 42,
         air,
         ground: grass,
+        stone,
         ground_level_m: 16.0,
         amplitude_m: 6.0,
         feature_size_m: 24.0,

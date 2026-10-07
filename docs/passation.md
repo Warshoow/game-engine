@@ -13,8 +13,10 @@ meshing (greedy, ×12,8 vs naïf, fluidité validée en jeu par Warshow même
 sous llvmpipe), et **streaming** (§3.4 : monde qui démarre vide, chunks
 générés/déchargés autour du joueur). Dernier commit : `f135fb0`.
 
-1. Chunk généré depuis la seed (heightmap fBm maison, déterministe),
-   **en continu autour du joueur** (budget 4 chunks/frame, hystérésis).
+1. Chunk généré depuis la seed (heightmap fBm maison, pierre sous 1 m de
+   sol, **grottes** par bruit 3D, déterministe), **en continu autour du
+   joueur** sur plusieurs couches (cylindre 96 m × ±48 m, borné à −128 /
+   384 m ; budget 4 chunks/frame, hystérésis).
 2. Mesher blocky **greedy** avec **raccord inter-chunks** (le naïf reste
    comme oracle de test).
 3. Pose/casse data-driven + **sélection à la molette** (hotbar découverte
@@ -167,19 +169,11 @@ jeu ».
 
 ## Prochaines étapes (non arbitrées)
 
-**Recommandé à Warshow, en attente de sa réponse : la verticalité**
-(plusieurs couches de chunks, puis bruit 3D pour les grottes ; le doc
-prévoit −128 à 384 m). Le fix `978395c` en était le prérequis.
-
-
-Pistes discutées : surbrillance du voxel visé, HUD debug (FPS, chunks
-chargés — egui), interpolation caméra entre ticks (si le 64 Hz se sent),
-**verticalité** (plusieurs couches de chunks — la porte vers les caves ;
-la boucle « ensemble voulu » de `streaming.rs` est le seul endroit à
-élargir), **build Windows natif** pour les tests de feel (demande
-mingw-w64, non mis en place).
+Suivies en tickets GitHub : #1 verticalité (codée le 2026-10-07, non
+commitée à l'écriture, pas encore vue en jeu), #2 surbrillance du bloc
+visé, #3 HUD debug (FPS, chunks chargés), #4 interpolation caméra entre
+ticks (si le 64 Hz se sent), #5 build Windows natif (mingw-w64).
 
 Limitations assumées (ne pas « corriger » sans besoin) : palette non
-compactée, re-mesh complet du chunk au moindre voxel, une seule couche
-verticale de chunks (y = 0, le terrain tient dedans), pas de persistance
+compactée, re-mesh complet du chunk au moindre voxel, pas de persistance
 disque (les édits vivent en mémoire), full-bright.

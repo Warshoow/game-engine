@@ -23,6 +23,12 @@
 //! La marge d'hystérésis évite le charge/décharge en boucle quand le joueur
 //! oscille autour d'une frontière : on charge à `VIEW_DISTANCE_M`, on ne
 //! décharge qu'au-delà de `VIEW_DISTANCE_M + UNLOAD_MARGIN_M`.
+//!
+//! La zone chargée est un **cylindre** : un disque de `VIEW_DISTANCE_M` à
+//! l'horizontale, `VERTICAL_VIEW_M` au-dessus et en dessous du joueur — on
+//! voit loin à l'horizon, mais charger 96 m de roche sous les pieds ne
+//! servirait à rien. Le monde est borné en hauteur (§3.4) : aucune couche
+//! hors de `[WORLD_MIN_Y_M, WORLD_MAX_Y_M)` n'est générée.
 
 use std::collections::HashSet;
 
@@ -39,6 +45,12 @@ use crate::{ChunkMesh, DirtyChunks, GameWorld};
 const VIEW_DISTANCE_M: f32 = 96.0;
 /// Hystérésis de déchargement, en mètres.
 const UNLOAD_MARGIN_M: f32 = 32.0;
+/// Demi-hauteur de la zone chargée, en mètres (distance verticale max entre
+/// le joueur et le centre d'un chunk).
+const VERTICAL_VIEW_M: f32 = 48.0;
+/// Bornes verticales du monde, en mètres (§3.4 : −128 à 384).
+const WORLD_MIN_Y_M: f32 = -128.0;
+const WORLD_MAX_Y_M: f32 = 384.0;
 /// Chunks générés/meshés par frame — lisse le coût du streaming.
 const GEN_BUDGET_PER_FRAME: usize = 4;
 
@@ -57,32 +69,42 @@ pub fn stream_chunks(
     // Chunks ayant une entité (affichés — y compris ceux au mesh vide).
     let displayed: HashSet<ChunkPos> = chunk_meshes.iter().map(|(_, cm, _)| cm.0).collect();
 
-    // Distance horizontale (mètres) du joueur au centre d'une colonne de chunk.
-    let dist_m = |pos: ChunkPos| -> f32 {
+    // Distances (mètres) du joueur au centre d'un chunk : horizontale et
+    // verticale, séparées car la zone chargée est un cylindre.
+    let horiz_m = |pos: ChunkPos| -> f32 {
         let cx = (pos.x as f32 + 0.5) * extent_m;
         let cz = (pos.z as f32 + 0.5) * extent_m;
         ((cx - p.x).powi(2) + (cz - p.z).powi(2)).sqrt()
     };
+    let vert_m = |pos: ChunkPos| ((pos.y as f32 + 0.5) * extent_m - p.y).abs();
 
-    // --- 1. L'ensemble voulu : un disque de chunks autour du joueur. ---
-    // Une seule couche verticale (y = 0) : le terrain de la heightmap tient
-    // dans [0, 32) voxels de haut. La verticalité (caves, y < 0) élargira
-    // cette boucle, pas la logique.
+    // --- 1. L'ensemble voulu : un cylindre de chunks autour du joueur. ---
     let (pcx, pcz) = (
         (p.x / extent_m).floor() as i32,
         (p.z / extent_m).floor() as i32,
     );
     let radius_chunks = (VIEW_DISTANCE_M / extent_m).ceil() as i32;
+    // Couches dont le centre est à moins de VERTICAL_VIEW_M, dans le monde.
+    let y_min = ((p.y - VERTICAL_VIEW_M) / extent_m - 0.5)
+        .ceil()
+        .max(WORLD_MIN_Y_M / extent_m) as i32;
+    let y_max = ((p.y + VERTICAL_VIEW_M) / extent_m - 0.5)
+        .floor()
+        .min(WORLD_MAX_Y_M / extent_m - 1.0) as i32;
     let mut desired: Vec<ChunkPos> = Vec::new();
-    for dz in -radius_chunks..=radius_chunks {
-        for dx in -radius_chunks..=radius_chunks {
-            let pos = ChunkPos { x: pcx + dx, y: 0, z: pcz + dz };
-            if dist_m(pos) <= VIEW_DISTANCE_M {
-                desired.push(pos);
+    for y in y_min..=y_max {
+        for dz in -radius_chunks..=radius_chunks {
+            for dx in -radius_chunks..=radius_chunks {
+                let pos = ChunkPos { x: pcx + dx, y, z: pcz + dz };
+                if horiz_m(pos) <= VIEW_DISTANCE_M {
+                    desired.push(pos);
+                }
             }
         }
     }
-    // Du plus proche au plus loin : le sol sous les pieds arrive en premier.
+    // Du plus proche au plus loin (en 3D) : le chunk sous les pieds arrive
+    // en premier.
+    let dist_m = |pos: ChunkPos| horiz_m(pos).hypot(vert_m(pos));
     desired.sort_by(|a, b| dist_m(*a).total_cmp(&dist_m(*b)));
 
     // --- 2. Générer (budget), en notant tout ce qui devra être meshé. ---
@@ -118,7 +140,9 @@ pub fn stream_chunks(
 
     // --- 3. Décharger les chunks trop loin (les données restent). ---
     for (entity, cm, mesh3d) in &chunk_meshes {
-        if dist_m(cm.0) > VIEW_DISTANCE_M + UNLOAD_MARGIN_M {
+        if horiz_m(cm.0) > VIEW_DISTANCE_M + UNLOAD_MARGIN_M
+            || vert_m(cm.0) > VERTICAL_VIEW_M + UNLOAD_MARGIN_M
+        {
             if let Some(mesh3d) = mesh3d {
                 meshes.remove(mesh3d.id());
             }
@@ -154,11 +178,10 @@ mod tests {
     use super::*;
     use crate::remesh_dirty;
 
-    /// Monde **tout en air** (sol à −100 m) : chaque chunk a un mesh vide.
-    /// Régression : un chunk vide n'avait pas d'entité, passait pour jamais
-    /// chargé, et était re-meshé à chaque frame en mangeant le budget.
-    #[test]
-    fn empty_chunks_load_once_and_stay_loaded() {
+    /// App headless : monde **tout en air** (sol à −1000 m, chaque chunk a
+    /// un mesh vide), joueur à l'altitude `y_m`, streaming lancé jusqu'à
+    /// tout charger. Retourne l'app et les chunks qui ont une entité.
+    fn stream_all_air(y_m: f32) -> (App, Vec<ChunkPos>) {
         let mut registry = Registry::new();
         let air = registry
             .register(ContentEntry::new_block("core:air", false, [0.0; 3]))
@@ -167,7 +190,8 @@ mod tests {
             seed: 1,
             air,
             ground: air,
-            ground_level_m: -100.0,
+            stone: air,
+            ground_level_m: -1000.0,
             amplitude_m: 1.0,
             feature_size_m: 24.0,
         };
@@ -185,15 +209,24 @@ mod tests {
             .add_systems(Update, (stream_chunks, remesh_dirty).chain());
         app.world_mut().spawn((
             Player::default(),
-            Transform::from_xyz(0.5, 0.0, 0.5),
+            Transform::from_xyz(0.5, y_m, 0.5),
         ));
 
-        // Assez de frames pour vider le disque au budget de 4/frame.
-        for _ in 0..30 {
+        // Assez de frames pour tout charger au budget de 4/frame
+        // (~30 colonnes × 4 couches).
+        for _ in 0..100 {
             app.update();
         }
         let mut q = app.world_mut().query::<&ChunkMesh>();
-        let loaded: Vec<ChunkPos> = q.iter(app.world()).map(|c| c.0).collect();
+        let loaded = q.iter(app.world()).map(|c| c.0).collect();
+        (app, loaded)
+    }
+
+    /// Régression : un chunk vide n'avait pas d'entité, passait pour jamais
+    /// chargé, et était re-meshé à chaque frame en mangeant le budget.
+    #[test]
+    fn empty_chunks_load_once_and_stay_loaded() {
+        let (mut app, loaded) = stream_all_air(0.0);
         let unique: HashSet<ChunkPos> = loaded.iter().copied().collect();
         assert!(!loaded.is_empty());
         assert_eq!(loaded.len(), unique.len(), "entité-chunk en double");
@@ -201,5 +234,19 @@ mod tests {
         // Une fois tout chargé, le streaming ne doit plus rien demander.
         app.world_mut().run_system_once(stream_chunks).unwrap();
         assert!(app.world().resource::<DirtyChunks>().0.is_empty());
+    }
+
+    #[test]
+    fn layers_follow_player_and_stop_at_world_bottom() {
+        // Joueur à y = 0 : couches -2..=1 (centres à ≤ 48 m de lui).
+        let (_, loaded) = stream_all_air(0.0);
+        let layers: HashSet<i32> = loaded.iter().map(|c| c.y).collect();
+        assert_eq!(layers, HashSet::from([-2, -1, 0, 1]));
+
+        // Près du fond du monde (−128 m = bas de la couche −4) : la couche
+        // −5 serait à portée (centre à 24 m) mais hors du monde.
+        let (_, loaded) = stream_all_air(-120.0);
+        let layers: HashSet<i32> = loaded.iter().map(|c| c.y).collect();
+        assert_eq!(layers, HashSet::from([-4, -3]));
     }
 }

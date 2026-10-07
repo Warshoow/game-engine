@@ -406,3 +406,37 @@ propre, `mesh_stats` à l'identique (8661 quads greedy, ×12,8), `cargo run`
 démarre avec les mêmes logs qu'avant (avertissements d'environnement
 seulement : rendu logiciel, pas d'audio). Non vérifié faute de build
 natif : le regard souris hors WSL — à tester au premier build Windows.
+
+## 2026-10-07 — Verticalité : plusieurs couches de chunks + grottes (#1)
+
+**Problème.** Le streaming ne chargeait que la couche y = 0 : creuser sous
+0 m tombait dans du non-chargé (physique figée), et rien n'existait sous
+la surface.
+
+**Streaming (`streaming.rs`).** La zone chargée devient un **cylindre** :
+disque de 96 m à l'horizontale, ±48 m en vertical (distance joueur →
+centre du chunk). Pourquoi pas une sphère de 96 m : on regarde loin à
+l'horizon, rarement à 96 m sous ses pieds ; charger toute cette roche
+coûterait ~3× plus de chunks pour rien. Tri par distance 3D (le chunk
+sous les pieds d'abord). Déchargement : au-delà de la marge sur l'un ou
+l'autre axe. Bornes du monde §3.4 (−128 à 384 m) : aucune couche hors de
+cet intervalle n'est générée — c'est le « simple check de bordure » du doc.
+
+**Worldgen (`worldgen.rs`).** Pierre sous 1 m de sol. Grottes par
+**intersection de deux bruits 3D** : un bruit vaut ~0,5 sur une surface
+ondulée ; « proche de 0,5 » est une plaque épaisse autour d'elle ; deux
+plaques indépendantes se coupent le long d'un tube qui serpente — un
+tunnel. Un seul bruit seuillé donnerait des bulles isolées. Bruit 3D =
+value noise 2D existant avec un axe de plus (8 coins), même hash, donc
+même déterminisme. Le second bruit n'est calculé que si le premier est
+dans la bande. Mesuré (seed 42) : ~10 % du sous-sol en vide, tunnels de
+3 à 5 m, 1,8 ms/chunk 32³ en profil dev.
+
+**Tests.** Worldgen : chaque voxel de chunks hors origine (y négatif
+compris) vaut ce que disent `height_m` / `is_cave_m` en coordonnées
+monde ; le sous-sol ne contient que pierre et vide, avec des grottes mais
+moins de 20 % de vide. Streaming : couches chargées autour du joueur, et
+rien sous le fond du monde. 44 tests, clippy propre.
+
+**Pas vérifié en jeu.** Aspect des grottes, descente dans les couches
+inférieures.
