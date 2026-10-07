@@ -1,4 +1,4 @@
-# Passation de session — 2026-07-09
+# Passation de session — 2026-10-07
 
 > Document de reprise pour une session Claude fraîche. Lire ceci, puis
 > `CLAUDE.md` (racine) et `docs/brief/voxel-engine-design.md` (canonique)
@@ -11,7 +11,7 @@
 d'apprentissage du cœur voxel sont construits — stockage (chunk paletté),
 meshing (greedy, ×12,8 vs naïf, fluidité validée en jeu par Warshow même
 sous llvmpipe), et **streaming** (§3.4 : monde qui démarre vide, chunks
-générés/déchargés autour du joueur). Dernier commit : `34e7aa1`.
+générés/déchargés autour du joueur). Dernier commit : `f135fb0`.
 
 1. Chunk généré depuis la seed (heightmap fBm maison, déterministe),
    **en continu autour du joueur** (budget 4 chunks/frame, hystérésis).
@@ -106,15 +106,15 @@ retourne le code de `tail`). Vérifier `EXIT=$?` explicitement.
   la précédente (cache bevy_winit). Autre renommage 0.19 : les événements
   bufferisés se lisent via `MessageReader` (ex-`EventReader`).
 - **Piège ECS** : les entités spawnées via `Commands` ne sont visibles dans
-  les `Query` qu'à la frame suivante — d'où le meshing différé/dédupliqué en
-  fin de passe dans `streaming.rs` (sinon meshes dupliqués).
+  les `Query` qu'à la frame suivante — d'où `DirtyChunks` + un seul système
+  de meshing (`remesh_dirty`), voir les invariants.
 
 ## Conventions de travail avec Warshow
 
 - **Français** partout (code commenté en français, commits en français).
 - **Jamais de trailer `Co-Authored-By`** dans les commits (demande explicite).
-- Commits soignés et descriptifs, un par étape logique ; il apprécie qu'on
-  commite les jalons sans redemander.
+- Commits soignés et descriptifs, un par étape logique, **seulement sur
+  demande explicite** ; jamais de push (c'est lui qui pousse).
 - **Pédagogie** : projet d'apprentissage — expliquer le *pourquoi* des
   concepts (meshing, layout mémoire, déterminisme…) dans les réponses ET
   dans `docs/journal.md`, tenu à jour à chaque étape.
@@ -136,7 +136,41 @@ Trois jalons, chacun committé et détaillé dans `docs/journal.md` :
    ci-dessus. Rayon de vue 96 m + marge 32 m, exprimés en mètres (§2), la
    conversion en chunks reste locale à `streaming.rs`.
 
+## Fait dans la session du 2026-10-05 → 07
+
+Reprise après une pause. Relecture complète, puis audit de complexité ;
+détail dans `docs/journal.md` (deux entrées du 2026-10-05).
+
+1. `48416b5` **refactor** — `Kind::Block(BlockData)` (plus d'état
+   incohérent), `voxels_per_meter` privé et unique (le générateur le reçoit
+   en paramètre).
+2. `978395c` **fix** — un chunk vide garde son entité (sinon re-meshé à
+   chaque frame : bloquant pour la verticalité) ; `DirtyChunks` +
+   `remesh_dirty` = un seul système meshe (fin des entités en double).
+   Test headless dans `streaming.rs`.
+3. `510d667` **refactor** — regard souris : hors WSL `Locked` +
+   `AccumulatedMouseMotion` (toute la mécanique de warp supprimée) ; sous
+   WSL inchangé. `ContentEntry::new_block`, code mort retiré. −105 lignes.
+4. `f135fb0` **chore** — config des skills mattpocock (`docs/agents/`,
+   tickets GitHub, labels de triage par défaut).
+
+**Pas encore vérifié en jeu par Warshow** : regard souris sous WSL après
+le refactor, pose/casse en bordure de chunk. **Jamais testé** : le regard
+hors WSL (pas de build natif).
+
+**Firetower** (agents sur un worker, lancés depuis des tickets GitHub) :
+possible mais pas branché — le dépôt n'est pas déclaré dans Firetower, et
+le worker doit avoir Rust + clang + mold + les libs système de Bevy.
+Proposé, non fait : ajouter à `CLAUDE.md` une règle « sans écran : prouver
+par `cargo test`/`clippy`, signaler dans la PR ce qui demande un test en
+jeu ».
+
 ## Prochaines étapes (non arbitrées)
+
+**Recommandé à Warshow, en attente de sa réponse : la verticalité**
+(plusieurs couches de chunks, puis bruit 3D pour les grottes ; le doc
+prévoit −128 à 384 m). Le fix `978395c` en était le prérequis.
+
 
 Pistes discutées : surbrillance du voxel visé, HUD debug (FPS, chunks
 chargés — egui), interpolation caméra entre ticks (si le 64 Hz se sent),
