@@ -20,7 +20,8 @@ générés/déchargés autour du joueur). Dernier commit : `f135fb0`.
 2. Mesher blocky **greedy** avec **raccord inter-chunks** (le naïf reste
    comme oracle de test).
 3. Pose/casse data-driven + **sélection à la molette** (hotbar découverte
-   depuis le registre — tout bloc solide est posable).
+   depuis le registre — tout bloc solide est posable), **contour noir du
+   bloc visé** (gizmo, même raycast que le clic).
 4. Déplacement FPS avec collision (AABB balayée), **figé si le chunk sous
    les pieds n'est pas chargé**.
 
@@ -169,9 +170,8 @@ jeu ».
 
 ## Prochaines étapes (non arbitrées)
 
-Suivies en tickets GitHub : #1 verticalité (codée le 2026-10-07, non
-commitée à l'écriture, pas encore vue en jeu), #2 surbrillance du bloc
-visé, #3 HUD debug (FPS, chunks chargés), #4 interpolation caméra entre
+Suivies en tickets GitHub : #1 verticalité (`c95e74b`, pas encore vue en
+jeu), #2 surbrillance du bloc visé (validée en jeu), #3 HUD debug (FPS, chunks chargés), #4 interpolation caméra entre
 ticks (si le 64 Hz se sent), #5 build Windows natif (mingw-w64).
 
 Limitations assumées (ne pas « corriger » sans besoin) : palette non

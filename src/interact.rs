@@ -15,7 +15,8 @@ use bevy::prelude::*;
 
 use voxel_core::chunk::ChunkPos;
 use voxel_core::physics::Aabb;
-use voxel_core::raycast::raycast;
+use voxel_core::raycast::{raycast, RayHit};
+use voxel_core::world::VoxelWorld;
 
 use crate::player::{CursorCaptured, Player, PLAYER_HEIGHT_M, PLAYER_WIDTH_M, PlayerCamera};
 use crate::{held_label, DirtyChunks, GameWorld, HeldBlockText};
@@ -47,6 +48,40 @@ pub fn select_held_block(
 /// Portée de la main, en mètres (§2 — jamais « en blocs »).
 const REACH_M: f32 = 5.0;
 
+/// Le voxel visé depuis l'œil, à portée de main. Partagé par la pose/casse
+/// et la surbrillance : le contour montre exactement ce qu'un clic touchera.
+fn aim(world: &VoxelWorld, cam: &GlobalTransform) -> Option<RayHit> {
+    raycast(
+        world,
+        cam.translation().to_array(),
+        cam.forward().as_vec3().to_array(),
+        REACH_M,
+    )
+}
+
+/// Contour du voxel visé (gizmo, redessiné à chaque frame). Rien hors mode
+/// FPS — on ne peut pas interagir — ni quand le regard ne touche rien.
+pub fn highlight_target(
+    captured: Res<CursorCaptured>,
+    game: Res<GameWorld>,
+    camera: Query<&GlobalTransform, With<PlayerCamera>>,
+    mut gizmos: Gizmos,
+) {
+    if !captured.0 {
+        return;
+    }
+    let Ok(cam) = camera.single() else { return };
+    let Some(hit) = aim(&game.world, cam) else { return };
+    let size_m = 1.0 / game.world.voxels_per_meter();
+    let center = (Vec3::from_array(hit.voxel.map(|v| v as f32)) + 0.5) * size_m;
+    // Un poil plus grand que le voxel : sinon les lignes se confondent avec
+    // les faces et clignotent (z-fighting).
+    gizmos.cube(
+        Transform::from_translation(center).with_scale(Vec3::splat(size_m * 1.01)),
+        Color::BLACK,
+    );
+}
+
 pub fn interact(
     mouse: Res<ButtonInput<MouseButton>>,
     captured: Res<CursorCaptured>,
@@ -65,14 +100,7 @@ pub fn interact(
     }
     let Ok(cam) = camera.single() else { return };
 
-    let Some(hit) = raycast(
-        &game.world,
-        cam.translation().to_array(),
-        cam.forward().as_vec3().to_array(),
-        REACH_M,
-    ) else {
-        return;
-    };
+    let Some(hit) = aim(&game.world, cam) else { return };
 
     let edited: [i64; 3];
     let touched: Option<ChunkPos> = if breaking {
@@ -126,7 +154,7 @@ pub fn interact(
 }
 
 fn voxel_overlaps_player(
-    world: &voxel_core::world::VoxelWorld,
+    world: &VoxelWorld,
     voxel: [i64; 3],
     player_feet: Vec3,
 ) -> bool {

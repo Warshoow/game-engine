@@ -45,7 +45,12 @@ impl Plugin for PlayerPlugin {
             )
             .add_systems(
                 Update,
-                (toggle_fullscreen, crate::interact::select_held_block),
+                (
+                    toggle_fullscreen,
+                    crate::interact::select_held_block,
+                    // Après la pose/casse : le contour voit déjà le monde modifié.
+                    crate::interact::highlight_target.after(crate::interact::interact),
+                ),
             );
     }
 }
