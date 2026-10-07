@@ -84,9 +84,10 @@ headless, ~0 s), le binaire ne fait que brancher dans l'ECS.
 ## Vérifications avant de conclure une étape
 
 ```bash
-cargo test --workspace                    # 42 tests cœur + 1 streaming (headless)
+cargo test --workspace                    # 42 tests cœur + 2 streaming (headless)
 cargo clippy --workspace --all-targets    # zéro warning exigé
 cargo run                                 # smoke test à l'occasion
+cargo windows                             # .exe Windows (README, « Build Windows natif »)
 ```
 
 ⚠️ Ne jamais lire le succès d'un build via un pipe (`cargo build | tail`
@@ -175,7 +176,7 @@ jeu ».
 
 Suivies en tickets GitHub : #1 verticalité (`c95e74b`, pas encore vue en
 jeu), #2 surbrillance du bloc visé (validée en jeu), #3 HUD debug (FPS, chunks chargés — codé, pas encore vu en jeu), #4 interpolation caméra entre
-ticks + yaw appliqué à chaque frame (codé, pas encore vu en jeu), #5 build Windows natif (mingw-w64).
+ticks + yaw appliqué à chaque frame (codé, pas encore vu en jeu), #5 build Windows natif (`cargo windows`, .exe autonome ; validé en jeu par Warshow : fluide, contrairement à WSL).
 
 Limitations assumées (ne pas « corriger » sans besoin) : palette non
 compactée, re-mesh complet du chunk au moindre voxel, pas de persistance

@@ -44,6 +44,19 @@ On WSL2, rendering goes through llvmpipe (CPU) and the mouse has its quirks
 (see `docs/journal.md`, "La saga de la souris"). The game forces X11 and turns
 off cursor recentring automatically.
 
+### Native Windows build (from WSL)
+
+To play with the GPU and the real Windows mouse:
+
+```bash
+sudo apt install mingw-w64                 # once
+rustup target add x86_64-pc-windows-gnu    # once
+cargo windows                              # alias from .cargo/config.toml
+```
+
+The executable lands in `target/x86_64-pc-windows-gnu/release/voxel_engine.exe`;
+copy it to the Windows side (e.g. `/mnt/c/Users/<you>/`) and run it.
+
 ## Layout
 
 ```
