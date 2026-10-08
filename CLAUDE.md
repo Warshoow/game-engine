@@ -27,7 +27,7 @@ Les décisions de §5 sont **ouvertes** : suis les recos, signale si tu veux tra
 
 **La tranche verticale (§7) est faite et dépassée** : les trois piliers du cœur voxel sont construits — stockage paletté, greedy meshing (raccord inter-chunks), streaming autour du joueur. L'état exact, les invariants à ne pas casser et les pistes ouvertes sont dans **`docs/passation.md`** (à lire en début de session) ; l'historique raisonné dans `docs/journal.md`.
 
-On avance maintenant **jalon par jalon, arbitré avec Warshow** — propose, ne décide pas seul d'un gros chantier.
+On avance maintenant **jalon par jalon, arbitré avec Warshow** — propose, ne décide pas seul d'un gros chantier. L'ordre décidé des jalons est dans **`docs/jalons.md`**.
 
 Les **non-goals** de §7 restent non-goals tant que non arbitrés : éclairage réel, smooth/densité, véhicules, script runtime complet, persistance disque, UI riche, multi. Le data model les **prévoit** ; ne les code pas, même si l'occasion se présente.
 

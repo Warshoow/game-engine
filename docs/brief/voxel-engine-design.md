@@ -1,6 +1,6 @@
 # Moteur Voxel — Design du Socle
 
-> **Statut :** v0 — figé pour attaquer le prototypage.
+> **Statut :** v0.1 — v0 figé pour le prototypage ; 2026-10-07 : recettes (§3.1), cycle de vie des block-entities (§3.3), forme du comportement (§3.6).
 > **Nature :** ceci est un `intent/` — la source de vérité du socle. On lit **avant** d'écrire. Toute décision qui contredit ce doc doit d'abord **modifier ce doc** (avec sa justification), pas le contourner en douce dans le code.
 > **Portée :** ce document décrit un **socle**, pas un jeu. Aucun système de gameplay (survie, magie, armes, quêtes…) n'est spécifié ici. Le socle est le substrat sur lequel ces systèmes se branchent sans toucher au core.
 
@@ -73,6 +73,7 @@ Les règles transverses dont dérive tout le modèle de données.
 - **IDs entiers stables.** Chaque entrée a un ID entier stable pour la session. Les données voxel (palette) et la persistance référencent ces IDs. Le mapping `int ↔ identifier` ne change jamais après attribution.
 - **World-owned.** La définition complète d'une entrée (composants, apparence, comportement) est sérialisée **dans la save**, à côté des données voxel. La save n'est plus « quels blocs sont où » mais « quels blocs *existent* dans ce monde **+** où ». C'est ce qui permet à un contenu généré en runtime (par une IA, plus tard) d'exister sans registre statique externe.
 - **Kinds unifiés.** Bloc, item, mob, item au sol, véhicule : côté ECS ce sont tous des entités ; côté contenu, une seule table avec un champ `kind`. L'item et le bloc générés par IA sortent de la même table. Pas de registres séparés qui divergent.
+- **Les recettes sont une donnée de l'entrée qu'elles produisent** (ajout 2026-10-07). Une entrée peut porter zéro, une ou plusieurs recettes (entrées consommées, quantité produite, station requise éventuelle). Pas de kind `recipe` : une recette n'est pas une chose qui existe dans le monde, et la porter sur l'entrée produite rend un contenu généré **autonome** — une seule entrée à ajouter pour qu'un nouvel item existe *et* soit fabricable. Lister les recettes d'une station = parcourir le registre (même principe que la hotbar découverte).
 
 **Implémentation (piste).** Arène append-only, ou `Arc<RegistrySnapshot>` swappé en RCU à chaque ajout pour garder des lectures lock-free côté systèmes ECS.
 
@@ -94,6 +95,8 @@ Les règles transverses dont dérive tout le modèle de données.
 **Décision.** Un **canal séparé, creux**, `position → état riche`, pour les rares blocs qui ont une « âme ».
 
 Un coffre a un inventaire ; un bloc-IA peut avoir de l'état. Cet état ne peut **pas** vivre dans le tableau voxel dense (ça ferait exploser la RAM). Comme Minecraft : tableau dense pour « quel bloc », map creuse pour l'état riche des rares blocs concernés. C'est aussi ce que lit une fenêtre d'inventaire (§3.11).
+
+**Cycle de vie** (ajout 2026-10-07). L'entrée du registre déclare l'état initial de ses instances ; poser le bloc crée l'entrée creuse à sa position, le casser la supprime. Un bloc dont l'entrée ne déclare pas d'état n'a jamais de ligne dans le canal creux.
 
 **Coût de changement :** Day-1. Le split dense/creux structure le format.
 
@@ -131,7 +134,22 @@ Un coffre a un inventaire ; un bloc-IA peut avoir de l'état. Cet état ne peut 
 - **C'est le levier n°1** de « construire à l'envie » **et** ce qui rend la génération runtime possible. Le socle modulaire pur et le rêve « IA qui génère du contenu in-game » sont **la même architecture**. Cette contrainte discipline le core dès maintenant.
 - **Runtime précis : décision ouverte** (voir §5), mais la *forme* est figée : hooks événementiels + API capability-scoped.
 
-**Coût de changement :** Day-1 pour le principe (comportement = data/script). Le runtime concret est mou.
+**Forme précisée** (ajout 2026-10-07). Trois étages, du plus sûr au plus libre ; on ne monte d'un étage que quand un contenu concret ne s'exprime pas à l'étage du dessous.
+
+1. **Propriétés** — des primitives sans logique, lues par les systèmes du moteur (`solid` aujourd'hui ; `emits_light`, `flammable`… plus tard).
+2. **Règles « déclencheur → condition → effet »**, en donnée dans l'entrée. Le moteur code une fois chaque **hook** (utilisé, posé, cassé, tick, voisin modifié…), chaque condition et chaque effet (poser/retirer un voxel, faire apparaître un item, modifier l'état block-entity…) ; le contenu les combine. Des comportements que personne n'a codés naissent des combinaisons. C'est l'étage visé pour le contenu généré : une donnée se valide contre un schéma avant d'être acceptée.
+3. **Script** — quand une règle ne suffit pas (boucle, calcul, état complexe). Le texte du script vit **dans l'entrée, donc dans la save**, et il est appelé sur les mêmes hooks. Garde-fous non négociables :
+   - **API seulement** : le script ne voit que les fonctions que le moteur lui donne — ni fichiers, ni réseau, ni accès global au monde ;
+   - **portée** : il ne lit/écrit qu'autour de son bloc, rayon en mètres ;
+   - **budget** : nombre d'instructions borné par tick, coupé au-delà ;
+   - **erreur isolée** : un script qui plante désactive ce comportement et le signale, le jeu continue ;
+   - **déterminisme** (§2) : pas d'horloge ni de hasard libre — le hasard passe par l'API, dérivé de la seed.
+
+**Le vocabulaire est un contrat avec la save, append-only comme le registre.** Hooks, propriétés, conditions, effets et fonctions de l'API de script ne sont jamais renommés ni supprimés, seulement ajoutés. Une save qui cite un élément inconnu de cette version du moteur est **refusée au chargement**, avec un message qui le nomme — l'ignorer changerait en silence le comportement du monde.
+
+**La limite assumée :** un contenu, même scripté, ne fait que combiner ce que le moteur expose. Il invente de la logique, pas un nouveau rendu, un nouveau type de physique ou un nouveau genre de fenêtre. La surface du vocabulaire borne la créativité ; elle s'élargit quand un contenu concret en a besoin (§4).
+
+**Coût de changement :** Day-1 pour le principe (comportement = data/script) et pour le contrat append-only du vocabulaire. Le runtime concret et la surface exacte du vocabulaire sont mous.
 
 ### 3.7 Entités & sous-grilles mobiles (véhicules)
 
@@ -194,7 +212,7 @@ On ne les fige **pas**. On fige seulement la *forme* indiquée, et on laisse le 
 | Zone | Forme figée | Ce qui reste libre |
 |---|---|---|
 | **Internals UI** | l'UI lit le registre (§3.11) | thème, widgets, layout |
-| **API de script/mod** | hooks événementiels + API capability-scoped | la surface exacte (se découvre à l'usage) |
+| **API de script/mod** | hooks événementiels + API capability-scoped ; propriétés → règles → script (§3.6) ; vocabulaire append-only | la surface exacte (se découvre à l'usage) |
 | **Worldgen** | pipeline *pluggable* | richesse : noise → biome → features peut rester bête au début |
 | **Backend de persistance** | structure logique de la save (§3.10) | moteur : region-files vs `redb`/`sled` |
 | **Multijoueur** | déterminisme préserve la porte (§3.9) | **tout** — c'est de la v2 |
@@ -301,6 +319,10 @@ Ces non-goals sont *prévus par le data model* (§3) mais *pas implémentés* da
 | Résolution | `voxels_per_meter`, param de création gelé | Figé | Day-1 |
 | Gameplay | En mètres, jamais en blocs | Figé | — |
 | Comportement | Couche script/data, primitives composables | Figé | Day-1 |
+| Recettes | Donnée de l'entrée produite, pas de kind dédié | Figé (2026-10-07) | Day-1 |
+| Block-entities (vie) | État initial déclaré par l'entrée ; créé à la pose, supprimé à la casse | Figé (2026-10-07) | Day-1 |
+| Forme du comportement | Propriétés → règles déclencheur/condition/effet → script ; garde-fous script | Figé (2026-10-07) | Day-1 (forme) |
+| Vocabulaire | Append-only ; save à élément inconnu refusée | Figé (2026-10-07) | Day-1 |
 | Sous-grilles mobiles | Prévues au data model, espace/origine locaux | Figé | Day-1 |
 | Éclairage | Pas dans l'identité voxel (couche dérivée) | Figé (invariant) | Day-1 |
 | Simulation | Tick fixe déterministe / frame variable | Figé | Day-1 |
@@ -327,4 +349,7 @@ Ces non-goals sont *prévus par le data model* (§3) mais *pas implémentés* da
 - **Densité / SDF** — champ scalaire permettant une surface *smooth* (marching cubes / dual contouring / Transvoxel). Canal optionnel futur.
 - **Tick fixe** — pas de simulation à cadence constante, déterministe depuis la seed.
 - **Floating origin** — technique (non nécessaire ici) recentrant le monde pour préserver la précision float loin de l'origine.
+- **Hook** — événement du moteur auquel un comportement se branche (bloc utilisé, posé, cassé, tick…).
+- **Primitive** — brique de comportement codée dans le moteur et composée en donnée par le contenu : propriété, condition ou effet.
+- **Règle** — « quand (hook) / si (conditions) / faire (effets) », en donnée dans une entrée du registre.
 - **Capability-scoped** — API dont chaque capacité est explicitement accordée (principe de moindre privilège pour les scripts/mods).

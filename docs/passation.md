@@ -172,11 +172,17 @@ Proposé, non fait : ajouter à `CLAUDE.md` une règle « sans écran : prouver
 par `cargo test`/`clippy`, signaler dans la PR ce qui demande un test en
 jeu ».
 
-## Prochaines étapes (non arbitrées)
+## Prochaines étapes
 
-Suivies en tickets GitHub : #1 verticalité (`c95e74b`, pas encore vue en
-jeu), #2 surbrillance du bloc visé (validée en jeu), #3 HUD debug (FPS, chunks chargés — codé, pas encore vu en jeu), #4 interpolation caméra entre
-ticks + yaw appliqué à chaque frame (codé, pas encore vu en jeu), #5 build Windows natif (`cargo windows`, .exe autonome ; validé en jeu par Warshow : fluide, contrairement à WSL).
+Tickets #1 à #5 faits et fermés (verticalité, contour du bloc visé, HUD
+debug, caméra interpolée, build Windows — tous validés en jeu).
+
+**Ordre des jalons : `docs/jalons.md`** (décidé avec Warshow le
+2026-10-07) — 1. items et inventaire, 2. hooks et règles, 3. craft par
+proximité. Les décisions de socle correspondantes sont dans le design doc
+(§3.1 recettes, §3.3 cycle de vie des block-entities, §3.6 forme du
+comportement). Tickets ouverts hors jalons : #6 distance de vue, #7
+ambient occlusion, #8 persistance (à arbitrer).
 
 Limitations assumées (ne pas « corriger » sans besoin) : palette non
 compactée, re-mesh complet du chunk au moindre voxel, pas de persistance
