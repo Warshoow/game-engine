@@ -16,7 +16,8 @@ générés/déchargés autour du joueur). Les **trois jalons de gameplay** de
 plus les **textures** (jalon 4), la **sauvegarde sur disque** (jalon 5,
 items au sol compris), les **recettes sans station** et les **fenêtres de
 jeu** avec le menu de fabrication (#45, #46).
-Dernier commit de code : `4005d35` (recettes sans station).
+Plus le **rechargement du contenu en jeu** (touche R, #17).
+Dernier commit de code : `e4c03bb` (#17).
 
 1. Chunk généré depuis la seed (heightmap fBm maison, pierre sous 1 m de
    sol, **grottes** par bruit 3D, déterministe), **en continu autour du
@@ -281,15 +282,20 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   jeu par Warshow. Ticket #44 (textures générées par IA) ouvert.
 - Complément du jalon 5 : items au sol sauvés (`9b91d4d`). Recettes sans
   station + touche C (`4005d35`), validé sous Windows.
-- Tickets ouverts : #45 base commune des fenêtres/menus (epic #43, lève
-  « UI riche »), #46 menu de fabrication pour choisir la recette (epic
-  #38, dépend de #45).
-- Poussé jusqu'à `4005d35` ; le commit de docs qui suit ne l'est pas.
+- Ordre de tous les tickets ouverts décidé (`docs/jalons.md`, « Suite »).
+  Design doc §2 : principe « le moteur fournit des mécanismes, le contenu
+  fait le jeu » ; commits en anglais (`CLAUDE.md`).
+- Fenêtres de jeu + menu de fabrication (`26d8a70`, #45 #46) ;
+  rechargement du contenu, touche R (`e4c03bb`, #17). Validés sous Windows.
+- Poussé jusqu'à `26d8a70` ; `e4c03bb` et ce commit de docs ne le sont pas.
 
 ## Prochaines étapes
 
 Ordre décidé avec Warshow (2026-10-08) : **`docs/jalons.md`, « Suite :
-ordre des tickets ouverts »**. #45, #46 et #17 faits ; suivant : #18 + #44 (contenu IA).
+ordre des tickets ouverts »**. #45, #46 et #17 faits ; suivant : **#18 + #44 (contenu généré par IA en
+jeu)** — surtout de la conception : qui déclenche, quel modèle, validation
+d'une entrée avant acceptation, texture (3 options dans #44). Présenter une
+reco tranchée à Warshow avant de coder.
 Principe (design doc §2) : le moteur fournit des mécanismes, `core.ron`
 n'est qu'un jeu d'exemple. Mipmaps si les textures scintillent au loin.
 
