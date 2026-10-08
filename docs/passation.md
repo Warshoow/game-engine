@@ -14,7 +14,7 @@ sous llvmpipe), et **streaming** (§3.4 : monde qui démarre vide, chunks
 générés/déchargés autour du joueur). Les **trois jalons de gameplay** de
 `docs/jalons.md` sont faits (items/inventaire, règles, craft sur l'établi),
 plus les **textures** (jalon 4) et la **sauvegarde sur disque** (jalon 5).
-Dernier commit : celui du jalon 5 (#8).
+Dernier commit de code : `3a60009` (jalon 5, #8).
 
 1. Chunk généré depuis la seed (heightmap fBm maison, pierre sous 1 m de
    sol, **grottes** par bruit 3D, déterministe), **en continu autour du
@@ -153,6 +153,16 @@ retourne le code de `tail`). Vérifier `EXIT=$?` explicitement.
   `git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push https://github.com/Warshoow/game-engine.git master`.
 - **`rtk`** (proxy de sortie) masque parfois la sortie de `cargo test` /
   `cargo run` : préfixer `rtk proxy` pour voir la sortie brute.
+- **Exe de debug** : `target/debug/voxel_engine` lancé directement échoue
+  (`libbevy_dylib…so` introuvable, linking dynamique) → passer par
+  `cargo run`.
+- **Voir le rendu sous WSL** : `xwd` échoue sous WSLg. Ajouter un système
+  temporaire qui spawn `Screenshot::primary_window()` avec
+  `.observe(save_to_disk(path))` après ~25 s, lancer, lire le PNG, puis
+  retirer le code (fait pour vérifier les textures).
+- **Save locale** : `cargo run` lit/écrit `saves/world/` à la racine du
+  dépôt (gitignoré) ; l'effacer pour un monde neuf, notamment si un test
+  dépend du terrain généré.
 - **Piège ECS** : les entités spawnées via `Commands` ne sont visibles dans
   les `Query` qu'à la frame suivante — d'où `DirtyChunks` + un seul système
   de meshing (`remesh_dirty`), voir les invariants.
@@ -231,15 +241,16 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   règles (#10), jalon 3 craft sur l'établi + block-entities (#11, #13
   fusionné), jalon 4 textures (#21), jalon 5 save (#8). Tous validés en
   jeu par Warshow. Ticket #44 (textures générées par IA) ouvert.
-- **Non poussé** : `40fde67` (#10) et `c2155c6` (#11) — `origin/master` est
-  à `828667c`.
+- Tout est poussé (`origin/master` = `3a60009`, jalon 5).
 
 ## Prochaines étapes
 
-À choisir avec Warshow (proposé en fin de session, pas encore tranché) :
+À choisir avec Warshow (proposé en fin de session, pas encore tranché ;
+reco donnée : l'établi d'abord, puis les biomes) :
 - **Recette de l'établi sans établi** — aujourd'hui il ne s'obtient que
   par G (debug) ; seul manque pour un craft sans triche.
 - **#27 biomes/décor** ; mipmaps si les textures scintillent au loin.
+- Sauver les items au sol (complément du jalon 5).
 - Restent ouverts : #6 distance de vue, #7 AO, #12 Lua, #14/#15 modèles,
   et le reste des epics.
 
