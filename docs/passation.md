@@ -250,10 +250,9 @@ reco donnée : l'établi d'abord, puis les biomes) :
 - **Recette de l'établi sans établi** — aujourd'hui il ne s'obtient que
   par G (debug) ; seul manque pour un craft sans triche.
 - **#27 biomes/décor** ; mipmaps si les textures scintillent au loin.
-- Sauver les items au sol (complément du jalon 5).
 - Restent ouverts : #6 distance de vue, #7 AO, #12 Lua, #14/#15 modèles,
   et le reste des epics.
 
 Limitations assumées (ne pas « corriger » sans besoin) : palette non
 compactée, re-mesh complet du chunk au moindre voxel, chunks sauvés sans
-compression, items au sol non sauvés, full-bright.
+compression, items au sol sauvés sans leur vitesse, full-bright.

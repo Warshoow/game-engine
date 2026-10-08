@@ -6,7 +6,8 @@
 //! - `registry.ron` : le registre complet, pixels compris (§3.1) ;
 //! - `chunks/x_y_z.bin` : un fichier par chunk **modifié**, block-entities
 //!   comprises. Un chunk absent se régénère depuis la seed ;
-//! - `player.ron` : position, regard, inventaire.
+//! - `player.ron` : position, regard, inventaire ;
+//! - `items.ron` : les items au sol (entrée + position des pieds, en mètres).
 //!
 //! Écritures atomiques (fichier temporaire puis renommage) : un arrêt en
 //! pleine écriture laisse l'ancienne version, jamais un fichier tronqué.
@@ -46,6 +47,10 @@ pub struct PlayerSave {
     /// Case choisie (`inventory.len()` = main vide).
     pub selected: usize,
 }
+
+/// Items au sol : entrée et position des pieds en mètres. La vitesse n'est
+/// pas gardée : un item sauvé en pleine chute repart à l'arrêt.
+pub type DroppedItems = Vec<(ContentId, [f32; 3])>;
 
 /// Block-entities d'un chunk : position locale → items posés.
 pub type ChunkEntities = Vec<([u32; 3], Vec<ContentId>)>;
@@ -93,6 +98,15 @@ impl Save {
 
     pub fn write_player(&self, player: &PlayerSave) -> Result<(), String> {
         self.write_ron("player.ron", player)
+    }
+
+    /// Absent (monde neuf ou sans items) : aucun item.
+    pub fn read_items(&self) -> Result<DroppedItems, String> {
+        Ok(self.read_ron("items.ron")?.unwrap_or_default())
+    }
+
+    pub fn write_items(&self, items: &DroppedItems) -> Result<(), String> {
+        self.write_ron("items.ron", items)
     }
 
     /// Le chunk `pos` s'il a été sauvé ; `None` s'il est à générer.
@@ -291,6 +305,11 @@ mod tests {
         let player = PlayerSave { feet: [1.0, 2.0, 3.0], yaw: 0.5, pitch: -0.2, inventory: vec![(bench, 3)], selected: 1 };
         save.write_player(&player).unwrap();
         assert_eq!(save.read_player().unwrap(), Some(player));
+
+        assert_eq!(save.read_items().unwrap(), vec![], "pas encore de fichier");
+        let items = vec![(bench, [0.5, 4.0, -2.5])];
+        save.write_items(&items).unwrap();
+        assert_eq!(save.read_items().unwrap(), items);
 
         save.write_ron("world.ron", &WorldMeta { format: 99, seed: 0, voxels_per_meter: 1.0, chunk_size: 8 }).unwrap();
         assert!(save.read_meta().is_err(), "autre version refusée");

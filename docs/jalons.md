@@ -110,9 +110,11 @@ backend v1 décidés dans §3.10.
 - **Fait quand :** quitter puis relancer retrouve les blocs posés/cassés,
   le contenu des établis, la position et l'inventaire ; tests headless
   (aller-retour d'un chunk, du registre, fusion avec `core.ron`).
-- Pas sauvés : les items au sol. Un seul monde, pas de menu : effacer
-  `saves/world/` pour repartir de zéro.
+- Un seul monde, pas de menu : effacer `saves/world/` pour repartir de
+  zéro.
 - *Fait et validé en jeu (Windows) le 2026-10-08 (#8).*
+- Complément : items au sol dans `items.ron` (entrée + position, sans la
+  vitesse), au même rythme que le joueur.
 
 ## Plus tard (non ordonné)
 

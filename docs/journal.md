@@ -618,3 +618,23 @@ Régénérer un chunk illisible l'aurait écrasé au prochain édit.
 **Tests.** Aller-retour d'un chunk avec établi, chunk corrompu refusé,
 métadonnées et joueur, registre (aller-retour, fusion, vocabulaire
 inconnu), streaming qui relit un chunk sauvé. 65 tests, clippy propre.
+
+## 2026-10-08 (suite) — Items au sol sauvés (complément du jalon 5)
+
+**Un fichier, pas dans les chunks.** `items.ron` : la liste des items au
+sol (entrée, position des pieds en mètres). Les ranger dans le fichier de
+leur chunk aurait demandé de réécrire le chunk à chaque chute ou ramassage,
+et les items ne se déchargent pas avec leur chunk (ils restent des
+entités, juste figés) : une liste globale suffit. À revoir si les items
+se comptent par milliers.
+
+**Même rythme que le joueur** (toutes les 5 s et à la fermeture) : un item
+bouge à chaque tick, l'écrire à chaque changement serait de l'écriture
+continue. On perd au pire 5 s de chute ou un ramassage — qui est aussi
+dans l'inventaire, sauvé au même moment, donc pas de duplication.
+
+**Sans la vitesse.** Un item sauvé en l'air repart à l'arrêt et retombe :
+invisible en pratique. Nouveau fichier optionnel (absent = aucun item) :
+les saves existantes restent lisibles, `FORMAT_VERSION` ne bouge pas.
+Illisible : erreur dans le log, items perdus, monde gardé (comme le
+joueur).

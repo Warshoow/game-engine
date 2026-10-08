@@ -116,7 +116,7 @@ fn main() {
         .init_resource::<items::StorageChanged>()
         .add_systems(
             Startup,
-            (setup_world, player::spawn_player, save::restore_player, inventory::spawn_hotbar).chain(),
+            (setup_world, player::spawn_player, save::restore_player, save::restore_items, inventory::spawn_hotbar).chain(),
         )
         // Pose/casse puis streaming notent les chunks sales ; on meshe après.
         .add_systems(
@@ -134,7 +134,7 @@ fn main() {
                 save::save_edited_chunks.after(interact::interact),
             ),
         )
-        .add_systems(Last, save::save_player.after(bevy::window::ExitSystems))
+        .add_systems(Last, save::save_player_and_items.after(bevy::window::ExitSystems))
         .add_systems(
             FixedUpdate,
             items::simulate_items.after(player::physics_step),

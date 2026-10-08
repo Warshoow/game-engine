@@ -87,8 +87,7 @@ Never reorder or remove entries: their position is their ID.
 
 The world is saved in `saves/world/` (next to `Cargo.toml`, or next to the
 `.exe`): placed and broken blocks, workbench contents, player position and
-inventory. Delete the folder to start a new world. Items lying on the ground
-are not saved.
+inventory, items lying on the ground. Delete the folder to start a new world.
 
 ## Layout
 

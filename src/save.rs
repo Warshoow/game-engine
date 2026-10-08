@@ -1,17 +1,19 @@
 //! Persistance côté app (jalon 5, #8) : branche `voxel_core::save` sur
 //! l'ECS. Le monde est chargé dans `setup_world` (main.rs), les chunks par
-//! le streaming ; ici, ce qui écrit, et la restauration du joueur.
+//! le streaming ; ici, ce qui écrit, et la restauration du joueur et des
+//! items au sol.
 
 use bevy::prelude::*;
 
 use voxel_core::save::{PlayerSave, Save};
 
 use crate::inventory::Inventory;
+use crate::items::{DroppedItem, ItemVisual};
 use crate::player::{Player, PlayerCamera};
 use crate::GameWorld;
 
-/// Toutes les combien de secondes le joueur est écrit (en plus de la
-/// fermeture) : ce qu'on perd au pire si le jeu plante.
+/// Toutes les combien de secondes joueur et items au sol sont écrits (en
+/// plus de la fermeture) : ce qu'on perd au pire si le jeu plante.
 const PLAYER_SAVE_PERIOD_S: f32 = 5.0;
 
 /// Le dossier du monde en cours. Absent (tests) : rien n'est lu ni écrit.
@@ -29,15 +31,18 @@ pub fn save_edited_chunks(mut game: ResMut<GameWorld>, save: Option<Res<WorldSav
     }
 }
 
-/// Écrit position, regard et inventaire : périodiquement, et à la
-/// fermeture (le `AppExit` est émis dans `Last`, d'où l'ordre).
-pub fn save_player(
+/// Écrit le joueur (position, regard, inventaire) et les items au sol :
+/// périodiquement, et à la fermeture (le `AppExit` est émis dans `Last`,
+/// d'où l'ordre). Les items bougent sans cesse (chute, ramassage) : les
+/// écrire au même rythme que le joueur plutôt qu'à chaque changement.
+pub fn save_player_and_items(
     time: Res<Time>,
     mut since: Local<f32>,
     mut exit: MessageReader<AppExit>,
     save: Option<Res<WorldSave>>,
     player: Query<&Player>,
     inventory: Res<Inventory>,
+    items: Query<&DroppedItem>,
 ) {
     *since += time.delta_secs();
     let exiting = exit.read().count() > 0;
@@ -45,7 +50,12 @@ pub fn save_player(
         return;
     }
     *since = 0.0;
-    let (Some(save), Ok(player)) = (save, player.single()) else { return };
+    let Some(save) = save else { return };
+    let dropped = items.iter().map(|i| (i.content, i.feet().to_array())).collect();
+    if let Err(err) = save.0.write_items(&dropped) {
+        error!("sauvegarde des items au sol impossible : {err}");
+    }
+    let Ok(player) = player.single() else { return };
     let (yaw, pitch) = player.look();
     let (inventory, selected) = inventory.to_save();
     let state = PlayerSave { feet: player.feet().to_array(), yaw, pitch, inventory, selected };
@@ -79,4 +89,18 @@ pub fn restore_player(
         cam.rotation = Quat::from_rotation_x(state.pitch);
     }
     inventory.restore(state.inventory, state.selected);
+}
+
+/// Refait apparaître les items au sol sauvés.
+pub fn restore_items(mut commands: Commands, save: Option<Res<WorldSave>>) {
+    let Some(save) = save else { return };
+    let items = match save.0.read_items() {
+        Ok(items) => items,
+        // Comme le joueur : illisible, on perd les items plutôt que le monde.
+        Err(err) => return error!("items au sol non restaurés : {err}"),
+    };
+    for (id, feet) in items {
+        let item = DroppedItem::restored(id, Vec3::from_array(feet));
+        commands.spawn((item, ItemVisual(id), Transform::default()));
+    }
 }

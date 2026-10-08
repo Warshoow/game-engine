@@ -43,6 +43,15 @@ impl DroppedItem {
             velocity: Vec3::Y * POP_SPEED_M_S,
         }
     }
+
+    /// Item relu dans une save : posé à ses pieds, sans saut.
+    pub fn restored(content: ContentId, feet: Vec3) -> Self {
+        Self { content, feet, velocity: Vec3::ZERO }
+    }
+
+    pub fn feet(&self) -> Vec3 {
+        self.feet
+    }
 }
 
 /// Gravité + collision, puis ramassage. Tick fixe.
