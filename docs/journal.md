@@ -660,3 +660,29 @@ Pas de choix si plusieurs sont faisables : un menu le jour où ça gêne.
 
 **Tests.** `craftable` (inventaire suffisant ou non, recette à station
 exclue et inversement), `Inventory::remove` garde la sélection.
+
+## 2026-10-08 (suite) — Fenêtres de jeu et menu de fabrication (#45, #46)
+
+**Pourquoi les deux ensemble.** #45 est la base commune des fenêtres ; sans
+fenêtre concrète, rien ne la prouve (règle d'or : le socle se prouve en
+portant du concret). Le menu de fabrication (#46) est sa première fenêtre.
+
+**Une fenêtre = une entité.** `ui::open` crée une racine `GameWindow` en
+fermant celle déjà ouverte : une seule à la fois, pas de pile tant que
+rien n'en a besoin. Pas de ressource « fenêtre ouverte » à tenir à jour :
+l'existence de l'entité *est* l'état, impossible de désynchroniser les deux.
+
+**La souris.** Le jeu avait déjà sa source de vérité, `CursorCaptured`
+(mode FPS voulu). Une fenêtre ouverte le passe à faux dans `cursor_grab`,
+et le clic ne recapture plus tant qu'elle est là — il sert à cliquer
+dedans. Visée, pose/casse et molette lisaient déjà `CursorCaptured` ; le
+déplacement non (on marchait souris libérée) : corrigé, la gravité
+continue.
+
+**Le menu.** Réflexif du registre (§3.11) : une ligne par recette sans
+station (`crafting::without_station`), grisée si `inputs_from` dit que
+les items manquent. Reconstruit à l'ouverture et quand l'inventaire
+change, plutôt que synchronisé ligne par ligne (même choix que la barre).
+Un clic est lu via `Interaction` de `bevy_ui` (composant `Button`).
+`crafting::craftable` (« la première faisable ») disparaît : le joueur
+choisit.

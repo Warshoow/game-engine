@@ -47,7 +47,7 @@ cargo run
 | Mouse wheel | change the held block (the last slot is an empty hand) |
 | WASD + Space | move / jump |
 | F | fullscreen |
-| C | craft from the inventory (first recipe without a station you can make) |
+| C | crafting menu: recipes without a station, click one to craft it (Esc closes) |
 | G | debug: one of every solid block |
 | Esc | release the mouse |
 
@@ -84,8 +84,8 @@ and the lamp in `core.ron`.
 image covers 1 m and repeats across large faces. A block without a texture is
 drawn in its `color`, which items also use.
 
-**Crafting.** A recipe without `station` is crafted from the inventory with
-C — that is how you get the workbench (2 dirt + 2 stone):
+**Crafting.** A recipe without `station` is crafted from the inventory in the
+crafting menu (C) — that is how you get the workbench (2 dirt + 2 stone):
 `recipes: [(inputs: ["core:dirt", "core:dirt", "core:stone", "core:stone"])]`.
 Other recipes happen *on* the workbench (`core:workbench`): right
 click with an item in hand puts it on the bench; right click with an empty
@@ -109,7 +109,8 @@ src/                  Bevy binary: plugs the core into the ECS
   interact.rs         place/break/use, applies block rules
   streaming.rs        loading/unloading chunks (read from the save, else generated)
   items.rs            items on the ground, items shown on a workbench
-  inventory.rs        inventory, hotbar, C (craft), G (debug)
+  inventory.rs        inventory, hotbar, crafting menu (C), G (debug)
+  ui.rs               game windows: one at a time, frees the mouse, shared item slot
   save.rs             save writes and player/items restore
 assets/               content (core.ron), textures (PNG), shaders (voxel.wgsl)
 crates/voxel_core/    the WHOLE voxel core: pure, no Bevy dependency

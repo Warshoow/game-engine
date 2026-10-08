@@ -121,8 +121,55 @@ backend v1 décidés dans §3.10.
 L'établi ne s'obtenait que par G (debug). Une recette peut omettre
 `station` (§3.1) : elle se fait depuis l'inventaire avec C, première
 faisable dans l'ordre du registre. Recette de l'établi : une ligne de
-`core.ron`. *Fait et validé en jeu (Windows) le 2026-10-08.* Suite :
-choisir la recette dans un menu (#46, après #45).
+`core.ron`. *Fait et validé en jeu (Windows) le 2026-10-08.* Remplacé par
+le menu de fabrication (#46).
+
+## Complément — Fenêtres de jeu et menu de fabrication (#45, #46)
+
+**Lève :** « UI riche » (§7). Base commune (`ui.rs`) : une fenêtre à la
+fois, qui libère la souris et coupe déplacement, visée et interaction ;
+Échap ferme ; case d'item partagée avec la barre. Portée par sa première
+fenêtre concrète : C ouvre la liste des recettes sans station (registre),
+grisées si les items manquent, clic = fabriquer. *Fait et validé en jeu
+(Windows) le 2026-10-08.*
+
+## Suite : ordre des tickets ouverts
+
+Décidé avec Warshow le 2026-10-08. Principe : d'abord ce qui débloque le
+reste, puis le but du projet (contenu généré en jeu), la performance
+quand une mesure la réclame.
+
+1. **#45 puis #46** — fenêtres, puis menu de fabrication. #45 débloque le
+   choix de recette, l'inventaire complet, le contenu d'un établi ou d'un
+   coffre, le menu principal (#42).
+2. **#17 rechargement du contenu en cours de partie** — ajouter une
+   entrée en pleine partie demande de refaire textures et meshes sans
+   relancer. C'est la marche vers le contenu IA, et utile tout de suite.
+3. **#18 + #44 contenu généré par IA en jeu** — le but du design doc et
+   le vrai test du principe « mécanismes, pas règles de jeu » (§2).
+   Après #17, c'est surtout valider une entrée générée contre le format.
+4. **#27 biomes, arbres, minerais** — des ressources à trouver donnent un
+   sens aux recettes. Arbres à feuilles opaques en attendant #22.
+5. **#22 → #34 → #28** — blocs transparents, puis blocs qui changent seuls
+   au tick, puis eau et lave (dépend des deux premiers).
+6. **#23 éclairage réel + #7 coins de grottes assombris, puis #30
+   jour/nuit** — le jour/nuit n'a de sens qu'avec un vrai éclairage.
+7. **#14 / #15 → #32 → #33** — formes non cubiques et modèles, puis mobs,
+   puis vie et survie. #33 est un choix de jeu : du contenu que `core.ron`
+   active, pas une règle du moteur.
+
+**Quand le besoin apparaît, pas dans l'ordre :**
+- #41 profilage : dès que le build Windows saccade ;
+- #39 génération et meshing sur d'autres threads, puis #6 / #24 distance
+  de vue : dans cet ordre, voir loin coûte des chunks ;
+- #40 mémoire des chunks : mesurer avant ;
+- #12 Lua : quand un bloc ne s'exprime pas en règles ;
+- #19 console de debug (egui) : à glisser dès que téléporter ou changer
+  de seed manque.
+
+**Pas planifiés :** #25 terrain lisse, #29 bord du monde, #35 véhicules,
+#36 multijoueur, #37 audio, #42 menu principal (après #45, faible
+priorité).
 
 ## Plus tard (non ordonné)
 
@@ -137,6 +184,3 @@ choisir la recette dans un menu (#46, après #45).
   mesher, découpée en parties avec pivot pour l'animation (plutôt que du
   glTF, qui vivrait hors de la save). Taille du modèle en mètres,
   indépendante de la résolution du monde ; collision séparée du visuel.
-- Distance de vue (#6), ambient occlusion (#7).
-- **Fenêtres et menus** (#45) puis menu de fabrication (#46) — lèvent
-  « UI riche » (§7).

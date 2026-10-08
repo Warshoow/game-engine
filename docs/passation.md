@@ -14,7 +14,8 @@ sous llvmpipe), et **streaming** (§3.4 : monde qui démarre vide, chunks
 générés/déchargés autour du joueur). Les **trois jalons de gameplay** de
 `docs/jalons.md` sont faits (items/inventaire, règles, craft sur l'établi),
 plus les **textures** (jalon 4), la **sauvegarde sur disque** (jalon 5,
-items au sol compris) et les **recettes sans station** (touche C).
+items au sol compris), les **recettes sans station** et les **fenêtres de
+jeu** avec le menu de fabrication (#45, #46).
 Dernier commit de code : `4005d35` (recettes sans station).
 
 1. Chunk généré depuis la seed (heightmap fBm maison, pierre sous 1 m de
@@ -29,8 +30,8 @@ Dernier commit de code : `4005d35` (recettes sans station).
 4. **Contenu en donnée** dans `assets/content/core.ron` (blocs, drops,
    règles, recettes) ; **règles** déclencheur → condition → effet (lampe) ;
    **établi** : on pose les items dessus, main vide → fabrique ; une
-   recette **sans `station`** se fait depuis l'inventaire (touche C, la
-   première faisable dans l'ordre du registre) — c'est ainsi qu'on obtient
+   recette **sans `station`** se fait depuis l'inventaire, dans le menu de
+   fabrication (touche C, clic sur la recette) — c'est ainsi qu'on obtient
    l'établi (2 terre + 2 pierre).
 5. **Textures** (texture array, PNG de `assets/textures/` nommés par
    l'entrée, pixels gardés dans le registre ; 1 image = 1 m, répétée sur
@@ -47,8 +48,8 @@ Dernier commit de code : `4005d35` (recettes sans station).
 
 `cargo run` → clic gauche pour jouer, WASD/Espace, clic gauche casse,
 clic droit utilise (bloc à règle `Used`) ou pose, Maj+clic droit pose
-toujours, molette change la case, C fabrique depuis l'inventaire (recettes
-sans `station`), G debug, Échap libère la souris, F plein
+toujours, molette change la case, C ouvre le menu de fabrication
+(recettes sans `station`), G debug, Échap libère la souris, F plein
 écran. **Pour juger le ressenti : build Windows** (`cargo windows`, ~10-16
 min ; copier l'exe ET `assets/` dans `Téléchargements\voxel_engine\`). Sous
 WSL le rendu est logiciel et rame — normal.
@@ -74,6 +75,10 @@ WSL le rendu est logiciel et rame — normal.
   les 5 s et sur `AppExit`. Une save illisible arrête le jeu, jamais
   écrasée. Changer un format → incrémenter `save::FORMAT_VERSION` ; un
   fichier nouveau et optionnel (comme `items.ron`) n'en a pas besoin.
+- **Fenêtres** (`ui.rs`) : une entité `GameWindow`, une seule à la fois
+  (`ui::open` ferme l'autre). Tant qu'elle existe, `cursor_grab` libère la
+  souris et ne recapture pas au clic ; tout système d'entrée du jeu doit
+  lire `CursorCaptured` (déplacement, visée, pose/casse, molette le font).
 - **RON lu avec `IMPLICIT_SOME`** (`registry::parse`) : un champ
   `Option` s'écrit sans `Some(…)`. Ne pas revenir à `ron::from_str` (les
   saves dont la recette s'écrit `station: "…"` ne se reliraient plus).
@@ -123,7 +128,8 @@ src/player.rs         contrôleur FPS : simu en FixedUpdate, regard/curseur en U
 src/interact.rs       pose/casse/utilisation : raycast, règles, re-mesh du chunk touché (+ voisin si bordure)
 src/streaming.rs      charge/décharge les chunks (relit la save, sinon génère)
 src/items.rs          items au sol (tick fixe) et cubes posés sur les blocs
-src/inventory.rs      inventaire, barre, touche C (craft), G (debug)
+src/inventory.rs      inventaire, barre, menu de fabrication (C), G (debug)
+src/ui.rs             fenêtres de jeu : une à la fois, souris libérée, case d'item partagée
 src/save.rs           branche voxel_core::save sur l'ECS (écritures, restauration)
 assets/content/       core.ron (le contenu) ; assets/textures/ (PNG) ; assets/shaders/voxel.wgsl
 crates/voxel_core/    TOUT le cœur voxel, PUR (zéro dépendance Bevy, testable headless)
@@ -277,14 +283,10 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
 
 ## Prochaines étapes
 
-À choisir avec Warshow. Principe posé par Warshow (2026-10-08) : le moteur
-ne fige pas une manière de jouer — il fournit des mécanismes, `core.ron`
-n'est qu'un jeu d'exemple, remplaçable sans toucher au Rust.
-- **#45 puis #46** : fenêtres, puis menu de fabrication (C fait
-  aujourd'hui la première recette faisable, sans choix).
-- **#27 biomes/décor** ; mipmaps si les textures scintillent au loin.
-- Restent ouverts : #6 distance de vue, #7 AO, #12 Lua, #14/#15 modèles,
-  et le reste des epics.
+Ordre décidé avec Warshow (2026-10-08) : **`docs/jalons.md`, « Suite :
+ordre des tickets ouverts »**. #45 et #46 faits ; suivant : #17.
+Principe (design doc §2) : le moteur fournit des mécanismes, `core.ron`
+n'est qu'un jeu d'exemple. Mipmaps si les textures scintillent au loin.
 
 Limitations assumées (ne pas « corriger » sans besoin) : palette non
 compactée, re-mesh complet du chunk au moindre voxel, chunks sauvés sans

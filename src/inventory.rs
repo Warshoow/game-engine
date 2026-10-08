@@ -15,6 +15,7 @@ use voxel_core::crafting;
 use voxel_core::registry::{ContentId, Kind, Registry};
 
 use crate::player::CursorCaptured;
+use crate::ui;
 use crate::{GameWorld, HeldBlockText};
 
 #[derive(Resource, Default)]
@@ -97,21 +98,104 @@ pub fn scroll_selection(
     }
 }
 
-/// Touche C : fabrique depuis l'inventaire la première recette sans
-/// station faisable (§3.1). Le moteur ne connaît aucune recette : elles
-/// viennent du registre.
-pub fn craft_from_inventory(
+/// Menu de fabrication (#46), fenêtre de `ui.rs`.
+#[derive(Component)]
+pub struct CraftMenu;
+
+/// Une ligne du menu : la `n`-ième recette sans station
+/// (`crafting::without_station`, ordre du registre).
+#[derive(Component)]
+pub struct RecipeButton(usize);
+
+/// Touche C : ouvre ou ferme le menu de fabrication.
+pub fn toggle_craft_menu(
+    mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
-    captured: Res<CursorCaptured>,
-    game: Res<GameWorld>,
-    mut inventory: ResMut<Inventory>,
+    opened: Query<Entity, With<ui::GameWindow>>,
+    menu: Query<Entity, With<CraftMenu>>,
 ) {
-    if !captured.0 || !keys.just_pressed(KeyCode::KeyC) {
+    if !keys.just_pressed(KeyCode::KeyC) {
         return;
     }
-    let Some((product, count, used)) = crafting::craftable(&game.world.registry, &inventory.slots) else { return };
-    used.into_iter().for_each(|id| inventory.remove(id));
-    (0..count).for_each(|_| inventory.add(product));
+    match menu.single() {
+        Ok(menu) => {
+            commands.entity(menu).despawn();
+        }
+        Err(_) => {
+            let window = ui::open(&mut commands, &opened, "Fabrication");
+            commands.entity(window).insert(CraftMenu);
+        }
+    }
+}
+
+/// Remplit le menu à son ouverture et quand l'inventaire change : une
+/// ligne par recette sans station, grisée si les items manquent. Tout vient
+/// du registre — une recette ajoutée au contenu apparaît sans code.
+pub fn fill_craft_menu(
+    mut commands: Commands,
+    game: Res<GameWorld>,
+    inventory: Res<Inventory>,
+    menu: Query<(Entity, Ref<CraftMenu>)>,
+    rows: Query<Entity, With<RecipeButton>>,
+) {
+    let Ok((menu, added)) = menu.single() else { return };
+    if !added.is_added() && !inventory.is_changed() {
+        return;
+    }
+    for row in &rows {
+        commands.entity(row).despawn();
+    }
+    let registry = &game.world.registry;
+    let recipes: Vec<_> = crafting::without_station(registry).collect();
+    if recipes.is_empty() {
+        commands.entity(menu).with_child((RecipeButton(0), Text::new("aucune recette sans station")));
+        return;
+    }
+    commands.entity(menu).with_children(|list| {
+        for (n, (product, recipe)) in recipes.into_iter().enumerate() {
+            let makeable = crafting::inputs_from(registry, recipe, &inventory.slots).is_some();
+            list.spawn((
+                RecipeButton(n),
+                Button,
+                Node { column_gap: Val::Px(6.0), padding: UiRect::all(Val::Px(4.0)), align_items: AlignItems::Center, ..default() },
+                BackgroundColor(if makeable { Color::srgb(0.25, 0.35, 0.25) } else { Color::srgb(0.2, 0.2, 0.2) }),
+            ))
+            .with_children(|row| {
+                row.spawn(ui::slot(registry, product, recipe.count, Color::BLACK));
+                row.spawn(Text::new(format!("{}  ←", identifier(registry, product))));
+                // Entrées groupées par entrée, dans l'ordre de la recette.
+                let mut inputs: Vec<(ContentId, u32)> = Vec::new();
+                for id in recipe.inputs.iter().filter_map(|s| registry.lookup(s)) {
+                    match inputs.iter_mut().find(|(c, _)| *c == id) {
+                        Some((_, n)) => *n += 1,
+                        None => inputs.push((id, 1)),
+                    }
+                }
+                for (id, count) in inputs {
+                    row.spawn(ui::slot(registry, id, count, Color::BLACK));
+                }
+            });
+        }
+    });
+}
+
+/// Clic sur une recette faisable : consomme ses entrées, ajoute le produit.
+/// Le menu reste ouvert (l'inventaire change → il se remplit à nouveau).
+pub fn click_recipe(
+    game: Res<GameWorld>,
+    mut inventory: ResMut<Inventory>,
+    clicked: Query<(&Interaction, &RecipeButton), Changed<Interaction>>,
+) {
+    for (interaction, &RecipeButton(n)) in &clicked {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        let registry = &game.world.registry;
+        let Some((product, recipe)) = crafting::without_station(registry).nth(n) else { continue };
+        let Some(used) = crafting::inputs_from(registry, recipe, &inventory.slots) else { continue };
+        used.into_iter().for_each(|id| inventory.remove(id));
+        (0..recipe.count).for_each(|_| inventory.add(product));
+    }
 }
 
 /// Debug — touche G : un exemplaire de chaque bloc solide du registre, pour
@@ -174,19 +258,7 @@ pub fn update_hotbar(
     commands.entity(root).despawn_children().with_children(|bar| {
         for (i, &(id, count)) in inventory.slots.iter().enumerate() {
             let border = if i == inventory.selected { Color::WHITE } else { Color::BLACK };
-            bar.spawn((
-                Node {
-                    width: Val::Px(44.0),
-                    height: Val::Px(44.0),
-                    border: UiRect::all(Val::Px(3.0)),
-                    justify_content: JustifyContent::End,
-                    align_items: AlignItems::End,
-                    ..default()
-                },
-                BackgroundColor(color(registry, id)),
-                BorderColor::all(border),
-            ))
-            .with_child((Text::new(count.to_string()), TextFont::from_font_size(14.0)));
+            bar.spawn(ui::slot(registry, id, count, border));
         }
         // La case main vide, après les piles.
         let border = if inventory.selected == inventory.slots.len() { Color::WHITE } else { Color::BLACK };

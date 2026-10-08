@@ -29,7 +29,7 @@ Les décisions de §5 sont **ouvertes** : suis les recos, signale si tu veux tra
 
 On avance maintenant **jalon par jalon, arbitré avec Warshow** — propose, ne décide pas seul d'un gros chantier. L'ordre décidé des jalons est dans **`docs/jalons.md`**.
 
-Les **non-goals** de §7 restent non-goals tant que non arbitrés : éclairage réel, smooth/densité, véhicules, script runtime complet, UI riche (levée en partie : barre d'inventaire ; menus = #45), multi. Le data model les **prévoit** ; ne les code pas, même si l'occasion se présente. (Persistance disque : levée, jalon 5.)
+Les **non-goals** de §7 restent non-goals tant que non arbitrés : éclairage réel, smooth/densité, véhicules, script runtime complet, multi. Le data model les **prévoit** ; ne les code pas, même si l'occasion se présente. (Levés : persistance disque, jalon 5 ; UI riche, #45.)
 
 **Principe (Warshow, 2026-10-08) :** le moteur ne fige pas une manière de jouer. Il fournit des mécanismes (règles, recettes, block-entities…) ; `assets/content/core.ron` n'est qu'un jeu d'exemple, remplaçable sans toucher au Rust. Un besoin de jeu se règle en donnée ; s'il n'y arrive pas, on ajoute un mécanisme général, jamais une règle propre à un contenu.
 

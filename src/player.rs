@@ -131,9 +131,13 @@ pub fn spawn_player(mut commands: Commands, game: Res<GameWorld>) {
 pub fn physics_step(
     time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
+    captured: Res<CursorCaptured>,
     game: Res<GameWorld>,
     mut query: Query<&mut Player>,
 ) {
+    // Hors mode FPS (souris libérée, fenêtre ouverte) : les touches ne
+    // pilotent plus le joueur, mais la gravité continue.
+    let keys_on = |key| captured.0 && keys.pressed(key);
     let dt = time.delta_secs(); // dans FixedUpdate : le pas fixe
     for mut player in &mut query {
         player.prev_feet = player.feet;
@@ -149,16 +153,16 @@ pub fn physics_step(
         }
         // Intention de déplacement dans le plan horizontal, repère joueur.
         let mut wish = Vec3::ZERO;
-        if keys.pressed(KeyCode::KeyW) {
+        if keys_on(KeyCode::KeyW) {
             wish.z -= 1.0;
         }
-        if keys.pressed(KeyCode::KeyS) {
+        if keys_on(KeyCode::KeyS) {
             wish.z += 1.0;
         }
-        if keys.pressed(KeyCode::KeyA) {
+        if keys_on(KeyCode::KeyA) {
             wish.x -= 1.0;
         }
-        if keys.pressed(KeyCode::KeyD) {
+        if keys_on(KeyCode::KeyD) {
             wish.x += 1.0;
         }
         // Tournée par le yaw seul : regarder le sol ne ralentit pas la marche.
@@ -169,7 +173,7 @@ pub fn physics_step(
         player.velocity.x = dir.x * WALK_SPEED_M_S;
         player.velocity.z = dir.z * WALK_SPEED_M_S;
         player.velocity.y -= GRAVITY_M_S2 * dt;
-        if player.grounded && keys.pressed(KeyCode::Space) {
+        if player.grounded && keys_on(KeyCode::Space) {
             player.velocity.y = JUMP_SPEED_M_S;
         }
 
@@ -285,17 +289,21 @@ fn toggle_fullscreen(
     }
 }
 
-/// Clic gauche : passe en mode FPS (et demande le grab OS). Échap : sort.
+/// Clic gauche : passe en mode FPS (et demande le grab OS). Échap ou une
+/// fenêtre de jeu ouverte (`ui.rs`) : sort, et le clic ne recapture pas
+/// tant que la fenêtre est là (il sert à cliquer dedans).
 fn cursor_grab(
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     mut captured: ResMut<CursorCaptured>,
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
+    windows: Query<(), With<crate::ui::GameWindow>>,
 ) {
     let Ok(mut options) = cursor.single_mut() else {
         return;
     };
-    if mouse.just_pressed(MouseButton::Left) && !captured.0 {
+    let window_open = !windows.is_empty();
+    if mouse.just_pressed(MouseButton::Left) && !captured.0 && !window_open {
         captured.0 = true;
         // Hors WSL : `Locked` (bevy_winit retombe sur `Confined` là où le
         // lock n'existe pas, X11). Sous WSL, `mouse_look` lit la position du
@@ -309,7 +317,7 @@ fn cursor_grab(
         };
         options.visible = false;
     }
-    if keys.just_pressed(KeyCode::Escape) && captured.0 {
+    if (keys.just_pressed(KeyCode::Escape) || window_open) && captured.0 {
         captured.0 = false;
         options.grab_mode = CursorGrabMode::None;
         options.visible = true;

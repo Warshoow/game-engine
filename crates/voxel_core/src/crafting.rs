@@ -4,7 +4,7 @@
 //! pour une recette sans station), on obtient ce qui sort. Les entrées se comparent **sans ordre** (deux pierres et une terre,
 //! dans n'importe quel ordre de pose).
 
-use crate::registry::{ContentId, Registry};
+use crate::registry::{ContentId, Recipe, Registry};
 
 /// La première recette (ordre du registre, donc déterministe) faite sur
 /// `station` dont les entrées sont exactement `items`. Rend l'entrée
@@ -25,21 +25,24 @@ pub fn find(registry: &Registry, station: ContentId, items: &[ContentId]) -> Opt
     })
 }
 
-/// La première recette **sans station** (ordre du registre) faisable avec
-/// les piles `have` : produit, quantité, et les items à consommer.
-// ponytail: pas de choix quand plusieurs recettes sont faisables ; un menu
-// de recettes le jour où le contenu en a assez pour que ça gêne.
-pub fn craftable(registry: &Registry, have: &[(ContentId, u32)]) -> Option<(ContentId, u32, Vec<ContentId>)> {
-    registry.iter().find_map(|(product, entry)| {
-        entry.recipes.iter().filter(|r| r.station.is_none()).find_map(|r| {
-            let need: Vec<ContentId> = r.inputs.iter().map(|s| registry.lookup(s)).collect::<Option<_>>()?;
-            let enough = need.iter().all(|id| {
-                let wanted = need.iter().filter(|n| *n == id).count() as u32;
-                have.iter().any(|&(c, n)| c == *id && n >= wanted)
-            });
-            enough.then_some((product, r.count, need))
-        })
-    })
+/// Les recettes **sans station** (ordre du registre), avec leur produit :
+/// ce que le menu de fabrication liste.
+pub fn without_station(registry: &Registry) -> impl Iterator<Item = (ContentId, &Recipe)> {
+    registry
+        .iter()
+        .flat_map(|(product, entry)| entry.recipes.iter().map(move |r| (product, r)))
+        .filter(|(_, r)| r.station.is_none())
+}
+
+/// Les items que `recipe` consomme si les piles `have` suffisent, `None`
+/// sinon.
+pub fn inputs_from(registry: &Registry, recipe: &Recipe, have: &[(ContentId, u32)]) -> Option<Vec<ContentId>> {
+    let need: Vec<ContentId> = recipe.inputs.iter().map(|s| registry.lookup(s)).collect::<Option<_>>()?;
+    let enough = need.iter().all(|id| {
+        let wanted = need.iter().filter(|n| *n == id).count() as u32;
+        have.iter().any(|&(c, n)| c == *id && n >= wanted)
+    });
+    enough.then_some(need)
 }
 
 #[cfg(test)]
@@ -83,8 +86,12 @@ mod tests {
         let id = |s| reg.lookup(s).unwrap();
         let (stone, bench) = (id("t:stone"), id("t:bench"));
 
-        assert_eq!(craftable(&reg, &[(stone, 2)]), None, "il manque une pierre");
-        assert_eq!(craftable(&reg, &[(bench, 1), (stone, 5)]), Some((bench, 1, vec![stone; 3])));
+        let listed: Vec<_> = without_station(&reg).collect();
+        assert_eq!(listed.len(), 1, "la lampe se fait sur l'établi : pas listée");
+        let (product, recipe) = listed[0];
+        assert_eq!(product, bench);
+        assert_eq!(inputs_from(&reg, recipe, &[(stone, 2)]), None, "il manque une pierre");
+        assert_eq!(inputs_from(&reg, recipe, &[(bench, 1), (stone, 5)]), Some(vec![stone; 3]));
         // Une recette à station ne se fait pas depuis l'inventaire, et
         // l'inverse : la recette de l'établi ne se fait pas sur l'établi.
         assert_eq!(find(&reg, bench, &[stone, stone, stone]), None);

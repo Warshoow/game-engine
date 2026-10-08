@@ -8,6 +8,7 @@ mod items;
 mod player;
 mod save;
 mod streaming;
+mod ui;
 
 use std::collections::{HashMap, HashSet};
 
@@ -130,7 +131,10 @@ fn main() {
                 items::show_stored.after(interact::interact),
                 inventory::scroll_selection,
                 inventory::give_all_blocks,
-                inventory::craft_from_inventory,
+                inventory::toggle_craft_menu,
+                inventory::fill_craft_menu.after(inventory::toggle_craft_menu),
+                inventory::click_recipe,
+                ui::close_on_escape,
                 inventory::update_hotbar.after(inventory::scroll_selection),
                 save::save_edited_chunks.after(interact::interact),
             ),
@@ -226,7 +230,7 @@ fn setup_world(
         },
     ));
     commands.spawn((
-        Text::new("Clic gauche : jouer · Échap : libérer la souris · F : plein écran\nWASD/Espace : bouger · gauche : casser · droit : utiliser/poser · Maj+droit : poser · molette : bloc · C : fabriquer · G : un de chaque bloc (debug)"),
+        Text::new("Clic gauche : jouer · Échap : libérer la souris · F : plein écran\nWASD/Espace : bouger · gauche : casser · droit : utiliser/poser · Maj+droit : poser · molette : bloc · C : fabriquer (menu) · G : un de chaque bloc (debug)"),
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(12.0),

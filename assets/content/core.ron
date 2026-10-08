@@ -33,7 +33,7 @@
     // si le contenu est une recette faite ici, sinon rend les items. Les
     // recettes sont portées par l'entrée produite (`recipes`, ci-dessus).
     // Sa propre recette est sans `station` : elle se fait depuis
-    // l'inventaire (touche C).
+    // l'inventaire (menu de fabrication, touche C).
     (identifier: "core:workbench", kind: Block((solid: true, color: (0.55, 0.36, 0.18),
         texture: Some((side: "planks", top: Some("workbench_top"))),
         storage: Some(9),
