@@ -29,7 +29,9 @@ Les décisions de §5 sont **ouvertes** : suis les recos, signale si tu veux tra
 
 On avance maintenant **jalon par jalon, arbitré avec Warshow** — propose, ne décide pas seul d'un gros chantier. L'ordre décidé des jalons est dans **`docs/jalons.md`**.
 
-Les **non-goals** de §7 restent non-goals tant que non arbitrés : éclairage réel, smooth/densité, véhicules, script runtime complet, persistance disque, UI riche, multi. Le data model les **prévoit** ; ne les code pas, même si l'occasion se présente.
+Les **non-goals** de §7 restent non-goals tant que non arbitrés : éclairage réel, smooth/densité, véhicules, script runtime complet, UI riche (levée en partie : barre d'inventaire ; menus = #45), multi. Le data model les **prévoit** ; ne les code pas, même si l'occasion se présente. (Persistance disque : levée, jalon 5.)
+
+**Principe (Warshow, 2026-10-08) :** le moteur ne fige pas une manière de jouer. Il fournit des mécanismes (règles, recettes, block-entities…) ; `assets/content/core.ron` n'est qu'un jeu d'exemple, remplaçable sans toucher au Rust. Un besoin de jeu se règle en donnée ; s'il n'y arrive pas, on ajoute un mécanisme général, jamais une règle propre à un contenu.
 
 **Règle d'or :** le socle se prouve en portant du concret, pas en ajoutant une couche d'abstraction. Si une abstraction ne sert pas le jalon en cours, elle attend.
 
@@ -45,7 +47,11 @@ Les **non-goals** de §7 restent non-goals tant que non arbitrés : éclairage r
 
 Ce projet est un projet d'apprentissage. Quand un concept est en jeu (meshing, layout mémoire, ECS, déterminisme) : **explique le raisonnement** — pourquoi cette approche, quels compromis. Pas de solution finie balancée sans le pourquoi.
 
-Remarque : **ne plus ajouter les mentions "Co-Authored-By:" dans aucun commit**
+## Commits
+
+- **En anglais** à partir du 2026-10-08 (les plus anciens sont en français, on ne les réécrit pas). Conventional Commits, sujet + corps qui explique le pourquoi, `Closes #N` si un ticket est concerné.
+- **Ne plus ajouter les mentions "Co-Authored-By:" dans aucun commit.**
+- Code, commentaires et docs restent en français.
 
 ## Agent skills
 

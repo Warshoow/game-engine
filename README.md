@@ -17,14 +17,21 @@ is. Bevy provides the ECS loop, rendering and the window.
   quads than naive culling, which is kept as a test oracle), with seams handled
   across chunks so no hidden faces are left at the borders.
 - **Streaming.** The world starts empty; chunks are generated and meshed around
-  the player (per-frame budget, unload hysteresis), and edits survive unloading
-  in memory.
+  the player (per-frame budget, unload hysteresis); edits survive unloading
+  and are saved to disk.
 - **FPS controller.** Fixed-tick simulation, swept AABB collision
   (no tunnelling), gameplay expressed in **metres**, never in blocks.
 - **Data-driven place/break and inventory.** DDA raycast (Amanatides & Woo).
   A broken block drops what its registry entry says (itself by default) as an
   item on the ground, picked up when close; placing consumes from the
   inventory bar.
+- **Behaviour and crafting as data.** Block rules (trigger → condition →
+  effect), a workbench that holds items and crafts from them, recipes without
+  a station crafted from the inventory (C).
+- **Textures** in a texture array, named by the content entry, one image per
+  metre.
+- **Saves on disk**: edited chunks, the registry, the player, items on the
+  ground.
 
 ## Run
 
@@ -77,7 +84,10 @@ and the lamp in `core.ron`.
 image covers 1 m and repeats across large faces. A block without a texture is
 drawn in its `color`, which items also use.
 
-**Crafting** happens *on* the workbench (`core:workbench`, G gives one): right
+**Crafting.** A recipe without `station` is crafted from the inventory with
+C — that is how you get the workbench (2 dirt + 2 stone):
+`recipes: [(inputs: ["core:dirt", "core:dirt", "core:stone", "core:stone"])]`.
+Other recipes happen *on* the workbench (`core:workbench`): right
 click with an item in hand puts it on the bench; right click with an empty
 hand crafts if what lies there matches a recipe (the product drops), otherwise
 gives the items back. Recipes live on the produced entry:
@@ -94,10 +104,14 @@ inventory, items lying on the ground. Delete the folder to start a new world.
 
 ```
 src/                  Bevy binary: plugs the core into the ECS
-  main.rs             setup (registry → world), mesh conversion, HUD
+  main.rs             setup (save/registry → world), texture array, mesh conversion, HUD
   player.rs           FPS controller (simulated in FixedUpdate)
-  interact.rs         place/break + block selection
-  streaming.rs        loading/unloading chunks around the player
+  interact.rs         place/break/use, applies block rules
+  streaming.rs        loading/unloading chunks (read from the save, else generated)
+  items.rs            items on the ground, items shown on a workbench
+  inventory.rs        inventory, hotbar, C (craft), G (debug)
+  save.rs             save writes and player/items restore
+assets/               content (core.ron), textures (PNG), shaders (voxel.wgsl)
 crates/voxel_core/    the WHOLE voxel core: pure, no Bevy dependency
   registry.rs         append-only content registry
   chunk.rs            palette chunk
@@ -106,7 +120,11 @@ crates/voxel_core/    the WHOLE voxel core: pure, no Bevy dependency
   mesher.rs           greedy meshing → plain buffers
   physics.rs          AABB collision against the grid
   raycast.rs          DDA (voxel picking)
+  rules.rs            block rules (pure evaluation)
+  crafting.rs         recipe lookup (station or inventory)
+  save.rs             world folder, binary chunk format
 docs/                 in French
+  jalons.md                      milestones, in order
   brief/voxel-engine-design.md   the design doc, the reference
   journal.md                     the reasoned history (the *why*)
   passation.md                   current state + invariants, to resume a session

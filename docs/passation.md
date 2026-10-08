@@ -13,8 +13,9 @@ meshing (greedy, ×12,8 vs naïf, fluidité validée en jeu par Warshow même
 sous llvmpipe), et **streaming** (§3.4 : monde qui démarre vide, chunks
 générés/déchargés autour du joueur). Les **trois jalons de gameplay** de
 `docs/jalons.md` sont faits (items/inventaire, règles, craft sur l'établi),
-plus les **textures** (jalon 4) et la **sauvegarde sur disque** (jalon 5).
-Dernier commit de code : `3a60009` (jalon 5, #8).
+plus les **textures** (jalon 4), la **sauvegarde sur disque** (jalon 5,
+items au sol compris) et les **recettes sans station** (touche C).
+Dernier commit de code : `4005d35` (recettes sans station).
 
 1. Chunk généré depuis la seed (heightmap fBm maison, pierre sous 1 m de
    sol, **grottes** par bruit 3D, déterministe), **en continu autour du
@@ -27,12 +28,16 @@ Dernier commit de code : `3a60009` (jalon 5, #8).
    case « main vide »), poser consomme ; **contour noir du bloc visé**.
 4. **Contenu en donnée** dans `assets/content/core.ron` (blocs, drops,
    règles, recettes) ; **règles** déclencheur → condition → effet (lampe) ;
-   **établi** : on pose les items dessus, main vide → fabrique.
+   **établi** : on pose les items dessus, main vide → fabrique ; une
+   recette **sans `station`** se fait depuis l'inventaire (touche C, la
+   première faisable dans l'ordre du registre) — c'est ainsi qu'on obtient
+   l'établi (2 terre + 2 pierre).
 5. **Textures** (texture array, PNG de `assets/textures/` nommés par
    l'entrée, pixels gardés dans le registre ; 1 image = 1 m, répétée sur
    les faces fusionnées). Shader `assets/shaders/voxel.wgsl`.
 6. **Save** dans `saves/world/` (`voxel_core::save`, `src/save.rs`) :
-   métadonnées, registre complet, un fichier par chunk modifié, joueur.
+   métadonnées, registre complet, un fichier par chunk modifié, joueur,
+   items au sol (`items.ron`).
    Une save illisible arrête le jeu, jamais écrasée. Effacer le dossier =
    monde neuf.
 7. HUD debug (FPS, chunks), caméra interpolée entre ticks, touche **G**
@@ -61,7 +66,17 @@ WSL le rendu est logiciel et rame — normal.
   air pour `is_solid` → sans la garde, on tombe à travers le monde).
 - **Décharger un mesh ≠ oublier le chunk** : l'entité et l'asset GPU
   (`meshes.remove`, sinon fuite) partent, les données restent en mémoire —
-  les édits du joueur survivent. Pas de persistance disque (non-goal §7).
+  les édits du joueur survivent (et sont aussi sur disque, voir la save).
+- **Save** : les IDs viennent de `registry.ron` de la save, puis `core.ron`
+  est fusionné par identifier (`Registry::merge`). Un chunk est écrit dès
+  qu'il est édité (`VoxelWorld::take_edited`, à marquer dans toute
+  nouvelle méthode qui modifie un chunk) ; joueur et items au sol toutes
+  les 5 s et sur `AppExit`. Une save illisible arrête le jeu, jamais
+  écrasée. Changer un format → incrémenter `save::FORMAT_VERSION` ; un
+  fichier nouveau et optionnel (comme `items.ron`) n'en a pas besoin.
+- **RON lu avec `IMPLICIT_SOME`** (`registry::parse`) : un champ
+  `Option` s'écrit sans `Some(…)`. Ne pas revenir à `ron::from_str` (les
+  saves dont la recette s'écrit `station: "…"` ne se reliraient plus).
 - **L'inventaire tient des `ContentId`** : un bloc s'y range lui-même (pas
   d'item « double »). Casser fait tomber `Registry::drops` en items au sol
   (`items.rs`, tick fixe), ramassés à 1,5 m ; poser consomme. Aucune liste
@@ -85,14 +100,17 @@ WSL le rendu est logiciel et rame — normal.
   code, c'est voulu).
 - **Comportement = règles en donnée** (`BlockData::rules`, évaluées par
   `voxel_core::rules::actions`, appliquées par `interact.rs`). Hooks
-  `Used`/`Placed`/`Broken`, condition `Holding`, effets `ReplaceSelf`/`Drop`.
+  `Used`/`Placed`/`Broken`, conditions `Holding`/`EmptyHand`/`HoldingAny`,
+  effets `ReplaceSelf`/`Drop`/`StoreHeld`/`Craft`.
   Vocabulaire **append-only** (§3.6) : ajouter des variantes, ne jamais en
   renommer ni supprimer. Un `ReplaceSelf` ne redéclenche aucun hook.
 - **Block-entities** (§3.3) : `VoxelWorld` garde une map position →
   items posés, pour les blocs dont l'entrée déclare `storage`. Créée par
   `set_voxel` quand le bloc posé en déclare, supprimée quand le voxel
   change ; `interact.rs` (`Edit::set`) fait d'abord tomber le contenu.
-  Recettes : `ContentEntry::recipes`, cherchées par `crafting::find`.
+  Recettes : `ContentEntry::recipes` ; `crafting::find` (sur une
+  station, entrées exactes) et `crafting::craftable` (sans station, depuis
+  l'inventaire). Aucune recette en Rust.
 - **`voxels_per_meter` n'existe qu'une fois** : `VoxelWorld::voxels_per_meter()`
   (gelé, §3.5). Le générateur le reçoit en paramètre.
 
@@ -100,10 +118,14 @@ WSL le rendu est logiciel et rame — normal.
 
 ```
 Cargo.toml            workspace + binaire voxel_engine (Bevy 0.19)
-src/main.rs           setup : registre → worldgen → mesher → entités ; GameWorld (Resource)
+src/main.rs           setup : save/registre → worldgen → entités ; texture array ; GameWorld (Resource)
 src/player.rs         contrôleur FPS : simu en FixedUpdate, regard/curseur en Update
-src/interact.rs       pose/casse : raycast depuis la caméra, re-mesh du chunk touché (+ voisin si bordure)
-src/streaming.rs      charge/décharge les chunks autour du joueur (budget/frame, hystérésis)
+src/interact.rs       pose/casse/utilisation : raycast, règles, re-mesh du chunk touché (+ voisin si bordure)
+src/streaming.rs      charge/décharge les chunks (relit la save, sinon génère)
+src/items.rs          items au sol (tick fixe) et cubes posés sur les blocs
+src/inventory.rs      inventaire, barre, touche C (craft), G (debug)
+src/save.rs           branche voxel_core::save sur l'ECS (écritures, restauration)
+assets/content/       core.ron (le contenu) ; assets/textures/ (PNG) ; assets/shaders/voxel.wgsl
 crates/voxel_core/    TOUT le cœur voxel, PUR (zéro dépendance Bevy, testable headless)
   registry.rs         registre append-only §3.1 (IDs = index d'insertion)
   chunk.rs            chunk paletté §3.2 (dense u16 + palette locale)
@@ -112,15 +134,18 @@ crates/voxel_core/    TOUT le cœur voxel, PUR (zéro dépendance Bevy, testable
   mesher.rs           greedy meshing (naïf conservé en oracle) → MeshData (tampons purs)
   physics.rs          AABB vs grille, région balayée (anti-tunneling)
   raycast.rs          DDA Amanatides & Woo (visée voxel + face d'entrée)
+  rules.rs            règles hook → condition → effet (évaluation pure)
+  crafting.rs         recherche de recette (station ou inventaire)
+  save.rs             dossier du monde, format binaire des chunks
 ```
 
-Règle de séparation stricte : logique voxel → `voxel_core` (42 tests
+Règle de séparation stricte : logique voxel → `voxel_core` (60 tests
 headless, ~0 s), le binaire ne fait que brancher dans l'ECS.
 
 ## Vérifications avant de conclure une étape
 
 ```bash
-cargo test --workspace                    # 56 tests (51 cœur + 5 binaire), headless
+cargo test --workspace                    # 67 tests (60 cœur + 7 binaire), headless
 cargo clippy --workspace --all-targets    # zéro warning exigé
 cargo run                                 # smoke test à l'occasion
 cargo windows                             # .exe Windows (README, « Build Windows natif »)
@@ -170,7 +195,8 @@ retourne le code de `tail`). Vérifier `EXIT=$?` explicitement.
 
 ## Conventions de travail avec Warshow
 
-- **Français** partout (code commenté en français, commits en français).
+- **Français** pour le code commenté et les docs ; **commits en anglais**
+  depuis le 2026-10-08 (règle dans `CLAUDE.md`).
 - **Jamais de trailer `Co-Authored-By`** dans les commits (demande explicite).
 - Commits soignés et descriptifs, un par étape logique, **seulement sur
   demande explicite** (« commit », ou validation après « je commite quand tu
@@ -242,13 +268,20 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   règles (#10), jalon 3 craft sur l'établi + block-entities (#11, #13
   fusionné), jalon 4 textures (#21), jalon 5 save (#8). Tous validés en
   jeu par Warshow. Ticket #44 (textures générées par IA) ouvert.
-- Tout est poussé (`origin/master` = `3a60009`, jalon 5).
+- Complément du jalon 5 : items au sol sauvés (`9b91d4d`). Recettes sans
+  station + touche C (`4005d35`), validé sous Windows.
+- Tickets ouverts : #45 base commune des fenêtres/menus (epic #43, lève
+  « UI riche »), #46 menu de fabrication pour choisir la recette (epic
+  #38, dépend de #45).
+- Poussé jusqu'à `4005d35` ; le commit de docs qui suit ne l'est pas.
 
 ## Prochaines étapes
 
 À choisir avec Warshow. Principe posé par Warshow (2026-10-08) : le moteur
 ne fige pas une manière de jouer — il fournit des mécanismes, `core.ron`
 n'est qu'un jeu d'exemple, remplaçable sans toucher au Rust.
+- **#45 puis #46** : fenêtres, puis menu de fabrication (C fait
+  aujourd'hui la première recette faisable, sans choix).
 - **#27 biomes/décor** ; mipmaps si les textures scintillent au loin.
 - Restent ouverts : #6 distance de vue, #7 AO, #12 Lua, #14/#15 modèles,
   et le reste des epics.

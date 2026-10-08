@@ -116,6 +116,14 @@ backend v1 décidés dans §3.10.
 - Complément : items au sol dans `items.ron` (entrée + position, sans la
   vitesse), au même rythme que le joueur.
 
+## Complément — Recettes sans station (touche C)
+
+L'établi ne s'obtenait que par G (debug). Une recette peut omettre
+`station` (§3.1) : elle se fait depuis l'inventaire avec C, première
+faisable dans l'ordre du registre. Recette de l'établi : une ligne de
+`core.ron`. *Fait et validé en jeu (Windows) le 2026-10-08.* Suite :
+choisir la recette dans un menu (#46, après #45).
+
 ## Plus tard (non ordonné)
 
 - **Script Lua** (`mlua`, étage 3 de §3.6) — quand un bloc concret ne
@@ -130,3 +138,5 @@ backend v1 décidés dans §3.10.
   glTF, qui vivrait hors de la save). Taille du modèle en mètres,
   indépendante de la résolution du monde ; collision séparée du visuel.
 - Distance de vue (#6), ambient occlusion (#7).
+- **Fenêtres et menus** (#45) puis menu de fabrication (#46) — lèvent
+  « UI riche » (§7).
