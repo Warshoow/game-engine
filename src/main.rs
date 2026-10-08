@@ -6,6 +6,7 @@ mod interact;
 mod inventory;
 mod items;
 mod player;
+mod save;
 mod streaming;
 
 use std::collections::{HashMap, HashSet};
@@ -25,6 +26,7 @@ use bevy::shader::ShaderRef;
 use voxel_core::chunk::{ChunkPos, CHUNK_SIZE};
 use voxel_core::mesher::{mesh_chunk_in_world, MeshData, NO_TEXTURE};
 use voxel_core::registry::{ContentId, Registry};
+use voxel_core::save::{Save, WorldMeta, FORMAT_VERSION};
 use voxel_core::world::VoxelWorld;
 use voxel_core::worldgen::HeightmapGenerator;
 
@@ -114,7 +116,7 @@ fn main() {
         .init_resource::<items::StorageChanged>()
         .add_systems(
             Startup,
-            (setup_world, player::spawn_player, inventory::spawn_hotbar).chain(),
+            (setup_world, player::spawn_player, save::restore_player, inventory::spawn_hotbar).chain(),
         )
         // Pose/casse puis streaming notent les chunks sales ; on meshe après.
         .add_systems(
@@ -129,8 +131,10 @@ fn main() {
                 inventory::scroll_selection,
                 inventory::give_all_blocks,
                 inventory::update_hotbar.after(inventory::scroll_selection),
+                save::save_edited_chunks.after(interact::interact),
             ),
         )
+        .add_systems(Last, save::save_player.after(bevy::window::ExitSystems))
         .add_systems(
             FixedUpdate,
             items::simulate_items.after(player::physics_step),
@@ -148,12 +152,30 @@ fn setup_world(
     let path = assets_dir().join("content/core.ron");
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|err| panic!("lecture de {} impossible : {err}", path.display()));
-    let mut registry = Registry::from_ron(&text)
+    let content = Registry::from_ron(&text)
         .unwrap_or_else(|err| panic!("contenu invalide dans {} : {err}", path.display()));
+
+    // --- Save (§3.10) : un monde existant impose ses IDs, sa seed et sa
+    //     résolution ; le contenu du jeu y est fusionné. Une save illisible
+    //     arrête le jeu : elle n'est jamais écrasée. ---
+    let save = Save::new(base_dir().join("saves/world"));
+    let refuse = |err: String| -> ! { panic!("save {} refusée : {err}", save.dir().display()) };
+    let (mut registry, meta) = match save.read_meta().unwrap_or_else(|e| refuse(e)) {
+        Some(meta) => {
+            let mut registry = save.read_registry().unwrap_or_else(|e| refuse(e));
+            registry.merge(content).unwrap_or_else(|e| refuse(e.to_string()));
+            (registry, meta)
+        }
+        None => (
+            content,
+            WorldMeta { format: FORMAT_VERSION, seed: 42, voxels_per_meter: 1.0, chunk_size: CHUNK_SIZE },
+        ),
+    };
     registry
         .load_textures(&assets_dir().join("textures"))
         .unwrap_or_else(|err| panic!("{err}"));
     let array = images.add(texture_array(&registry));
+    save.write_world(&meta, &registry).unwrap_or_else(|e| refuse(e));
     // Le worldgen a besoin de quelques matériaux : résolus par identifier,
     // une fois ici. Le reste du contenu, aucun système ne le nomme.
     let id = |identifier: &str| {
@@ -165,9 +187,8 @@ fn setup_world(
 
     // Gameplay en mètres (§2) : le relief est défini en mètres, la
     // résolution voxel ne fait que convertir.
-    let voxels_per_meter = 1.0;
     let generator = HeightmapGenerator {
-        seed: 42,
+        seed: meta.seed,
         air,
         ground: grass,
         stone,
@@ -179,12 +200,13 @@ fn setup_world(
     // --- Le monde démarre VIDE : c'est le streaming (Update) qui génère et
     //     meshe les chunks autour du joueur, dès la première frame. La
     //     physique se fige tant que le sol sous le joueur n'est pas chargé.
-    let world = VoxelWorld::new(registry, CHUNK_SIZE, voxels_per_meter);
+    let world = VoxelWorld::new(registry, meta.chunk_size, meta.voxels_per_meter);
     let material = materials.add(ExtendedMaterial {
         base: StandardMaterial::from(Color::WHITE), // la couleur vient des sommets et des textures
         extension: BlockTextures { array },
     });
 
+    commands.insert_resource(save::WorldSave(save));
     commands.insert_resource(GameWorld {
         world,
         generator,
@@ -319,15 +341,18 @@ fn update_debug_text(
     text.0 = format!("{fps:.0} FPS · {} chunks", chunks.iter().count());
 }
 
-/// Dossier `assets/` : à côté du `Cargo.toml` sous `cargo run`, à côté de
+/// Dossier du jeu : celui du `Cargo.toml` sous `cargo run`, celui de
 /// l'exécutable sinon (build Windows : copier `assets/` avec le `.exe`).
-/// Même règle que les assets Bevy.
-fn assets_dir() -> std::path::PathBuf {
-    let base = std::env::var_os("CARGO_MANIFEST_DIR")
+/// Même règle que les assets Bevy. `assets/` et `saves/` y vivent.
+fn base_dir() -> std::path::PathBuf {
+    std::env::var_os("CARGO_MANIFEST_DIR")
         .map(std::path::PathBuf::from)
         .or_else(|| std::env::current_exe().ok()?.parent().map(Into::into))
-        .unwrap_or_default();
-    base.join("assets")
+        .unwrap_or_default()
+}
+
+fn assets_dir() -> std::path::PathBuf {
+    base_dir().join("assets")
 }
 
 /// Empile les textures du registre (couche = index dans le registre). Un

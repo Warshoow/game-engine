@@ -95,6 +95,20 @@ impl Chunk {
         (self.palette.len() - 1) as u16
     }
 
+    /// Reconstruit un chunk lu dans une save. `None` si les morceaux ne
+    /// forment pas un chunk valide (taille, index hors palette).
+    pub fn from_parts(size: u32, palette: Vec<ContentId>, voxels: Vec<u16>) -> Option<Self> {
+        let valid = !palette.is_empty()
+            && voxels.len() == (size as usize).pow(3)
+            && voxels.iter().all(|&i| (i as usize) < palette.len());
+        valid.then_some(Self { size, palette, voxels })
+    }
+
+    /// Le tableau dense d'indices de palette (layout de [`Self::get_local`]).
+    pub fn voxels(&self) -> &[u16] {
+        &self.voxels
+    }
+
     /// La palette locale (lecture seule) — utile au mesher pour résoudre
     /// les defs une fois par matériau plutôt qu'une fois par voxel.
     pub fn palette(&self) -> &[ContentId] {

@@ -15,12 +15,12 @@
 //! renomme ni n'en supprime jamais. Une variante inconnue dans un fichier de
 //! contenu est refusée au chargement (erreur de parse qui la nomme).
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::registry::{ContentId, Registry};
 
 /// Événement du moteur auquel une règle se branche.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 pub enum Hook {
     /// Clic droit sur le bloc.
     Used,
@@ -30,7 +30,7 @@ pub enum Hook {
     Broken,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub enum Condition {
     /// Le joueur tient cette entrée en main.
     Holding(String),
@@ -40,7 +40,7 @@ pub enum Condition {
     HoldingAny,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub enum Effect {
     /// Remplace le bloc de la règle par cette entrée.
     ReplaceSelf(String),
@@ -55,7 +55,7 @@ pub enum Effect {
     Craft,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Rule {
     pub on: Hook,
     /// Toutes doivent être vraies (vide : toujours).

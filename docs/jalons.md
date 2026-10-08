@@ -93,6 +93,27 @@ textures déclarées dans l'entrée (§3.1, apparence).
 - *Fait et validé en jeu (Windows) le 2026-10-08 (#21)* : 10 textures
   16 × 16 générées par script (à redessiner librement).
 
+## 5. Persistance disque
+
+Choix de Warshow (2026-10-08). **Lève** le non-goal « persistance disque »
+de §7. Structure logique déjà figée (§3.10) ; rechargement du registre et
+backend v1 décidés dans §3.10.
+
+- **Socle :**
+  - `saves/world/` : `world.ron` (version, seed, résolution), `registry.ron`
+    (registre complet, pixels compris), `chunks/` (un fichier binaire par
+    chunk modifié, block-entities incluses), `player.ron` (position,
+    regard, inventaire) ;
+  - le streaming lit le fichier d'un chunk s'il existe, sinon génère ;
+  - un chunk est écrit dans la frame où il change ; joueur et inventaire
+    toutes les 5 s et à la fermeture.
+- **Fait quand :** quitter puis relancer retrouve les blocs posés/cassés,
+  le contenu des établis, la position et l'inventaire ; tests headless
+  (aller-retour d'un chunk, du registre, fusion avec `core.ron`).
+- Pas sauvés : les items au sol. Un seul monde, pas de menu : effacer
+  `saves/world/` pour repartir de zéro.
+- *Fait et validé en jeu (Windows) le 2026-10-08 (#8).*
+
 ## Plus tard (non ordonné)
 
 - **Script Lua** (`mlua`, étage 3 de §3.6) — quand un bloc concret ne
@@ -106,5 +127,4 @@ textures déclarées dans l'entrée (§3.1, apparence).
   mesher, découpée en parties avec pivot pour l'animation (plutôt que du
   glTF, qui vivrait hors de la save). Taille du modèle en mètres,
   indépendante de la résolution du monde ; collision séparée du visuel.
-- **Persistance disque** — ticket #8, à arbitrer.
 - Distance de vue (#6), ambient occlusion (#7).

@@ -54,6 +54,17 @@ impl Inventory {
         }
     }
 
+    /// Piles et case choisie, pour la save.
+    pub fn to_save(&self) -> (Vec<(ContentId, u32)>, usize) {
+        (self.slots.clone(), self.selected)
+    }
+
+    /// Inventaire relu dans une save.
+    pub fn restore(&mut self, slots: Vec<(ContentId, u32)>, selected: usize) {
+        self.selected = selected.min(slots.len());
+        self.slots = slots;
+    }
+
     /// Décale la sélection, cyclique sur les piles + la main vide (`step` = ±1).
     pub fn scroll(&mut self, step: isize) {
         let n = self.slots.len() as isize + 1;

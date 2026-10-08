@@ -84,6 +84,16 @@ impl Player {
     pub fn feet(&self) -> Vec3 {
         self.feet
     }
+
+    /// Joueur relu dans une save.
+    pub fn restored(feet: Vec3, yaw: f32, pitch: f32) -> Self {
+        Self { yaw, pitch, ..Self::at(feet) }
+    }
+
+    /// (yaw, pitch), en radians.
+    pub fn look(&self) -> (f32, f32) {
+        (self.yaw, self.pitch)
+    }
 }
 
 #[derive(Component)]

@@ -83,6 +83,13 @@ gives the items back. Recipes live on the produced entry:
 `recipes: [(inputs: ["core:stone", "core:stone"], count: 2, station: "core:workbench")]`.
 Never reorder or remove entries: their position is their ID.
 
+### Saves
+
+The world is saved in `saves/world/` (next to `Cargo.toml`, or next to the
+`.exe`): placed and broken blocks, workbench contents, player position and
+inventory. Delete the folder to start a new world. Items lying on the ground
+are not saved.
+
 ## Layout
 
 ```

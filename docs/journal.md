@@ -583,3 +583,38 @@ suffi pour vérifier l'orientation avant le test Windows.
 **Tests.** PNG des blocs livrés chargés, PNG manquant refusé, face
 fusionnée 5 × 3 aux UV couvrant 5 × 3, bloc sans texture en couleur.
 59 tests, clippy propre.
+
+## 2026-10-08 (suite) — Jalon 5 : sauvegarde sur disque (#8)
+
+Lève le non-goal « persistance disque » de §7. La structure logique était
+figée depuis le début (§3.10) ; restaient deux décisions, écrites dans le
+doc avant de coder.
+
+**Rechargement du registre.** Les IDs viennent de la save (les chunks les
+citent, ils ne bougent jamais). Puis `core.ron` est fusionné par
+identifier : une entrée connue prend la définition du fichier (sinon
+corriger une recette n'aurait aucun effet sur un monde existant), une
+nouvelle est ajoutée à la fin, une entrée que seule la save connaît
+(contenu généré en jeu, plus tard) est gardée avec ses pixels —
+`load_textures` garde les pixels d'une texture sans PNG.
+
+**Backend v1.** Un dossier par monde : `world.ron`, `registry.ron`,
+`player.ron`, et `chunks/x_y_z.bin` pour les seuls chunks modifiés (les
+autres se régénèrent depuis la seed). Le binaire est écrit à la main
+(en-tête `VXC1`, palette, tableau dense u16, block-entities) : 64 Kio par
+chunk, sans compression. `decode_chunk` refuse un fichier tronqué ou des
+index hors palette.
+
+**Quand écrire.** Un chunk dès qu'il change (`VoxelWorld::take_edited`,
+marqué par `set_voxel`, `store`, `take_stored`) : les édits sont rares,
+et on ne dépend pas d'une fermeture propre. Le joueur toutes les 5 s et
+sur `AppExit` (système dans `Last`, après `ExitSystems`). Écritures
+atomiques (temporaire puis renommage).
+
+**Refuser plutôt qu'écraser.** Save d'une autre version, registre au
+vocabulaire inconnu, chunk illisible : le jeu s'arrête avec un message.
+Régénérer un chunk illisible l'aurait écrasé au prochain édit.
+
+**Tests.** Aller-retour d'un chunk avec établi, chunk corrompu refusé,
+métadonnées et joueur, registre (aller-retour, fusion, vocabulaire
+inconnu), streaming qui relit un chunk sauvé. 65 tests, clippy propre.

@@ -17,8 +17,9 @@
 //! 3. **Décharger** : les entités-chunk au-delà du rayon + une marge
 //!    d'hystérésis sont despawnées (et leur asset GPU libéré). Les
 //!    **données** du chunk restent en mémoire : les modifications du joueur
-//!    survivent à l'aller-retour — la persistance *disque* est un non-goal
-//!    (§7), la persistance *mémoire* est juste du bon sens.
+//!    survivent à l'aller-retour. Sur disque, un chunk modifié est écrit
+//!    dès qu'il change (`save.rs`) ; au chargement, le fichier d'un chunk
+//!    passe avant la génération.
 //!
 //! La marge d'hystérésis évite le charge/décharge en boucle quand le joueur
 //! oscille autour d'une frontière : on charge à `VIEW_DISTANCE_M`, on ne
@@ -37,7 +38,9 @@ use bevy::prelude::*;
 use voxel_core::chunk::ChunkPos;
 use voxel_core::worldgen::WorldGenerator;
 
+use crate::items::StorageChanged;
 use crate::player::Player;
+use crate::save::WorldSave;
 use crate::{ChunkMesh, DirtyChunks, GameWorld};
 
 /// Rayon de vue, en **mètres** (§2 : le gameplay ne parle jamais « en
@@ -54,10 +57,14 @@ const WORLD_MAX_Y_M: f32 = 384.0;
 /// Chunks générés/meshés par frame — lisse le coût du streaming.
 const GEN_BUDGET_PER_FRAME: usize = 4;
 
+// Paramètres de système Bevy : c'est la forme normale (cf. `interact`).
+#[allow(clippy::too_many_arguments)]
 pub fn stream_chunks(
     mut commands: Commands,
     mut game: ResMut<GameWorld>,
     mut dirty: ResMut<DirtyChunks>,
+    mut storage: ResMut<StorageChanged>,
+    save: Option<Res<WorldSave>>,
     player: Query<&Transform, With<Player>>,
     mut meshes: ResMut<Assets<Mesh>>,
     chunk_meshes: Query<(Entity, &ChunkMesh, Option<&Mesh3d>)>,
@@ -118,12 +125,24 @@ pub fn stream_chunks(
             continue; // déjà chargé et affiché : rien à faire
         }
         if !has_data {
-            let chunk = game.generator.generate_chunk(
-                pos,
-                game.world.chunk_size(),
-                game.world.voxels_per_meter(),
-            );
-            game.world.insert_chunk(pos, chunk);
+            // Sauvé (modifié par le joueur) : relu ; sinon généré depuis la
+            // seed. Un fichier illisible arrête le jeu plutôt que d'être
+            // écrasé par un chunk régénéré au prochain édit.
+            let saved = save.as_ref().map_or(Ok(None), |s| s.0.read_chunk(pos));
+            match saved.unwrap_or_else(|err| panic!("{err}")) {
+                Some((chunk, entities)) => {
+                    game.world.insert_saved_chunk(pos, chunk, entities);
+                    storage.0.extend(game.world.block_entity_positions(pos));
+                }
+                None => {
+                    let chunk = game.generator.generate_chunk(
+                        pos,
+                        game.world.chunk_size(),
+                        game.world.voxels_per_meter(),
+                    );
+                    game.world.insert_chunk(pos, chunk);
+                }
+            }
             // La bordure des voisins déjà affichés doit se recoudre contre
             // ce nouveau chunk (culling inter-chunks).
             for n in neighbors(pos) {
@@ -173,6 +192,7 @@ mod tests {
     use voxel_core::chunk::CHUNK_SIZE;
     use voxel_core::registry::{ContentEntry, Registry};
     use voxel_core::world::VoxelWorld;
+    use voxel_core::save::Save;
     use voxel_core::worldgen::HeightmapGenerator;
 
     use super::*;
@@ -182,6 +202,10 @@ mod tests {
     /// un mesh vide), joueur à l'altitude `y_m`, streaming lancé jusqu'à
     /// tout charger. Retourne l'app et les chunks qui ont une entité.
     fn stream_all_air(y_m: f32) -> (App, Vec<ChunkPos>) {
+        stream_all_air_with(y_m, None)
+    }
+
+    fn stream_all_air_with(y_m: f32, save: Option<Save>) -> (App, Vec<ChunkPos>) {
         let mut registry = Registry::new();
         let air = registry
             .register(ContentEntry::new_block("core:air", false, [0.0; 3]))
@@ -198,6 +222,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<Assets<Mesh>>()
             .init_resource::<DirtyChunks>()
+            .init_resource::<StorageChanged>()
             .insert_resource(GameWorld {
                 world: VoxelWorld::new(registry, CHUNK_SIZE, 1.0),
                 generator,
@@ -205,6 +230,9 @@ mod tests {
                 material: Handle::default(),
             })
             .add_systems(Update, (stream_chunks, remesh_dirty).chain());
+        if let Some(save) = save {
+            app.insert_resource(WorldSave(save));
+        }
         app.world_mut().spawn((
             Player::default(),
             Transform::from_xyz(0.5, y_m, 0.5),
@@ -246,5 +274,27 @@ mod tests {
         let (_, loaded) = stream_all_air(-120.0);
         let layers: HashSet<i32> = loaded.iter().map(|c| c.y).collect();
         assert_eq!(layers, HashSet::from([-4, -3]));
+    }
+
+    #[test]
+    fn saved_chunk_is_read_instead_of_generated() {
+        // Un chunk sauvé porte un voxel `marker` que le générateur (tout
+        // en air) ne produit jamais : s'il est là, le fichier a été relu.
+        let mut registry = Registry::new();
+        let air = registry.register(ContentEntry::new_block("core:air", false, [0.0; 3])).unwrap();
+        let marker = registry.register(ContentEntry::new_block("t:marker", false, [0.0; 3])).unwrap();
+        let mut world = VoxelWorld::new(registry, CHUNK_SIZE, 1.0);
+        let pos = ChunkPos { x: 0, y: 0, z: 0 };
+        world.insert_chunk(pos, voxel_core::chunk::Chunk::filled(CHUNK_SIZE, air));
+        world.set_voxel([1, 2, 3], marker);
+        let dir = std::env::temp_dir().join(format!("voxel_stream_test_{}", std::process::id()));
+        let save = Save::new(&dir);
+        save.write_chunk(&world, pos).unwrap();
+
+        let (app, _) = stream_all_air_with(0.0, Some(save));
+        let game = app.world().resource::<GameWorld>();
+        assert_eq!(game.world.voxel([1, 2, 3]), Some(marker), "relu, pas régénéré");
+        assert_eq!(game.world.voxel([1, 2, 4]), Some(air));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

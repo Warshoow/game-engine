@@ -193,6 +193,10 @@ Contenu logique d'une save :
 
 **Coût de changement :** Day-1 pour la structure. Le moteur (region-files vs `redb`/`sled`) est un choix ultérieur.
 
+**Rechargement du registre** (ajout 2026-10-08, jalon 5). Au chargement d'une save, les **IDs viennent de la save** et ne bougent jamais. Les fichiers de contenu du jeu (`core.ron`) sont ensuite fusionnés par identifier : une entrée qu'ils déclarent prend **leur** définition (corriger une recette ou une texture s'applique aux mondes existants) ; une entrée nouvelle est ajoutée avec un ID neuf ; une entrée que seule la save connaît (contenu généré en jeu) est gardée telle quelle, pixels compris. Une save qui contient un élément de vocabulaire inconnu est refusée (§3.6), jamais écrasée. *Coût de changement :* Day-1 (fixe ce qu'un monde garde quand le jeu évolue).
+
+**Backend v1** (mou, 2026-10-08). Un dossier par monde : métadonnées et registre en RON, un fichier binaire par chunk **modifié** (palette + tableau dense + ses block-entities, en-tête versionné). Un chunk jamais modifié n'est pas écrit : il se régénère depuis la seed. Un chunk est écrit dès qu'il change ; joueur et inventaire périodiquement et à la fermeture.
+
 ### 3.11 UI réflexive du registre
 
 **Décision.** L'UI est **réflexive du registre** : un slot d'inventaire tire la def de son item (icône, nom, taille de stack) du **même registre world-owned**.
@@ -297,7 +301,7 @@ Le premier livrable qui **prouve que les fondations tiennent**. Pas une couche d
 - smooth / densité ;
 - sous-grilles mobiles / véhicules ;
 - script runtime complet (le « un vrai bloc » peut passer par une def data minimale, la couche script vient juste après) ;
-- persistance disque (in-memory OK pour la slice) ;
+- persistance disque (in-memory OK pour la slice) — *levé le 2026-10-08 par le jalon 5 (#8)* ;
 - UI riche (un HUD debug egui suffit) — *levé en partie le 2026-10-08 par le jalon 1 (#9) : barre d'inventaire `bevy_ui`, réflexive du registre* ;
 - multi.
 
@@ -329,6 +333,7 @@ Ces non-goals sont *prévus par le data model* (§3) mais *pas implémentés* da
 | Éclairage | Pas dans l'identité voxel (couche dérivée) | Figé (invariant) | Day-1 |
 | Simulation | Tick fixe déterministe / frame variable | Figé | Day-1 |
 | Persistance | Structure logique figée ; backend mou | Figé (structure) | Day-1 |
+| Rechargement du registre | IDs de la save ; définitions des fichiers du jeu par identifier ; entrées de la save seule gardées | Figé (2026-10-08) | Day-1 |
 | UI | Réflexive du registre | Figé (principe) | — |
 | Runtime script | `mlua` v1 (reco), wasm en graduation | **Ouvert** | — |
 | Algo éclairage | Différé, full-bright pour la slice | **Ouvert** | — |

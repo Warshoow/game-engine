@@ -14,7 +14,7 @@
 use std::fmt;
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::rules::Rule;
 
@@ -22,7 +22,7 @@ use crate::rules::Rule;
 ///
 /// `u32` : la palette de chunk mappe ses indices locaux (`u16`) vers ces IDs
 /// globaux, donc l'ID global peut être large sans coût mémoire per-voxel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 pub struct ContentId(pub u32);
 
 /// Catégorie d'entrée — kinds unifiés (§3.1) : une seule table pour tout.
@@ -30,7 +30,7 @@ pub struct ContentId(pub u32);
 /// Chaque variante porte ses propres données : un `Block` sans `BlockData`
 /// (ou un `Item` avec) est irreprésentable — c'est le type qui porte
 /// l'invariant, pas la discipline de l'appelant.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub enum Kind {
     Block(BlockData),
     Item,
@@ -41,7 +41,7 @@ pub enum Kind {
 ///
 /// Volontairement minimal pour la tranche verticale : le comportement riche
 /// viendra par la couche script/data (§3.6), pas en gonflant cette struct.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct BlockData {
     /// Un bloc non-solide (air…) n'est ni meshé ni collidable.
     pub solid: bool,
@@ -67,7 +67,7 @@ pub struct BlockData {
 }
 
 /// Les textures d'un bloc, par nom (un PNG de `assets/textures/`).
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Faces {
     /// Côtés, et dessus/dessous quand ils ne sont pas précisés.
     pub side: String,
@@ -84,8 +84,8 @@ impl Faces {
     }
 }
 
-/// Une texture chargée : ses pixels, que la save stockera (§3.1).
-#[derive(Debug, Clone, PartialEq)]
+/// Une texture chargée : ses pixels, que la save stocke (§3.1).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Texture {
     pub name: String,
     /// Côté en pixels (carrée).
@@ -96,7 +96,7 @@ pub struct Texture {
 
 /// Une façon de fabriquer l'entrée qui la porte (§3.1 : les recettes sont
 /// une donnée de l'entrée produite).
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Recipe {
     /// Items consommés, sans ordre (un identifier par exemplaire).
     pub inputs: Vec<String>,
@@ -112,7 +112,7 @@ fn one() -> u32 {
 }
 
 /// Une entrée de contenu : identifier stable + kind (qui porte ses données).
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ContentEntry {
     /// Identifiant namespacé, ex. `core:air`, `core:stone`.
     pub identifier: String,
@@ -169,8 +169,50 @@ impl Registry {
         for entry in entries {
             registry.register(entry).map_err(LoadError::Registry)?;
         }
-        // Une référence vers une entrée inexistante est refusée au
-        // chargement, pas découverte à la première casse.
+        registry.check_references()?;
+        Ok(registry)
+    }
+
+    /// Le registre complet, pixels compris, tel que la save le garde
+    /// (§3.10). L'ordre des entrées est celui des IDs.
+    pub fn to_snapshot(&self) -> String {
+        let snapshot = SnapshotRef { entries: &self.entries, textures: &self.textures };
+        ron::ser::to_string(&snapshot).expect("le registre se sérialise toujours")
+    }
+
+    /// Relit un registre écrit par [`Self::to_snapshot`]. Un élément de
+    /// vocabulaire inconnu (save d'une version plus récente) est refusé.
+    pub fn from_snapshot(text: &str) -> Result<Self, LoadError> {
+        let snapshot: Snapshot = ron::from_str(text).map_err(LoadError::Parse)?;
+        let mut registry = Self::new();
+        for entry in snapshot.entries {
+            registry.register(entry).map_err(LoadError::Registry)?;
+        }
+        registry.textures = snapshot.textures;
+        registry.check_references()?;
+        Ok(registry)
+    }
+
+    /// Fusionne les fichiers de contenu du jeu dans le registre d'une save
+    /// (§3.10, rechargement) : les IDs existants ne bougent pas, une entrée
+    /// déclarée par `content` prend sa définition, une entrée nouvelle est
+    /// ajoutée, une entrée que seule la save connaît est gardée.
+    pub fn merge(&mut self, content: Registry) -> Result<(), LoadError> {
+        for entry in content.entries {
+            match self.lookup(&entry.identifier) {
+                Some(id) => self.entries[id.0 as usize] = entry,
+                None => {
+                    self.register(entry).map_err(LoadError::Registry)?;
+                }
+            }
+        }
+        self.check_references()
+    }
+
+    /// Une référence vers une entrée inexistante est refusée au chargement,
+    /// pas découverte à la première casse.
+    fn check_references(&self) -> Result<(), LoadError> {
+        let registry = self;
         for (_, entry) in registry.iter() {
             let block = entry.block();
             let drops = block.into_iter().flat_map(|b| b.drops.iter().flatten());
@@ -188,12 +230,13 @@ impl Registry {
                 }
             }
         }
-        Ok(registry)
+        Ok(())
     }
 
     /// Lit dans `dir` le PNG (`<nom>.png`) de chaque texture citée par un
-    /// bloc et garde ses pixels. Toutes doivent être carrées et de même
-    /// taille (texture array).
+    /// bloc et garde ses pixels. Sans PNG, les pixels déjà gardés (venus
+    /// d'une save) restent ; sinon erreur. Toutes doivent être carrées et
+    /// de même taille (texture array).
     pub fn load_textures(&mut self, dir: &Path) -> Result<(), LoadError> {
         let mut names: Vec<String> = Vec::new();
         for (_, entry) in self.iter() {
@@ -206,9 +249,13 @@ impl Registry {
         let mut textures = Vec::with_capacity(names.len());
         for name in names {
             let path = dir.join(format!("{name}.png"));
-            let texture = read_png(&path)
-                .map(|(size, rgba)| Texture { name: name.clone(), size, rgba })
-                .map_err(|reason| LoadError::Texture { name: name.clone(), reason })?;
+            let kept = self.textures.iter().find(|t| t.name == name).filter(|_| !path.exists());
+            let texture = match kept {
+                Some(t) => t.clone(),
+                None => read_png(&path)
+                    .map(|(size, rgba)| Texture { name: name.clone(), size, rgba })
+                    .map_err(|reason| LoadError::Texture { name: name.clone(), reason })?,
+            };
             if let Some(first) = textures.first().filter(|t: &&Texture| t.size != texture.size) {
                 return Err(LoadError::Texture {
                     name,
@@ -280,6 +327,19 @@ impl Registry {
             .enumerate()
             .map(|(i, e)| (ContentId(i as u32), e))
     }
+}
+
+/// Forme du registre dans la save.
+#[derive(Deserialize)]
+struct Snapshot {
+    entries: Vec<ContentEntry>,
+    textures: Vec<Texture>,
+}
+
+#[derive(Serialize)]
+struct SnapshotRef<'a> {
+    entries: &'a [ContentEntry],
+    textures: &'a [Texture],
 }
 
 #[derive(Debug, PartialEq)]
@@ -362,6 +422,46 @@ mod tests {
         assert_ne!(top, reg.texture_layer(&faces.side).unwrap());
         let t = &reg.textures()[top as usize];
         assert_eq!(t.rgba.len(), (t.size * t.size * 4) as usize);
+    }
+
+    #[test]
+    fn snapshot_round_trips_and_merge_keeps_save_ids() {
+        // La save : a, b (b n'existe que dans la save), pixels de b gardés.
+        let mut save = Registry::from_ron(
+            r#"[
+                (identifier: "a:air", kind: Block((solid: false, color: (0.0, 0.0, 0.0)))),
+                (identifier: "a:gen", kind: Block((solid: true, color: (1.0, 1.0, 1.0), texture: Some((side: "gen"))))),
+            ]"#,
+        )
+        .unwrap();
+        save.textures.push(Texture { name: "gen".into(), size: 1, rgba: vec![1, 2, 3, 4] });
+        let mut save = Registry::from_snapshot(&save.to_snapshot()).unwrap();
+        assert_eq!(save.textures()[0].rgba, vec![1, 2, 3, 4]);
+
+        // Le jeu a évolué : `a:stone` en tête de fichier, `a:air` redéfini.
+        let content = Registry::from_ron(
+            r#"[
+                (identifier: "a:stone", kind: Block((solid: true, color: (0.5, 0.5, 0.5)))),
+                (identifier: "a:air", kind: Block((solid: false, color: (0.1, 0.1, 0.1)))),
+            ]"#,
+        )
+        .unwrap();
+        save.merge(content).unwrap();
+        assert_eq!(save.lookup("a:air"), Some(ContentId(0)), "ID de la save");
+        assert_eq!(save.lookup("a:gen"), Some(ContentId(1)), "entrée de la save seule gardée");
+        assert_eq!(save.lookup("a:stone"), Some(ContentId(2)), "nouvelle entrée à la fin");
+        assert_eq!(save.get(ContentId(0)).unwrap().block().unwrap().color, [0.1; 3], "définition du jeu");
+
+        // Pas de PNG pour `gen` : les pixels de la save restent.
+        save.load_textures(Path::new("/nonexistent")).unwrap();
+        assert_eq!(save.texture_layer("gen"), Some(0));
+    }
+
+    #[test]
+    fn snapshot_with_unknown_vocabulary_is_refused() {
+        let text = r#"(entries: [(identifier: "a:x", kind: Block((solid: true, color: (1.0, 1.0, 1.0),
+            rules: [(on: Ticked, then: [])])))], textures: [])"#;
+        assert!(Registry::from_snapshot(text).is_err());
     }
 
     #[test]

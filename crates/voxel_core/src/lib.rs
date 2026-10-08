@@ -12,5 +12,6 @@ pub mod physics;
 pub mod raycast;
 pub mod registry;
 pub mod rules;
+pub mod save;
 pub mod worldgen;
 pub mod world;

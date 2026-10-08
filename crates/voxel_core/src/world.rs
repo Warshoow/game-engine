@@ -8,7 +8,7 @@
 //! - **mètres** (`f32`) : le world-space où vivent entités et physique (§2).
 //!   `voxels_per_meter` est l'unique pont entre les deux.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::chunk::{Chunk, ChunkPos};
 use crate::registry::{ContentId, Registry};
@@ -25,8 +25,13 @@ pub struct VoxelWorld {
     /// Block-entities (§3.3) : canal creux position voxel → items posés sur
     /// le bloc. Seuls les blocs dont l'entrée déclare `storage` y ont une
     /// ligne, créée à la pose, supprimée quand le voxel change.
-    // ponytail: une map pour tout le monde ; par chunk quand la save le demandera.
+    // ponytail: une map pour tout le monde, filtrée par chunk à la save
+    // (scan de toute la map) ; par chunk si les établis se comptent par
+    // milliers.
     block_entities: HashMap<[i64; 3], Vec<ContentId>>,
+    /// Chunks modifiés depuis le dernier [`Self::take_edited`] : à écrire
+    /// dans la save.
+    edited: HashSet<ChunkPos>,
 }
 
 impl VoxelWorld {
@@ -37,7 +42,47 @@ impl VoxelWorld {
             voxels_per_meter,
             chunks: HashMap::new(),
             block_entities: HashMap::new(),
+            edited: HashSet::new(),
         }
+    }
+
+    /// Insère un chunk lu dans la save, avec ses block-entities (positions
+    /// locales au chunk).
+    pub fn insert_saved_chunk(&mut self, pos: ChunkPos, chunk: Chunk, entities: Vec<([u32; 3], Vec<ContentId>)>) {
+        for (local, items) in entities {
+            self.block_entities.insert(self.to_world(pos, local), items);
+        }
+        self.insert_chunk(pos, chunk);
+    }
+
+    /// Les block-entities du chunk `pos`, en positions locales.
+    pub fn chunk_block_entities(&self, pos: ChunkPos) -> Vec<([u32; 3], Vec<ContentId>)> {
+        self.block_entities
+            .iter()
+            .filter_map(|(&v, items)| {
+                let (p, local) = self.split(v);
+                (p == pos).then(|| (local, items.clone()))
+            })
+            .collect()
+    }
+
+    /// Positions monde des block-entities du chunk `pos`.
+    pub fn block_entity_positions(&self, pos: ChunkPos) -> Vec<[i64; 3]> {
+        self.block_entities.keys().copied().filter(|&v| self.split(v).0 == pos).collect()
+    }
+
+    /// Les chunks modifiés depuis le dernier appel, et oublie la liste.
+    pub fn take_edited(&mut self) -> Vec<ChunkPos> {
+        self.edited.drain().collect()
+    }
+
+    fn to_world(&self, pos: ChunkPos, local: [u32; 3]) -> [i64; 3] {
+        let s = self.chunk_size as i64;
+        [
+            pos.x as i64 * s + local[0] as i64,
+            pos.y as i64 * s + local[1] as i64,
+            pos.z as i64 * s + local[2] as i64,
+        ]
     }
 
     pub fn voxels_per_meter(&self) -> f32 {
@@ -98,6 +143,7 @@ impl VoxelWorld {
         if self.capacity(material).is_some() {
             self.block_entities.insert(v, Vec::new());
         }
+        self.edited.insert(pos);
         Some(pos)
     }
 
@@ -114,9 +160,11 @@ impl VoxelWorld {
     /// s'il est plein.
     pub fn store(&mut self, v: [i64; 3], item: ContentId) -> bool {
         let Some(capacity) = self.voxel(v).and_then(|id| self.capacity(id)) else { return false };
+        let pos = self.split(v).0;
         match self.block_entities.get_mut(&v) {
             Some(items) if (items.len() as u32) < capacity => {
                 items.push(item);
+                self.edited.insert(pos);
                 true
             }
             _ => false,
@@ -125,7 +173,11 @@ impl VoxelWorld {
 
     /// Vide le bloc `v` et rend son contenu (vide s'il n'a pas d'état).
     pub fn take_stored(&mut self, v: [i64; 3]) -> Vec<ContentId> {
-        self.block_entities.get_mut(&v).map(std::mem::take).unwrap_or_default()
+        let items = self.block_entities.get_mut(&v).map(std::mem::take).unwrap_or_default();
+        if !items.is_empty() {
+            self.edited.insert(self.split(v).0);
+        }
+        items
     }
 
     /// Solidité d'un voxel, résolue via le registre (data-driven).
