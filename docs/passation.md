@@ -49,7 +49,7 @@ Dernier commit de code : `4005d35` (recettes sans station).
 `cargo run` → clic gauche pour jouer, WASD/Espace, clic gauche casse,
 clic droit utilise (bloc à règle `Used`) ou pose, Maj+clic droit pose
 toujours, molette change la case, C ouvre le menu de fabrication
-(recettes sans `station`), G debug, Échap libère la souris, F plein
+(recettes sans `station`), R recharge le contenu, G debug, Échap libère la souris, F plein
 écran. **Pour juger le ressenti : build Windows** (`cargo windows`, ~10-16
 min ; copier l'exe ET `assets/` dans `Téléchargements\voxel_engine\`). Sous
 WSL le rendu est logiciel et rame — normal.
@@ -79,6 +79,10 @@ WSL le rendu est logiciel et rame — normal.
   (`ui::open` ferme l'autre). Tant qu'elle existe, `cursor_grab` libère la
   souris et ne recapture pas au clic ; tout système d'entrée du jeu doit
   lire `CursorCaptured` (déplacement, visée, pose/casse, molette le font).
+- **Le registre peut changer en cours de partie** (touche R, `content.rs`).
+  Ne rien en mettre en cache qui ne se rafraîchisse pas : `reload_content`
+  re-meshe tous les chunks, remplace le texture array, marque les
+  `ItemVisual` et l'inventaire modifiés. Les IDs, eux, ne bougent jamais.
 - **RON lu avec `IMPLICIT_SOME`** (`registry::parse`) : un champ
   `Option` s'écrit sans `Some(…)`. Ne pas revenir à `ron::from_str` (les
   saves dont la recette s'écrit `station: "…"` ne se reliraient plus).
@@ -129,6 +133,7 @@ src/interact.rs       pose/casse/utilisation : raycast, règles, re-mesh du chun
 src/streaming.rs      charge/décharge les chunks (relit la save, sinon génère)
 src/items.rs          items au sol (tick fixe) et cubes posés sur les blocs
 src/inventory.rs      inventaire, barre, menu de fabrication (C), G (debug)
+src/content.rs        charge core.ron + textures (démarrage et touche R)
 src/ui.rs             fenêtres de jeu : une à la fois, souris libérée, case d'item partagée
 src/save.rs           branche voxel_core::save sur l'ECS (écritures, restauration)
 assets/content/       core.ron (le contenu) ; assets/textures/ (PNG) ; assets/shaders/voxel.wgsl
@@ -284,7 +289,7 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
 ## Prochaines étapes
 
 Ordre décidé avec Warshow (2026-10-08) : **`docs/jalons.md`, « Suite :
-ordre des tickets ouverts »**. #45 et #46 faits ; suivant : #17.
+ordre des tickets ouverts »**. #45, #46 et #17 faits ; suivant : #18 + #44 (contenu IA).
 Principe (design doc §2) : le moteur fournit des mécanismes, `core.ron`
 n'est qu'un jeu d'exemple. Mipmaps si les textures scintillent au loin.
 

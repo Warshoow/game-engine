@@ -150,7 +150,7 @@ impl ContentEntry {
 }
 
 /// Registre append-only. L'ID d'une entrée est son index d'insertion.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Registry {
     entries: Vec<ContentEntry>,
     /// Textures citées par les blocs ; l'index est la couche du texture

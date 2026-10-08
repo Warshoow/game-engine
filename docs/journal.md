@@ -686,3 +686,28 @@ change, plutôt que synchronisé ligne par ligne (même choix que la barre).
 Un clic est lu via `Interaction` de `bevy_ui` (composant `Button`).
 `crafting::craftable` (« la première faisable ») disparaît : le joueur
 choisit.
+
+## 2026-10-08 (suite) — Recharger le contenu en cours de partie (#17)
+
+**Le même chemin que la save.** Charger une save fusionnait déjà `core.ron`
+dans le registre gardé (§3.10). Recharger, c'est la même fusion, dans le
+registre courant : `content::load(base)` sert au démarrage (base = registre
+de la save, ou vide pour un monde neuf — fusionner dans du vide redonne
+l'ordre du fichier) et à la touche R. Une entrée retirée du fichier reste :
+des chunks la citent peut-être.
+
+**Tout ou rien.** La fusion se fait sur une copie du registre (`Registry`
+devient `Clone`) ; on ne remplace l'original que si tout a réussi. Une
+erreur (RON mal écrit, PNG absent ou de mauvaise taille) s'affiche dans le
+HUD et la partie continue — au démarrage, la même erreur arrête le jeu.
+
+**Ce qui dépend du registre.** Les couleurs et couches de texture sont
+dans les sommets : tous les chunks affichés sont re-meshés (`DirtyChunks`,
+le chemin habituel). Le texture array est remplacé dans son asset. Les
+cubes d'items gardaient un matériau par entrée : désormais un par couleur,
+et le rechargement marque les `ItemVisual` modifiés pour qu'ils se
+rhabillent. Barre et menu se refont quand l'inventaire est marqué modifié.
+
+**Pourquoi une touche plutôt que surveiller les fichiers.** Explicite, et
+pas d'erreur affichée à chaque sauvegarde d'un fichier à moitié écrit.
+Surveiller les fichiers reste possible plus tard.

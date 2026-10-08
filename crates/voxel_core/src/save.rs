@@ -89,6 +89,11 @@ impl Save {
     /// au chargement).
     pub fn write_world(&self, meta: &WorldMeta, registry: &Registry) -> Result<(), String> {
         self.write_ron("world.ron", meta)?;
+        self.write_registry(registry)
+    }
+
+    /// Réécrit le registre seul (contenu rechargé en cours de partie).
+    pub fn write_registry(&self, registry: &Registry) -> Result<(), String> {
         self.write("registry.ron", registry.to_snapshot().as_bytes())
     }
 

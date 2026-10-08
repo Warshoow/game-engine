@@ -48,6 +48,7 @@ cargo run
 | WASD + Space | move / jump |
 | F | fullscreen |
 | C | crafting menu: recipes without a station, click one to craft it (Esc closes) |
+| R | reload the content (`core.ron`, textures) without restarting |
 | G | debug: one of every solid block |
 | Esc | release the mouse |
 
@@ -72,7 +73,8 @@ startup) to the Windows side (e.g. `/mnt/c/Users/<you>/`) and run it.
 ### Content
 
 Blocks are data, not code: `assets/content/core.ron`. Add an entry at the end
-of the list and it exists on the next launch, no recompilation. `drops` says
+of the list, press **R** in game and it exists, no restart. An error in the
+file is shown on screen and the game keeps its current content. `drops` says
 what a block gives when broken (absent: itself; `Some([])`: nothing).
 `rules` gives a block behaviour as data: `(on: Used, when: [Holding("…")],
 then: [ReplaceSelf("…"), Drop("…")])` — see `crates/voxel_core/src/rules.rs`
@@ -110,6 +112,7 @@ src/                  Bevy binary: plugs the core into the ECS
   streaming.rs        loading/unloading chunks (read from the save, else generated)
   items.rs            items on the ground, items shown on a workbench
   inventory.rs        inventory, hotbar, crafting menu (C), G (debug)
+  content.rs          loads core.ron + textures, reloads them on R
   ui.rs               game windows: one at a time, frees the mouse, shared item slot
   save.rs             save writes and player/items restore
 assets/               content (core.ron), textures (PNG), shaders (voxel.wgsl)

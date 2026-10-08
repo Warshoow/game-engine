@@ -2,6 +2,7 @@
 //! `voxel_core` (testable headless) ; ici on ne fait que brancher :
 //! registre → worldgen → mesher → entités Bevy, et le contrôleur joueur.
 
+mod content;
 mod interact;
 mod inventory;
 mod items;
@@ -115,6 +116,7 @@ fn main() {
         .init_resource::<DirtyChunks>()
         .init_resource::<inventory::Inventory>()
         .init_resource::<items::StorageChanged>()
+        .init_resource::<content::ReloadStatus>()
         .add_systems(
             Startup,
             (setup_world, player::spawn_player, save::restore_player, save::restore_items, inventory::spawn_hotbar).chain(),
@@ -135,6 +137,7 @@ fn main() {
                 inventory::fill_craft_menu.after(inventory::toggle_craft_menu),
                 inventory::click_recipe,
                 ui::close_on_escape,
+                content::reload_content.before(remesh_dirty),
                 inventory::update_hotbar.after(inventory::scroll_selection),
                 save::save_edited_chunks.after(interact::interact),
             ),
@@ -153,32 +156,20 @@ fn setup_world(
     mut images: ResMut<Assets<Image>>,
 ) {
     // --- Le monde possède son contenu (§3.1) : tout part du registre, lu
-    //     depuis un fichier de données — aucun bloc n'est défini en Rust. ---
-    let path = assets_dir().join("content/core.ron");
-    let text = std::fs::read_to_string(&path)
-        .unwrap_or_else(|err| panic!("lecture de {} impossible : {err}", path.display()));
-    let content = Registry::from_ron(&text)
-        .unwrap_or_else(|err| panic!("contenu invalide dans {} : {err}", path.display()));
-
-    // --- Save (§3.10) : un monde existant impose ses IDs, sa seed et sa
-    //     résolution ; le contenu du jeu y est fusionné. Une save illisible
-    //     arrête le jeu : elle n'est jamais écrasée. ---
+    //     depuis un fichier de données — aucun bloc n'est défini en Rust.
+    //     Save (§3.10) : un monde existant impose ses IDs, sa seed et sa
+    //     résolution ; le contenu du jeu y est fusionné (`content::load`).
+    //     Une save illisible arrête le jeu : elle n'est jamais écrasée. ---
     let save = Save::new(base_dir().join("saves/world"));
     let refuse = |err: String| -> ! { panic!("save {} refusée : {err}", save.dir().display()) };
-    let (mut registry, meta) = match save.read_meta().unwrap_or_else(|e| refuse(e)) {
-        Some(meta) => {
-            let mut registry = save.read_registry().unwrap_or_else(|e| refuse(e));
-            registry.merge(content).unwrap_or_else(|e| refuse(e.to_string()));
-            (registry, meta)
-        }
+    let (base, meta) = match save.read_meta().unwrap_or_else(|e| refuse(e)) {
+        Some(meta) => (save.read_registry().unwrap_or_else(|e| refuse(e)), meta),
         None => (
-            content,
+            Registry::new(),
             WorldMeta { format: FORMAT_VERSION, seed: 42, voxels_per_meter: 1.0, chunk_size: CHUNK_SIZE },
         ),
     };
-    registry
-        .load_textures(&assets_dir().join("textures"))
-        .unwrap_or_else(|err| panic!("{err}"));
+    let registry = content::load(base).unwrap_or_else(|e| panic!("contenu invalide : {e}"));
     let array = images.add(texture_array(&registry));
     save.write_world(&meta, &registry).unwrap_or_else(|e| refuse(e));
     // Le worldgen a besoin de quelques matériaux : résolus par identifier,
@@ -186,7 +177,7 @@ fn setup_world(
     let id = |identifier: &str| {
         registry
             .lookup(identifier)
-            .unwrap_or_else(|| panic!("{identifier} absent de {}", path.display()))
+            .unwrap_or_else(|| panic!("{identifier} absent du contenu"))
     };
     let (air, grass, stone) = (id("core:air"), id("core:grass"), id("core:stone"));
 
@@ -230,7 +221,7 @@ fn setup_world(
         },
     ));
     commands.spawn((
-        Text::new("Clic gauche : jouer · Échap : libérer la souris · F : plein écran\nWASD/Espace : bouger · gauche : casser · droit : utiliser/poser · Maj+droit : poser · molette : bloc · C : fabriquer (menu) · G : un de chaque bloc (debug)"),
+        Text::new("Clic gauche : jouer · Échap : libérer la souris · F : plein écran\nWASD/Espace : bouger · gauche : casser · droit : utiliser/poser · Maj+droit : poser · molette : bloc · C : fabriquer (menu) · R : recharger le contenu · G : un de chaque bloc (debug)"),
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(12.0),
@@ -336,6 +327,7 @@ pub fn remesh_dirty(
 fn update_debug_text(
     diagnostics: Res<DiagnosticsStore>,
     chunks: Query<(), With<ChunkMesh>>,
+    reload: Res<content::ReloadStatus>,
     mut text: Query<&mut Text, With<DebugText>>,
 ) {
     let Ok(mut text) = text.single_mut() else { return };
@@ -343,7 +335,7 @@ fn update_debug_text(
         .get(&FrameTimeDiagnosticsPlugin::FPS)
         .and_then(|d| d.smoothed())
         .unwrap_or(0.0);
-    text.0 = format!("{fps:.0} FPS · {} chunks", chunks.iter().count());
+    text.0 = format!("{fps:.0} FPS · {} chunks\n{}", chunks.iter().count(), reload.0);
 }
 
 /// Dossier du jeu : celui du `Cargo.toml` sous `cargo run`, celui de

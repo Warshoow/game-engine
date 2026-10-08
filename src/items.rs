@@ -92,24 +92,26 @@ pub fn simulate_items(
     }
 }
 
-/// Habille un item fraîchement apparu : un cube de la couleur de son
-/// entrée. Mesh et matériaux partagés (un matériau par entrée).
+/// Habille un item fraîchement apparu (ou dont le contenu a été rechargé) :
+/// un cube de la couleur de son entrée. Mesh et matériaux partagés (un
+/// matériau par couleur : une couleur changée au rechargement en crée un).
 pub fn add_item_visuals(
     mut commands: Commands,
     game: Res<GameWorld>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut cube: Local<Option<Handle<Mesh>>>,
-    mut material_of: Local<HashMap<ContentId, Handle<StandardMaterial>>>,
-    added: Query<(Entity, &ItemVisual), Added<ItemVisual>>,
+    mut material_of: Local<HashMap<[u8; 4], Handle<StandardMaterial>>>,
+    changed: Query<(Entity, &ItemVisual), Changed<ItemVisual>>,
 ) {
-    for (entity, &ItemVisual(content)) in &added {
+    for (entity, &ItemVisual(content)) in &changed {
         let cube = cube
             .get_or_insert_with(|| meshes.add(Cuboid::from_length(ITEM_SIZE_M)))
             .clone();
+        let color = inventory::color(&game.world.registry, content);
         let material = material_of
-            .entry(content)
-            .or_insert_with(|| materials.add(inventory::color(&game.world.registry, content)))
+            .entry(color.to_srgba().to_u8_array())
+            .or_insert_with(|| materials.add(color))
             .clone();
         commands.entity(entity).insert((Mesh3d(cube), MeshMaterial3d(material)));
     }

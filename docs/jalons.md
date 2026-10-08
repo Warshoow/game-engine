@@ -130,7 +130,15 @@ le menu de fabrication (#46).
 fois, qui libère la souris et coupe déplacement, visée et interaction ;
 Échap ferme ; case d'item partagée avec la barre. Portée par sa première
 fenêtre concrète : C ouvre la liste des recettes sans station (registre),
-grisées si les items manquent, clic = fabriquer. *Fait et validé en jeu
+grisées si les items manquent, clic = fabriquer.
+
+## Complément — Rechargement du contenu en cours de partie (#17)
+
+Touche R : `core.ron` et les PNG sont relus et fusionnés dans le registre
+courant, comme au chargement d'une save (§3.10) — les IDs ne bougent pas.
+Une erreur s'affiche et laisse le contenu en place. Textures, chunks,
+couleurs des items, barre et menu se mettent à jour ; `registry.ron` est
+réécrit. *Fait et validé en jeu (Windows) le 2026-10-08.* *Fait et validé en jeu
 (Windows) le 2026-10-08.*
 
 ## Suite : ordre des tickets ouverts
