@@ -1,16 +1,16 @@
 //! Pose / casse de voxels — critère §7.3 de la slice.
 //!
-//! Clic gauche : casser le voxel visé. Clic droit : poser le bloc « en
-//! main » sur la face visée. Le bloc posé est **data-driven** : c'est un
-//! `ContentId` du registre (`GameWorld::held`), jamais un type en dur — le
-//! système ne sait pas ce qu'il pose.
+//! Clic gauche : casser le voxel visé, qui laisse tomber ses drops
+//! (`Registry::drops`) en items au sol. Clic droit : poser le bloc en main
+//! (pris dans l'[`Inventory`]) sur la face visée. Tout est **data-driven** :
+//! des `ContentId` du registre, jamais un type en dur — le système ne sait
+//! pas ce qu'il casse ni ce qu'il pose.
 //!
 //! Après une écriture, le chunk touché est noté à re-mesher intégralement
 //! ([`DirtyChunks`]). C'est brut (on reconstruit 32³ voxels pour un
 //! changement d'un seul) mais largement assez rapide — et c'est le *même*
 //! chemin de meshing que le streaming (`remesh_dirty`, main.rs).
 
-use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 
 use voxel_core::chunk::ChunkPos;
@@ -19,31 +19,9 @@ use voxel_core::raycast::{raycast, RayHit};
 use voxel_core::world::VoxelWorld;
 
 use crate::player::{CursorCaptured, Player, PLAYER_HEIGHT_M, PLAYER_WIDTH_M, PlayerCamera};
-use crate::{held_label, DirtyChunks, GameWorld, HeldBlockText};
-
-/// Molette : fait défiler la hotbar (cyclique). La hotbar est découverte
-/// depuis le registre au setup — ce système ne connaît aucun bloc, il ne
-/// fait que déplacer un index.
-pub fn select_held_block(
-    mut wheel: MessageReader<MouseWheel>,
-    captured: Res<CursorCaptured>,
-    mut game: ResMut<GameWorld>,
-    mut hud: Query<&mut Text, With<HeldBlockText>>,
-) {
-    // Somme des crans de la frame (trackpads : plusieurs petits événements).
-    let scroll: f32 = wheel.read().map(|w| w.y).sum();
-    if !captured.0 || scroll == 0.0 {
-        return;
-    }
-    let n = game.hotbar.len();
-    // rem_euclid : modulo toujours positif, même en reculant depuis 0.
-    let step = if scroll > 0.0 { 1 } else { n - 1 };
-    game.held_idx = (game.held_idx + step).rem_euclid(n);
-
-    if let Ok(mut text) = hud.single_mut() {
-        text.0 = held_label(&game.world.registry, game.held());
-    }
-}
+use crate::inventory::Inventory;
+use crate::items::DroppedItem;
+use crate::{DirtyChunks, GameWorld};
 
 /// Portée de la main, en mètres (§2 — jamais « en blocs »).
 const REACH_M: f32 = 5.0;
@@ -82,7 +60,12 @@ pub fn highlight_target(
     );
 }
 
+// Un système Bevy prend ses ressources en paramètres : 8 ici (entrée,
+// monde, inventaire, caméra, joueur…), c'est la forme normale.
+#[allow(clippy::too_many_arguments)]
 pub fn interact(
+    mut commands: Commands,
+    mut inventory: ResMut<Inventory>,
     mouse: Res<ButtonInput<MouseButton>>,
     captured: Res<CursorCaptured>,
     mut game: ResMut<GameWorld>,
@@ -106,8 +89,24 @@ pub fn interact(
     let touched: Option<ChunkPos> = if breaking {
         let air = game.air;
         edited = hit.voxel;
-        game.world.set_voxel(hit.voxel, air)
+        let broken = game.world.voxel(hit.voxel);
+        let touched = game.world.set_voxel(hit.voxel, air);
+        if let (Some(broken), Some(_)) = (broken, touched) {
+            let size_m = 1.0 / game.world.voxels_per_meter();
+            let center = (Vec3::from_array(hit.voxel.map(|v| v as f32)) + 0.5) * size_m;
+            for drop in game.world.registry.drops(broken) {
+                commands.spawn((DroppedItem::new(drop, center), Transform::from_translation(center)));
+            }
+        }
+        touched
     } else {
+        // Seul un bloc se pose : un item en main (sans `places`, pas encore
+        // implémenté) ne fait rien.
+        let Some(held) = inventory.selected().filter(|&id| {
+            game.world.registry.get(id).is_some_and(|e| e.block().is_some())
+        }) else {
+            return;
+        };
         // Poser : sur la face d'entrée du rayon. Normale nulle = l'œil est
         // dans un solide, pas de face → rien.
         if hit.normal == [0; 3] {
@@ -125,9 +124,12 @@ pub fn interact(
         {
             return;
         }
-        let held = game.held();
         edited = target;
-        game.world.set_voxel(target, held)
+        let touched = game.world.set_voxel(target, held);
+        if touched.is_some() {
+            inventory.take_selected();
+        }
+        touched
     };
 
     if let Some(pos) = touched {

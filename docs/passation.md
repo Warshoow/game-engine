@@ -19,9 +19,10 @@ générés/déchargés autour du joueur). Dernier commit : `f135fb0`.
    384 m ; budget 4 chunks/frame, hystérésis).
 2. Mesher blocky **greedy** avec **raccord inter-chunks** (le naïf reste
    comme oracle de test).
-3. Pose/casse data-driven + **sélection à la molette** (hotbar découverte
-   depuis le registre — tout bloc solide est posable), **contour noir du
-   bloc visé** (gizmo, même raycast que le clic).
+3. Pose/casse data-driven : casser fait tomber les drops du bloc en items
+   au sol, ramassés à portée ; **inventaire** (barre `bevy_ui`, molette),
+   poser consomme ; **contour noir du bloc visé** (gizmo, même raycast que
+   le clic).
 4. Déplacement FPS avec collision (AABB balayée), **figé si le chunk sous
    les pieds n'est pas chargé**.
 
@@ -43,8 +44,10 @@ F plein écran.
 - **Décharger un mesh ≠ oublier le chunk** : l'entité et l'asset GPU
   (`meshes.remove`, sinon fuite) partent, les données restent en mémoire —
   les édits du joueur survivent. Pas de persistance disque (non-goal §7).
-- **La hotbar se découvre** (`Registry::iter()`, filtre solide) : ajouter
-  un bloc au registre suffit à le rendre posable. Aucune liste en dur.
+- **L'inventaire tient des `ContentId`** : un bloc s'y range lui-même (pas
+  d'item « double »). Casser fait tomber `Registry::drops` en items au sol
+  (`items.rs`, tick fixe), ramassés à 1,5 m ; poser consomme. Aucune liste
+  de blocs en dur ; la barre lit couleur et nom dans le registre (§3.11).
 - **Un seul chemin de meshing** : génération, streaming et pose/casse
   notent les chunks à re-mesher dans `DirtyChunks` ; seul `remesh_dirty`
   (main.rs) meshe (→ `mesh_chunk_in_world`) et crée les entités-chunk.

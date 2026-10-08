@@ -44,6 +44,11 @@ pub struct BlockData {
     pub solid: bool,
     /// Couleur de base RGB — suffit pour la slice (pas de textures encore).
     pub color: [f32; 3],
+    /// Ce que le bloc donne quand on le casse, par identifier. Absent : le
+    /// bloc lui-même ; `Some([])` : rien (verre…) ; sinon ces entrées
+    /// (l'herbe donne de la terre, un minerai une gemme).
+    #[serde(default)]
+    pub drops: Option<Vec<String>>,
 }
 
 /// Une entrée de contenu : identifier stable + kind (qui porte ses données).
@@ -59,7 +64,7 @@ impl ContentEntry {
     pub fn new_block(identifier: &str, solid: bool, color: [f32; 3]) -> Self {
         Self {
             identifier: identifier.to_string(),
-            kind: Kind::Block(BlockData { solid, color }),
+            kind: Kind::Block(BlockData { solid, color, drops: None }),
         }
     }
 
@@ -91,7 +96,32 @@ impl Registry {
         for entry in entries {
             registry.register(entry).map_err(LoadError::Registry)?;
         }
+        // Une référence vers une entrée inexistante est refusée au
+        // chargement, pas découverte à la première casse.
+        for (_, entry) in registry.iter() {
+            for target in entry.block().and_then(|b| b.drops.as_ref()).into_iter().flatten() {
+                if registry.lookup(target).is_none() {
+                    return Err(LoadError::UnknownReference {
+                        from: entry.identifier.clone(),
+                        to: target.clone(),
+                    });
+                }
+            }
+        }
         Ok(registry)
+    }
+
+    /// Ce que donne le bloc `id` quand on le casse (voir [`BlockData::drops`]).
+    /// Vide si `id` n'est pas un bloc.
+    pub fn drops(&self, id: ContentId) -> Vec<ContentId> {
+        match self.get(id).and_then(ContentEntry::block) {
+            None => Vec::new(),
+            Some(BlockData { drops: None, .. }) => vec![id],
+            Some(BlockData { drops: Some(list), .. }) => {
+                // Références validées au chargement.
+                list.iter().filter_map(|t| self.lookup(t)).collect()
+            }
+        }
     }
 
     /// Ajoute une entrée et retourne son ID stable.
@@ -143,6 +173,8 @@ pub enum LoadError {
     /// RON invalide ou entrée mal formée (ligne:colonne dans le message).
     Parse(ron::error::SpannedError),
     Registry(RegistryError),
+    /// Une entrée cite un identifier qui n'existe pas dans le registre.
+    UnknownReference { from: String, to: String },
 }
 
 impl fmt::Display for LoadError {
@@ -151,6 +183,9 @@ impl fmt::Display for LoadError {
             Self::Parse(err) => write!(f, "{err}"),
             Self::Registry(RegistryError::DuplicateIdentifier(id)) => {
                 write!(f, "identifier en double : {id}")
+            }
+            Self::UnknownReference { from, to } => {
+                write!(f, "{from} cite {to}, absent du registre")
             }
         }
     }
@@ -172,6 +207,24 @@ mod tests {
     }
 
     #[test]
+    fn drops_default_to_self_and_can_be_empty_or_other() {
+        let reg = Registry::from_ron(
+            r#"[
+                (identifier: "a:dirt",  kind: Block((solid: true, color: (1.0, 1.0, 1.0)))),
+                (identifier: "a:grass", kind: Block((solid: true, color: (1.0, 1.0, 1.0), drops: Some(["a:dirt"])))),
+                (identifier: "a:glass", kind: Block((solid: true, color: (1.0, 1.0, 1.0), drops: Some([])))),
+                (identifier: "a:gem",   kind: Item),
+            ]"#,
+        )
+        .unwrap();
+        let id = |s| reg.lookup(s).unwrap();
+        assert_eq!(reg.drops(id("a:dirt")), vec![id("a:dirt")]);
+        assert_eq!(reg.drops(id("a:grass")), vec![id("a:dirt")]);
+        assert!(reg.drops(id("a:glass")).is_empty());
+        assert!(reg.drops(id("a:gem")).is_empty()); // pas un bloc
+    }
+
+    #[test]
     fn ron_order_gives_ids_and_errors_are_reported() {
         let reg = Registry::from_ron(
             r#"[
@@ -185,6 +238,11 @@ mod tests {
 
         let dup = Registry::from_ron(r#"[(identifier: "a:x", kind: Item), (identifier: "a:x", kind: Item)]"#);
         assert!(matches!(dup, Err(LoadError::Registry(RegistryError::DuplicateIdentifier(_)))));
+
+        let dangling = Registry::from_ron(
+            r#"[(identifier: "a:x", kind: Block((solid: true, color: (1.0, 0.0, 0.0), drops: Some(["a:nope"]))))]"#,
+        );
+        assert!(matches!(dangling, Err(LoadError::UnknownReference { .. })));
 
         // Champ manquant (`solid`) : erreur de parse avec position.
         let bad = Registry::from_ron(r#"[(identifier: "a:x", kind: Block((color: (1.0, 0.0, 0.0))))]"#);

@@ -202,8 +202,6 @@ mod tests {
                 world: VoxelWorld::new(registry, CHUNK_SIZE, 1.0),
                 generator,
                 air,
-                hotbar: vec![air],
-                held_idx: 0,
                 material: Handle::default(),
             })
             .add_systems(Update, (stream_chunks, remesh_dirty).chain());

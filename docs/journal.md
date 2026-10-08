@@ -459,3 +459,29 @@ Dossier résolu comme les assets Bevy : `CARGO_MANIFEST_DIR` sous
 **Tests.** Le fichier livré est chargé par un test (un RON cassé casse
 les tests, pas le démarrage) ; ordre → IDs, doublon refusé, champ
 manquant signalé avec sa position.
+
+## 2026-10-08 (suite) — Jalon 1 : items au sol et inventaire (#9)
+
+**Bloc ↔ item.** Un bloc se range **lui-même** dans l'inventaire : pas
+d'item « pierre » doublant chaque bloc, qui aurait doublé le fichier de
+contenu pour rien. `BlockData::drops` dit ce qu'il donne (absent :
+lui-même ; `Some([])` : rien ; sinon une liste d'identifiers, validés au
+chargement). Exemple réel : l'herbe donne de la terre. `places` (un item
+qui pose un bloc) attend le premier vrai item.
+
+**Item au sol** (`items.rs`). Entité simulée au tick fixe (l'inventaire
+est un état de simulation) : gravité + `move_and_collide`, comme le
+joueur, figée hors chunk chargé. Ramassée à 1,5 m du centre du joueur.
+Rendu : cube de 25 cm de la couleur de l'entrée, mesh et matériaux
+partagés. Pas d'interpolation entre ticks (commentaire `ponytail:`).
+
+**Inventaire** (`inventory.rs`). Une pile par `ContentId`, ordre de
+première obtention, sans limite. Le joueur démarre vide. La barre
+`bevy_ui` est reconstruite quand l'inventaire change (rare), plutôt que
+synchronisée case par case. Lève en partie « UI riche » (§7, noté dans le
+design doc).
+
+**Tests.** Drops (défaut, vide, autre bloc, référence inconnue refusée),
+inventaire (piles, retrait, sélection), et un test headless où un item
+tombe, se pose sur le sol, puis est ramassé quand le joueur s'approche.
+49 tests, clippy propre.

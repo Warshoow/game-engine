@@ -21,9 +21,10 @@ is. Bevy provides the ECS loop, rendering and the window.
   in memory.
 - **FPS controller.** Fixed-tick simulation, swept AABB collision
   (no tunnelling), gameplay expressed in **metres**, never in blocks.
-- **Data-driven place/break.** DDA raycast (Amanatides & Woo), and a hotbar
-  *discovered* from the registry: adding a block to the registry is enough to
-  make it placeable, no system to change.
+- **Data-driven place/break and inventory.** DDA raycast (Amanatides & Woo).
+  A broken block drops what its registry entry says (itself by default) as an
+  item on the ground, picked up when close; placing consumes from the
+  inventory bar.
 
 ## Run
 
@@ -61,7 +62,8 @@ startup) to the Windows side (e.g. `/mnt/c/Users/<you>/`) and run it.
 ### Content
 
 Blocks are data, not code: `assets/content/core.ron`. Add an entry at the end
-of the list and it becomes placeable on the next launch, no recompilation.
+of the list and it exists on the next launch, no recompilation. `drops` says
+what a block gives when broken (absent: itself; `Some([])`: nothing).
 Never reorder or remove entries: their position is their ID.
 
 ## Layout

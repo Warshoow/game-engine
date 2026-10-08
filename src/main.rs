@@ -3,6 +3,8 @@
 //! registre → worldgen → mesher → entités Bevy, et le contrôleur joueur.
 
 mod interact;
+mod inventory;
+mod items;
 mod player;
 mod streaming;
 
@@ -30,19 +32,8 @@ pub struct GameWorld {
     /// IDs résolus une fois au setup — le gameplay manipule des `ContentId`,
     /// jamais des identifiers en dur dans les systèmes.
     pub air: ContentId,
-    /// Blocs posables, **découverts** depuis le registre (tout bloc solide) —
-    /// jamais une liste de noms en dur. L'index est la sélection courante.
-    pub hotbar: Vec<ContentId>,
-    pub held_idx: usize,
     /// Matériau partagé des chunks (blanc, couleurs aux sommets).
     pub material: Handle<StandardMaterial>,
-}
-
-impl GameWorld {
-    /// Le bloc « en main » pour la pose (§7.3) — data-driven par ID.
-    pub fn held(&self) -> ContentId {
-        self.hotbar[self.held_idx]
-    }
 }
 
 /// Marque l'entité d'un chunk **chargé** (côté affichage). L'entité existe
@@ -87,7 +78,11 @@ fn main() {
         }))
         .add_plugins((player::PlayerPlugin, FrameTimeDiagnosticsPlugin::default()))
         .init_resource::<DirtyChunks>()
-        .add_systems(Startup, (setup_world, player::spawn_player).chain())
+        .init_resource::<inventory::Inventory>()
+        .add_systems(
+            Startup,
+            (setup_world, player::spawn_player, inventory::spawn_hotbar).chain(),
+        )
         // Pose/casse puis streaming notent les chunks sales ; on meshe après.
         .add_systems(
             Update,
@@ -95,7 +90,15 @@ fn main() {
                 streaming::stream_chunks.after(interact::interact),
                 remesh_dirty.after(streaming::stream_chunks),
                 update_debug_text,
+                items::add_item_visuals,
+                items::place_items,
+                inventory::scroll_selection,
+                inventory::update_hotbar.after(inventory::scroll_selection),
             ),
+        )
+        .add_systems(
+            FixedUpdate,
+            items::simulate_items.after(player::physics_step),
         )
         .run();
 }
@@ -136,24 +139,10 @@ fn setup_world(mut commands: Commands, mut materials: ResMut<Assets<StandardMate
     let world = VoxelWorld::new(registry, CHUNK_SIZE, voxels_per_meter);
     let material = materials.add(Color::WHITE); // blanc : les couleurs viennent des sommets
 
-    // La hotbar se **découvre** : tout bloc solide du registre est posable.
-    // Ajouter un bloc au registre suffit à le rendre disponible — aucun
-    // système à toucher. (grass est solide → présent, air non → absent.)
-    let hotbar: Vec<ContentId> = world
-        .registry
-        .iter()
-        .filter(|(_, e)| e.block().is_some_and(|b| b.solid))
-        .map(|(id, _)| id)
-        .collect();
-    let held_idx = hotbar.iter().position(|&id| id == grass).unwrap_or(0);
-    let held_label = held_label(&world.registry, hotbar[held_idx]);
-
     commands.insert_resource(GameWorld {
         world,
         generator,
         air,
-        hotbar,
-        held_idx,
         material,
     });
 
@@ -189,7 +178,7 @@ fn setup_world(mut commands: Commands, mut materials: ResMut<Assets<StandardMate
     // Bloc en main (HUD debug — §7 : pas d'UI riche).
     commands.spawn((
         HeldBlockText,
-        Text::new(held_label),
+        Text::default(), // rempli par inventory::update_hotbar
         Node {
             position_type: PositionType::Absolute,
             right: Val::Px(12.0),
@@ -294,15 +283,6 @@ fn content_dir() -> std::path::PathBuf {
         .or_else(|| std::env::current_exe().ok()?.parent().map(Into::into))
         .unwrap_or_default();
     base.join("assets").join("content")
-}
-
-/// Libellé HUD du bloc en main — l'identifier vient du registre, le HUD ne
-/// connaît aucun nom de bloc.
-pub fn held_label(registry: &Registry, id: ContentId) -> String {
-    match registry.get(id) {
-        Some(entry) => format!("en main : {}", entry.identifier),
-        None => "en main : ???".to_string(),
-    }
 }
 
 /// Convertit les tampons purs du mesher en `Mesh` Bevy.

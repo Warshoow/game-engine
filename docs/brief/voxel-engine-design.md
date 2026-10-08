@@ -297,7 +297,7 @@ Le premier livrable qui **prouve que les fondations tiennent**. Pas une couche d
 - sous-grilles mobiles / véhicules ;
 - script runtime complet (le « un vrai bloc » peut passer par une def data minimale, la couche script vient juste après) ;
 - persistance disque (in-memory OK pour la slice) ;
-- UI riche (un HUD debug egui suffit) ;
+- UI riche (un HUD debug egui suffit) — *levé en partie le 2026-10-08 par le jalon 1 (#9) : barre d'inventaire `bevy_ui`, réflexive du registre* ;
 - multi.
 
 Ces non-goals sont *prévus par le data model* (§3) mais *pas implémentés* dans la slice. C'est ça, un socle qui tient : le format les accueille, la slice ne les code pas encore.

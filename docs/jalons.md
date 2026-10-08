@@ -8,8 +8,8 @@
 
 ## 1. Items et inventaire
 
-Premier usage réel de `Kind::Item`. Casser un bloc donne un item, poser en
-consomme un. Sans ça, rien à fabriquer.
+Casser un bloc donne de quoi poser, poser le consomme. Sans ça, rien à
+fabriquer. (Fait et validé en jeu le 2026-10-08, #9.)
 
 - **Lève (en partie) :** « UI riche » — affichage de l'inventaire en
   `bevy_ui`, réflexif du registre (§3.11).
@@ -20,6 +20,9 @@ consomme un. Sans ça, rien à fabriquer.
   bloc dit ce qu'il donne à la casse (souvent son propre item, mais pas
   forcément : rien pour du verre, une gemme pour un minerai) ; l'item dit
   quel bloc il pose, s'il en pose un (une pioche n'en pose pas).
+  *Mise en œuvre :* un bloc se range lui-même dans l'inventaire (pas
+  d'item « double » par bloc) ; `drops` absent = lui-même. `places` attend
+  le premier vrai item (graines…) : aucun contenu n'en a besoin encore.
 - **Ramassage (décidé 2026-10-08) :** un bloc cassé tombe au sol en entité
   « item au sol » (§3.1), qui retombe avec la collision du joueur
   (`move_and_collide`) et se ramasse à portée, en mètres. Rendu : un petit

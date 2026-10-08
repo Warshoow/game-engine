@@ -28,7 +28,7 @@ const EYE_HEIGHT_M: f32 = 1.62;
 const WALK_SPEED_M_S: f32 = 5.0;
 /// Plus fort que 9,81 : la gravité « réaliste » donne un saut flottant en
 /// jeu — la quasi-totalité des jeux la gonflent.
-const GRAVITY_M_S2: f32 = 22.0;
+pub const GRAVITY_M_S2: f32 = 22.0;
 const JUMP_SPEED_M_S: f32 = 7.5;
 const MOUSE_SENSITIVITY: f32 = 0.002;
 
@@ -54,7 +54,6 @@ impl Plugin for PlayerPlugin {
                 Update,
                 (
                     toggle_fullscreen,
-                    crate::interact::select_held_block,
                     // Après la pose/casse : le contour voit déjà le monde modifié.
                     crate::interact::highlight_target.after(crate::interact::interact),
                 ),
@@ -77,7 +76,7 @@ pub struct Player {
 }
 
 impl Player {
-    fn at(feet: Vec3) -> Self {
+    pub fn at(feet: Vec3) -> Self {
         Self { feet, prev_feet: feet, ..default() }
     }
 
@@ -119,7 +118,7 @@ pub fn spawn_player(mut commands: Commands, game: Res<GameWorld>) {
 }
 
 /// Simulation du mouvement — tick fixe (§3.9).
-fn physics_step(
+pub fn physics_step(
     time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
     game: Res<GameWorld>,
