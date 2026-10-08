@@ -96,7 +96,7 @@ Les règles transverses dont dérive tout le modèle de données.
 
 Un coffre a un inventaire ; un bloc-IA peut avoir de l'état. Cet état ne peut **pas** vivre dans le tableau voxel dense (ça ferait exploser la RAM). Comme Minecraft : tableau dense pour « quel bloc », map creuse pour l'état riche des rares blocs concernés. C'est aussi ce que lit une fenêtre d'inventaire (§3.11).
 
-**Cycle de vie** (ajout 2026-10-07). L'entrée du registre déclare l'état initial de ses instances ; poser le bloc crée l'entrée creuse à sa position, le casser la supprime. Un bloc dont l'entrée ne déclare pas d'état n'a jamais de ligne dans le canal creux.
+**Cycle de vie** (ajout 2026-10-07). L'entrée du registre déclare l'état initial de ses instances ; poser le bloc crée l'entrée creuse à sa position, le casser la supprime. Un bloc dont l'entrée ne déclare pas d'état n'a jamais de ligne dans le canal creux. *Premier état codé (2026-10-08, établi) : `storage`, une capacité en items ; le contenu tombe au sol quand le bloc disparaît.*
 
 **Coût de changement :** Day-1. Le split dense/creux structure le format.
 

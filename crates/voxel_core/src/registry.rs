@@ -54,6 +54,27 @@ pub struct BlockData {
     /// Comportement en donnée (§3.6) — voir [`crate::rules`].
     #[serde(default)]
     pub rules: Vec<Rule>,
+    /// Block-entity (§3.3) : le bloc garde jusqu'à N items posés sur lui
+    /// (un établi). Absent : pas d'état, jamais de ligne dans le canal creux.
+    #[serde(default)]
+    pub storage: Option<u32>,
+}
+
+/// Une façon de fabriquer l'entrée qui la porte (§3.1 : les recettes sont
+/// une donnée de l'entrée produite).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Recipe {
+    /// Items consommés, sans ordre (un identifier par exemplaire).
+    pub inputs: Vec<String>,
+    /// Exemplaires produits.
+    #[serde(default = "one")]
+    pub count: u32,
+    /// Le bloc sur lequel la recette se fait.
+    pub station: String,
+}
+
+fn one() -> u32 {
+    1
 }
 
 /// Une entrée de contenu : identifier stable + kind (qui porte ses données).
@@ -62,6 +83,8 @@ pub struct ContentEntry {
     /// Identifiant namespacé, ex. `core:air`, `core:stone`.
     pub identifier: String,
     pub kind: Kind,
+    #[serde(default)]
+    pub recipes: Vec<Recipe>,
 }
 
 impl ContentEntry {
@@ -69,7 +92,14 @@ impl ContentEntry {
     pub fn new_block(identifier: &str, solid: bool, color: [f32; 3]) -> Self {
         Self {
             identifier: identifier.to_string(),
-            kind: Kind::Block(BlockData { solid, color, drops: None, rules: Vec::new() }),
+            kind: Kind::Block(BlockData {
+                solid,
+                color,
+                drops: None,
+                rules: Vec::new(),
+                storage: None,
+            }),
+            recipes: Vec::new(),
         }
     }
 
@@ -104,10 +134,14 @@ impl Registry {
         // Une référence vers une entrée inexistante est refusée au
         // chargement, pas découverte à la première casse.
         for (_, entry) in registry.iter() {
-            let Some(block) = entry.block() else { continue };
-            let drops = block.drops.iter().flatten();
-            let rules = block.rules.iter().flat_map(Rule::references);
-            for target in drops.chain(rules) {
+            let block = entry.block();
+            let drops = block.into_iter().flat_map(|b| b.drops.iter().flatten());
+            let rules = block.into_iter().flat_map(|b| b.rules.iter().flat_map(Rule::references));
+            let recipes = entry
+                .recipes
+                .iter()
+                .flat_map(|r| r.inputs.iter().chain([&r.station]));
+            for target in drops.chain(rules).chain(recipes) {
                 if registry.lookup(target).is_none() {
                     return Err(LoadError::UnknownReference {
                         from: entry.identifier.clone(),

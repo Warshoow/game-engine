@@ -11,14 +11,27 @@
     (identifier: "core:grass", kind: Block((solid: true,  color: (0.35, 0.6, 0.25), drops: Some(["core:dirt"])))),
     (identifier: "core:stone", kind: Block((solid: true,  color: (0.55, 0.55, 0.58)))),
     (identifier: "core:dirt",  kind: Block((solid: true,  color: (0.45, 0.30, 0.15)))),
-    (identifier: "core:sand",  kind: Block((solid: true,  color: (0.85, 0.78, 0.55)))),
+    (identifier: "core:sand",  kind: Block((solid: true,  color: (0.85, 0.78, 0.55))),
+        recipes: [(inputs: ["core:stone", "core:stone"], count: 2, station: "core:workbench")]),
 
     // Lampe : un clic droit bascule entre éteinte et allumée (§3.6, règles).
     // Aucun code Rust ne la connaît. Pas de vraie lumière (non-goal §7) :
     // seule la couleur change. Allumée, elle se casse en lampe éteinte.
     (identifier: "core:lamp", kind: Block((solid: true, color: (0.30, 0.27, 0.12),
-        rules: [(on: Used, then: [ReplaceSelf("core:lamp_lit")])]))),
+        rules: [(on: Used, then: [ReplaceSelf("core:lamp_lit")])])),
+        recipes: [(inputs: ["core:stone", "core:stone", "core:stone", "core:dirt"], station: "core:workbench")]),
     (identifier: "core:lamp_lit", kind: Block((solid: true, color: (1.0, 0.85, 0.35),
         drops: Some(["core:lamp"]),
         rules: [(on: Used, then: [ReplaceSelf("core:lamp")])]))),
+
+    // Établi (jalon 3) : garde jusqu'à 9 items posés dessus (block-entity,
+    // §3.3). Clic droit item en main : le pose dessus ; main vide : fabrique
+    // si le contenu est une recette faite ici, sinon rend les items. Les
+    // recettes sont portées par l'entrée produite (`recipes`, ci-dessus).
+    (identifier: "core:workbench", kind: Block((solid: true, color: (0.55, 0.36, 0.18),
+        storage: Some(9),
+        rules: [
+            (on: Used, when: [HoldingAny], then: [StoreHeld]),
+            (on: Used, when: [EmptyHand], then: [Craft]),
+        ]))),
 ]

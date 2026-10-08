@@ -34,6 +34,10 @@ pub enum Hook {
 pub enum Condition {
     /// Le joueur tient cette entrée en main.
     Holding(String),
+    /// Le joueur a la main vide.
+    EmptyHand,
+    /// Le joueur tient quelque chose, peu importe quoi.
+    HoldingAny,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -42,6 +46,13 @@ pub enum Effect {
     ReplaceSelf(String),
     /// Fait tomber un exemplaire de cette entrée à la position du bloc.
     Drop(String),
+    /// Pose un exemplaire de ce que tient le joueur sur le bloc (son
+    /// block-entity, §3.3), s'il a de la place.
+    StoreHeld,
+    /// Fabrique avec ce qui est posé sur le bloc : si c'est exactement les
+    /// entrées d'une recette faite sur ce bloc, le produit tombe ; sinon les
+    /// items posés sont rendus. Dans les deux cas le bloc est vidé.
+    Craft,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -56,9 +67,13 @@ pub struct Rule {
 impl Rule {
     /// Les identifiers que cite la règle (validés au chargement du registre).
     pub fn references(&self) -> impl Iterator<Item = &String> {
-        let conditions = self.when.iter().map(|Condition::Holding(id)| id);
-        let effects = self.then.iter().map(|e| match e {
-            Effect::ReplaceSelf(id) | Effect::Drop(id) => id,
+        let conditions = self.when.iter().filter_map(|c| match c {
+            Condition::Holding(id) => Some(id),
+            Condition::EmptyHand | Condition::HoldingAny => None,
+        });
+        let effects = self.then.iter().filter_map(|e| match e {
+            Effect::ReplaceSelf(id) | Effect::Drop(id) => Some(id),
+            Effect::StoreHeld | Effect::Craft => None,
         });
         conditions.chain(effects)
     }
@@ -69,6 +84,8 @@ impl Rule {
 pub enum Action {
     SetSelf(ContentId),
     Drop(ContentId),
+    StoreHeld,
+    Craft,
 }
 
 /// Contexte d'évaluation : ce que les conditions peuvent interroger.
@@ -94,12 +111,16 @@ pub fn actions(registry: &Registry, block: ContentId, hook: Hook, ctx: Context) 
         .filter(|r| {
             r.when.iter().all(|c| match c {
                 Condition::Holding(s) => ctx.holding.is_some() && ctx.holding == id(s),
+                Condition::EmptyHand => ctx.holding.is_none(),
+                Condition::HoldingAny => ctx.holding.is_some(),
             })
         })
         .flat_map(|r| &r.then)
         .filter_map(|e| match e {
             Effect::ReplaceSelf(s) => id(s).map(Action::SetSelf),
             Effect::Drop(s) => id(s).map(Action::Drop),
+            Effect::StoreHeld => Some(Action::StoreHeld),
+            Effect::Craft => Some(Action::Craft),
         })
         .collect()
 }
@@ -161,6 +182,26 @@ mod tests {
             vec![Action::SetSelf(id("t:lamp_lit")), Action::Drop(id("t:flint"))]
         );
         assert_eq!(actions(&reg, log, Hook::Broken, Context::default()), vec![Action::Drop(id("t:flint"))]);
+    }
+
+    #[test]
+    fn hand_conditions_split_store_and_craft() {
+        let reg = Registry::from_ron(
+            r#"[
+                (identifier: "t:bench", kind: Block((solid: true, color: (1.0, 1.0, 1.0), storage: Some(9),
+                    rules: [
+                        (on: Used, when: [HoldingAny], then: [StoreHeld]),
+                        (on: Used, when: [EmptyHand], then: [Craft]),
+                    ]))),
+                (identifier: "t:stone", kind: Block((solid: true, color: (1.0, 1.0, 1.0)))),
+            ]"#,
+        )
+        .unwrap();
+        let id = |s| reg.lookup(s).unwrap();
+        let bench = id("t:bench");
+        let holding = Context { holding: Some(id("t:stone")) };
+        assert_eq!(actions(&reg, bench, Hook::Used, holding), vec![Action::StoreHeld]);
+        assert_eq!(actions(&reg, bench, Hook::Used, Context::default()), vec![Action::Craft]);
     }
 
     #[test]

@@ -70,6 +70,11 @@ F plein écran.
   `Used`/`Placed`/`Broken`, condition `Holding`, effets `ReplaceSelf`/`Drop`.
   Vocabulaire **append-only** (§3.6) : ajouter des variantes, ne jamais en
   renommer ni supprimer. Un `ReplaceSelf` ne redéclenche aucun hook.
+- **Block-entities** (§3.3) : `VoxelWorld` garde une map position →
+  items posés, pour les blocs dont l'entrée déclare `storage`. Créée par
+  `set_voxel` quand le bloc posé en déclare, supprimée quand le voxel
+  change ; `interact.rs` (`Edit::set`) fait d'abord tomber le contenu.
+  Recettes : `ContentEntry::recipes`, cherchées par `crafting::find`.
 - **`voxels_per_meter` n'existe qu'une fois** : `VoxelWorld::voxels_per_meter()`
   (gelé, §3.5). Le générateur le reçoit en paramètre.
 
@@ -191,8 +196,8 @@ Tickets #1 à #5 faits et fermés (verticalité, contour du bloc visé, HUD
 debug, caméra interpolée, build Windows — tous validés en jeu).
 
 **Ordre des jalons : `docs/jalons.md`** (décidé avec Warshow le
-2026-10-07) — 1. items et inventaire, 2. hooks et règles, 3. craft par
-proximité. Les décisions de socle correspondantes sont dans le design doc
+2026-10-07) — 1. items et inventaire, 2. hooks et règles, 3. craft posé sur
+l'établi (révisé : plus de proximité). Les décisions de socle correspondantes sont dans le design doc
 (§3.1 recettes, §3.3 cycle de vie des block-entities, §3.6 forme du
 comportement). Tickets ouverts hors jalons : #6 distance de vue, #7
 ambient occlusion, #8 persistance (à arbitrer).

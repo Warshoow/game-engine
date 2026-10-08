@@ -514,3 +514,38 @@ ce qu'on tient — imprévisible). Maj + clic droit pose toujours.
 Rust qui la connaisse. Comme elle n'existe pas dans le monde généré, une
 touche de debug G donne un exemplaire de chaque bloc solide (découvert
 dans le registre).
+
+## 2026-10-08 (suite) — Jalon 3 : craft posé sur l'établi (#11)
+
+**Changement de cap.** Le craft par proximité ne plaisait pas à Warshow.
+Retenu : poser les items *sur* l'établi, puis fabriquer main vide. Pas de
+menu, on voit ce qu'on fabrique, et surtout c'est le premier usage des
+**block-entities** (§3.3), figées au doc depuis le début mais jamais
+codées. #13 (craft dans le monde) est fusionné dans #11.
+
+**Block-entities.** `BlockData::storage` (capacité) ; `VoxelWorld` garde
+une map position → items, créée par `set_voxel` quand le bloc posé
+déclare `storage`, supprimée quand le voxel change. Une seule map pour
+tout le monde (commentaire `ponytail:`) : par chunk quand la save en aura
+besoin. Le contenu d'un établi cassé tombe au sol (`Edit::set`).
+
+**Recettes** (§3.1). `ContentEntry::recipes` sur l'entrée produite :
+entrées sans ordre, quantité, station. `crafting::find` compare des
+listes triées et prend la première recette dans l'ordre du registre
+(déterministe). Références validées au chargement.
+
+**Vocabulaire** (append-only). Conditions `EmptyHand`, `HoldingAny` ;
+effets `StoreHeld`, `Craft` (produit si recette, sinon rend les items).
+L'établi n'est qu'une entrée de `core.ron` qui combine ces mots.
+
+**Main vide.** L'inventaire n'avait pas de main vide (toujours une pile
+choisie) : une case est ajoutée après les piles. Ramasser en main vide
+la garde vide, sauf le tout premier item.
+
+**Piège évité.** Un produit apparaît au centre de l'établi, donc dans un
+solide ; son petit saut (≈ 20 cm) ne l'en sort pas et il y reste coincé.
+Un item qui naît dans un solide apparaît donc un voxel au-dessus.
+
+**Tests.** Stockage (capacité, vidage, disparition avec le bloc),
+recherche de recette (ordre, station, manque, surplus), conditions de
+main, inventaire avec main vide. 56 tests, clippy propre.

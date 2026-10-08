@@ -2,7 +2,8 @@
 //!
 //! L'inventaire tient des `ContentId` du registre : n'importe quelle entrée
 //! (un bloc s'y range lui-même, sans item « double »). Une pile par entrée,
-//! dans l'ordre de première obtention, sans limite de taille.
+//! dans l'ordre de première obtention, sans limite de taille. Après la
+//! dernière pile, une case **main vide** (les règles `EmptyHand`, §3.6).
 //!
 //! La barre est **réflexive du registre** (§3.11) : couleur et nom viennent
 //! de l'entrée, l'UI ne connaît aucun bloc.
@@ -18,6 +19,7 @@ use crate::{GameWorld, HeldBlockText};
 #[derive(Resource, Default)]
 pub struct Inventory {
     slots: Vec<(ContentId, u32)>,
+    /// Dans `0..=slots.len()` ; `slots.len()` = la main vide.
     selected: usize,
 }
 
@@ -25,32 +27,37 @@ impl Inventory {
     pub fn add(&mut self, id: ContentId) {
         match self.slots.iter_mut().find(|(c, _)| *c == id) {
             Some((_, n)) => *n += 1,
-            None => self.slots.push((id, 1)),
+            None => {
+                // Main vide choisie exprès : elle le reste (la nouvelle pile
+                // s'insère avant elle). Inventaire vide : le premier item
+                // ramassé passe en main.
+                if self.selected == self.slots.len() && !self.slots.is_empty() {
+                    self.selected += 1;
+                }
+                self.slots.push((id, 1));
+            }
         }
     }
 
-    /// L'entrée en main, s'il y en a une.
+    /// L'entrée en main ; `None` = main vide.
     pub fn selected(&self) -> Option<ContentId> {
         self.slots.get(self.selected).map(|&(id, _)| id)
     }
 
     /// Retire un exemplaire de l'entrée en main. Une pile vide disparaît ;
-    /// la sélection reste sur une case existante.
+    /// la sélection passe à la case suivante (au pire la main vide).
     pub fn take_selected(&mut self) {
         let Some((_, n)) = self.slots.get_mut(self.selected) else { return };
         *n -= 1;
         if *n == 0 {
             self.slots.remove(self.selected);
-            self.selected = self.selected.min(self.slots.len().saturating_sub(1));
         }
     }
 
-    /// Décale la sélection, cyclique (`step` = ±1).
+    /// Décale la sélection, cyclique sur les piles + la main vide (`step` = ±1).
     pub fn scroll(&mut self, step: isize) {
-        let n = self.slots.len() as isize;
-        if n > 0 {
-            self.selected = (self.selected as isize + step).rem_euclid(n) as usize;
-        }
+        let n = self.slots.len() as isize + 1;
+        self.selected = (self.selected as isize + step).rem_euclid(n) as usize;
     }
 }
 
@@ -119,7 +126,8 @@ pub fn update_hotbar(
     if let Ok(mut text) = held_text.single_mut() {
         text.0 = match inventory.selected() {
             Some(id) => format!("en main : {}", identifier(registry, id)),
-            None => "inventaire vide : casse des blocs".to_string(),
+            None if inventory.slots.is_empty() => "inventaire vide : casse des blocs".to_string(),
+            None => "main vide".to_string(),
         };
     }
     let Ok(root) = root.single() else { return };
@@ -140,6 +148,18 @@ pub fn update_hotbar(
             ))
             .with_child((Text::new(count.to_string()), TextFont::from_font_size(14.0)));
         }
+        // La case main vide, après les piles.
+        let border = if inventory.selected == inventory.slots.len() { Color::WHITE } else { Color::BLACK };
+        bar.spawn((
+            Node {
+                width: Val::Px(44.0),
+                height: Val::Px(44.0),
+                border: UiRect::all(Val::Px(3.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.3)),
+            BorderColor::all(border),
+        ));
     });
 }
 
@@ -167,23 +187,33 @@ mod tests {
     fn stacks_take_and_selection_stay_consistent() {
         let mut inv = Inventory::default();
         assert_eq!(inv.selected(), None);
-        inv.take_selected(); // vide : sans effet
+        inv.take_selected(); // main vide : sans effet
 
-        inv.add(A);
+        inv.add(A); // inventaire vide : le premier item passe en main
+        assert_eq!(inv.selected(), Some(A));
         inv.add(B);
         inv.add(A);
         assert_eq!(inv.slots, vec![(A, 2), (B, 1)]);
 
         inv.scroll(1);
         assert_eq!(inv.selected(), Some(B));
-        inv.take_selected(); // B épuisé : la case disparaît, sélection ramenée sur A
+        inv.take_selected(); // B épuisé : la case disparaît, on tombe sur la main vide
         assert_eq!(inv.slots, vec![(A, 2)]);
-        assert_eq!(inv.selected(), Some(A));
-
-        inv.scroll(-1); // cyclique sur une seule case
-        assert_eq!(inv.selected(), Some(A));
-        inv.take_selected();
-        inv.take_selected();
         assert_eq!(inv.selected(), None);
+
+        inv.scroll(1); // cyclique : main vide → A
+        assert_eq!(inv.selected(), Some(A));
+        inv.scroll(-1);
+        assert_eq!(inv.selected(), None);
+    }
+
+    #[test]
+    fn empty_hand_stays_empty_when_picking_up() {
+        let mut inv = Inventory::default();
+        inv.add(A);
+        inv.scroll(1); // main vide choisie exprès
+        inv.add(B);
+        assert_eq!(inv.selected(), None);
+        assert_eq!(inv.slots, vec![(A, 1), (B, 1)]);
     }
 }

@@ -22,6 +22,11 @@ pub struct VoxelWorld {
     /// porte l'invariant, pas la discipline. Changer la densité = autre monde.
     voxels_per_meter: f32,
     chunks: HashMap<ChunkPos, Chunk>,
+    /// Block-entities (§3.3) : canal creux position voxel → items posés sur
+    /// le bloc. Seuls les blocs dont l'entrée déclare `storage` y ont une
+    /// ligne, créée à la pose, supprimée quand le voxel change.
+    // ponytail: une map pour tout le monde ; par chunk quand la save le demandera.
+    block_entities: HashMap<[i64; 3], Vec<ContentId>>,
 }
 
 impl VoxelWorld {
@@ -31,6 +36,7 @@ impl VoxelWorld {
             chunk_size,
             voxels_per_meter,
             chunks: HashMap::new(),
+            block_entities: HashMap::new(),
         }
     }
 
@@ -80,11 +86,46 @@ impl VoxelWorld {
 
     /// Écrit un voxel ; retourne le chunk touché (à re-mesher) ou `None`
     /// si le chunk n'est pas chargé.
+    ///
+    /// Cycle de vie des block-entities (§3.3) : l'état de l'ancien bloc
+    /// disparaît (récupérer son contenu avant, avec [`Self::take_stored`]),
+    /// un nouvel état vide est créé si le nouveau bloc déclare `storage`.
     pub fn set_voxel(&mut self, v: [i64; 3], material: ContentId) -> Option<ChunkPos> {
         let (pos, l) = self.split(v);
         let chunk = self.chunks.get_mut(&pos)?;
         chunk.set(l[0], l[1], l[2], material);
+        self.block_entities.remove(&v);
+        if self.capacity(material).is_some() {
+            self.block_entities.insert(v, Vec::new());
+        }
         Some(pos)
+    }
+
+    fn capacity(&self, id: ContentId) -> Option<u32> {
+        self.registry.get(id)?.block()?.storage
+    }
+
+    /// Les items posés sur le bloc `v`, s'il a un état.
+    pub fn stored(&self, v: [i64; 3]) -> Option<&[ContentId]> {
+        self.block_entities.get(&v).map(Vec::as_slice)
+    }
+
+    /// Pose un item sur le bloc `v`. `false` si le bloc n'a pas d'état ou
+    /// s'il est plein.
+    pub fn store(&mut self, v: [i64; 3], item: ContentId) -> bool {
+        let Some(capacity) = self.voxel(v).and_then(|id| self.capacity(id)) else { return false };
+        match self.block_entities.get_mut(&v) {
+            Some(items) if (items.len() as u32) < capacity => {
+                items.push(item);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Vide le bloc `v` et rend son contenu (vide s'il n'a pas d'état).
+    pub fn take_stored(&mut self, v: [i64; 3]) -> Vec<ContentId> {
+        self.block_entities.get_mut(&v).map(std::mem::take).unwrap_or_default()
     }
 
     /// Solidité d'un voxel, résolue via le registre (data-driven).
@@ -161,5 +202,46 @@ mod tests {
     fn meters_to_voxel_respects_resolution() {
         let (w, _, _) = world_with(2.0); // voxels de 0,5 m
         assert_eq!(w.voxel_at_m([1.6, -0.2, 0.0]), [3, -1, 0]);
+    }
+}
+
+#[cfg(test)]
+mod block_entity_tests {
+    use super::*;
+    use crate::chunk::Chunk;
+
+    #[test]
+    fn storage_lives_with_the_block() {
+        let reg = Registry::from_ron(
+            r#"[
+                (identifier: "t:air", kind: Block((solid: false, color: (0.0, 0.0, 0.0)))),
+                (identifier: "t:bench", kind: Block((solid: true, color: (1.0, 1.0, 1.0), storage: Some(2)))),
+                (identifier: "t:stone", kind: Block((solid: true, color: (1.0, 1.0, 1.0)))),
+            ]"#,
+        )
+        .unwrap();
+        let id = |s| reg.lookup(s).unwrap();
+        let (air, bench, stone) = (id("t:air"), id("t:bench"), id("t:stone"));
+        let mut w = VoxelWorld::new(reg, 16, 1.0);
+        w.insert_chunk(ChunkPos { x: 0, y: 0, z: 0 }, Chunk::filled(16, air));
+        let v = [1, 2, 3];
+
+        // Pas d'état sur un bloc sans `storage`.
+        w.set_voxel(v, stone);
+        assert_eq!(w.stored(v), None);
+        assert!(!w.store(v, stone));
+
+        // Établi posé : état vide, capacité 2.
+        w.set_voxel(v, bench);
+        assert_eq!(w.stored(v), Some(&[][..]));
+        assert!(w.store(v, stone) && w.store(v, stone));
+        assert!(!w.store(v, stone), "plein");
+        assert_eq!(w.take_stored(v), vec![stone, stone]);
+        assert_eq!(w.stored(v), Some(&[][..]));
+
+        // Le voxel change : l'état disparaît avec l'établi.
+        w.store(v, stone);
+        w.set_voxel(v, air);
+        assert_eq!(w.stored(v), None);
     }
 }

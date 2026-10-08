@@ -42,29 +42,40 @@ fabriquer. (Fait et validé en jeu le 2026-10-08, #9.)
   comportement (ex. une lampe qui bascule entre deux blocs quand on
   l'utilise), sans code Rust propre à ce bloc.
 
-## 3. Craft par proximité
+## 3. Craft posé sur l'établi
 
-Choix de jeu : **pas de grille à la Minecraft.** Être à portée d'une
-station débloque ses recettes dans un menu de craft.
+Choix de jeu (révisé le 2026-10-08, à la place du craft par proximité) :
+**pas de menu.** On pose ses items *sur* l'établi (clic droit, item en
+main), ils s'y affichent ; un clic droit main vide fabrique si ce qui est
+posé correspond à une recette (le résultat tombe au sol), sinon rend les
+items.
 
-- **Pourquoi :** le moins de code (une station n'a pas d'état, donc pas de
-  block-entity ni de grille), la portée s'exprime en mètres (§2), et ça ne
-  copie pas Minecraft.
-- **Socle :** propriété `station` (type + portée en mètres) sur l'entrée
-  du bloc ; recettes portées par l'entrée produite (§3.1).
-- **Lève (en partie) :** « UI riche » — menu de craft.
-- **Fait quand :** près d'un établi, le menu liste les recettes faisables
-  avec l'inventaire, fabriquer consomme les entrées et ajoute la sortie ;
-  loin, les recettes de l'établi disparaissent.
+- **Pourquoi :** on voit ce qu'on fabrique, pas d'UI riche à lever, et
+  c'est l'occasion de construire les **block-entities** (§3.3), figées au
+  doc mais jamais codées : l'établi est le cas d'école d'un bloc à état.
+- **Socle :**
+  - block-entity : propriété `storage` (capacité en items) sur l'entrée du
+    bloc ; l'état est créé à la pose, supprimé à la casse — son contenu
+    tombe au sol (§3.3) ;
+  - vocabulaire de règles (append-only) : conditions `EmptyHand`,
+    `HoldingAny` ; effets `StoreHeld`, `Craft` ;
+  - recettes portées par l'entrée produite (§3.1) : entrées (sans ordre),
+    quantité, station.
+- **Fait quand :** poser des items sur l'établi les affiche ; main vide,
+  une recette valide produit le résultat, sinon les items reviennent ;
+  casser l'établi rend son contenu ; tests headless du stockage et des
+  recettes.
+- *Fait et validé en jeu (Windows) le 2026-10-08 (#11)* : établi, lampe et sable fabricables ; case
+  « main vide » ajoutée à l'inventaire (nécessaire à `EmptyHand`).
+- La proximité et le menu (piste « à la Minecraft ») restent possibles
+  plus tard pour d'autres stations.
 
 ## Plus tard (non ordonné)
 
 - **Script Lua** (`mlua`, étage 3 de §3.6) — quand un bloc concret ne
   s'exprime pas en règles. Lève « script runtime complet ».
-- **Craft dans le monde** pour certaines stations (forge, poterie…) :
-  poser les items sur le bloc, frapper avec un outil. Avec
-  `voxels_per_meter` > 1, façonner l'objet voxel par voxel est une piste
-  propre à ce moteur.
+- **Façonner voxel par voxel** sur une station (forge, poterie…) : avec
+  `voxels_per_meter` > 1, une piste propre à ce moteur, après le jalon 3.
 - **Modèles non cubiques** — à écrire dans le design doc (§3.1, forme de
   « l'apparence ») quand un contenu concret en aura besoin. Pistes :
   blocs = liste de boîtes (forme et collision) ou finesse via

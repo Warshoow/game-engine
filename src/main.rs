@@ -79,6 +79,7 @@ fn main() {
         .add_plugins((player::PlayerPlugin, FrameTimeDiagnosticsPlugin::default()))
         .init_resource::<DirtyChunks>()
         .init_resource::<inventory::Inventory>()
+        .init_resource::<items::StorageChanged>()
         .add_systems(
             Startup,
             (setup_world, player::spawn_player, inventory::spawn_hotbar).chain(),
@@ -92,6 +93,7 @@ fn main() {
                 update_debug_text,
                 items::add_item_visuals,
                 items::place_items,
+                items::show_stored.after(interact::interact),
                 inventory::scroll_selection,
                 inventory::give_all_blocks,
                 inventory::update_hotbar.after(inventory::scroll_selection),

@@ -15,6 +15,7 @@
 
 use bevy::prelude::*;
 
+use voxel_core::crafting;
 use voxel_core::registry::ContentId;
 use voxel_core::rules::{self, Action, Context, Hook};
 use voxel_core::physics::Aabb;
@@ -23,7 +24,7 @@ use voxel_core::world::VoxelWorld;
 
 use crate::player::{CursorCaptured, Player, PLAYER_HEIGHT_M, PLAYER_WIDTH_M, PlayerCamera};
 use crate::inventory::Inventory;
-use crate::items::DroppedItem;
+use crate::items::{DroppedItem, ItemVisual, StorageChanged};
 use crate::{DirtyChunks, GameWorld};
 
 /// Portée de la main, en mètres (§2 — jamais « en blocs »).
@@ -63,7 +64,7 @@ pub fn highlight_target(
     );
 }
 
-// Un système Bevy prend ses ressources en paramètres : 9 ici (entrée,
+// Un système Bevy prend ses ressources en paramètres : 10 ici (entrée,
 // monde, inventaire, caméra, joueur…), c'est la forme normale.
 #[allow(clippy::too_many_arguments)]
 pub fn interact(
@@ -74,6 +75,7 @@ pub fn interact(
     captured: Res<CursorCaptured>,
     mut game: ResMut<GameWorld>,
     mut dirty: ResMut<DirtyChunks>,
+    mut storage: ResMut<StorageChanged>,
     camera: Query<&GlobalTransform, With<PlayerCamera>>,
     player: Query<&Player>,
 ) {
@@ -88,7 +90,13 @@ pub fn interact(
     let Ok(cam) = camera.single() else { return };
     let Some(hit) = aim(&game.world, cam) else { return };
     let ctx = Context { holding: inventory.selected() };
-    let mut edit = Edit { commands: &mut commands, game: &mut game, dirty: &mut dirty };
+    let mut edit = Edit {
+        commands: &mut commands,
+        game: &mut game,
+        dirty: &mut dirty,
+        storage: &mut storage,
+        inventory: &mut inventory,
+    };
 
     if breaking {
         let Some(broken) = edit.game.world.voxel(hit.voxel) else { return };
@@ -118,7 +126,7 @@ pub fn interact(
 
     // Poser. Seul un bloc se pose : un item en main (sans `places`, pas
     // encore implémenté) ne fait rien.
-    let Some(held) = inventory.selected().filter(|&id| {
+    let Some(held) = edit.inventory.selected().filter(|&id| {
         edit.game.world.registry.get(id).is_some_and(|e| e.block().is_some())
     }) else {
         return;
@@ -141,25 +149,35 @@ pub fn interact(
         return;
     }
     if edit.set(target, held) {
-        inventory.take_selected();
+        edit.inventory.take_selected();
         let actions = rules::actions(&edit.game.world.registry, held, Hook::Placed, ctx);
         edit.apply(target, &actions);
     }
 }
 
 /// Ce qu'une modification du monde touche : le monde, les chunks à
-/// re-mesher, et les entités à faire apparaître.
+/// re-mesher, les blocs dont le contenu posé change, l'inventaire, et les
+/// entités à faire apparaître.
 struct Edit<'a, 'w, 's> {
     commands: &'a mut Commands<'w, 's>,
     game: &'a mut GameWorld,
     dirty: &'a mut DirtyChunks,
+    storage: &'a mut StorageChanged,
+    inventory: &'a mut Inventory,
 }
 
 impl Edit<'_, '_, '_> {
     /// Écrit un voxel et note les chunks à re-mesher. `false` si le chunk
     /// n'est pas chargé (rien n'a changé).
     fn set(&mut self, voxel: [i64; 3], id: ContentId) -> bool {
+        // Le contenu posé sur l'ancien bloc tombe au sol (§3.3 : l'état
+        // disparaît avec le bloc).
+        let stored = self.game.world.take_stored(voxel);
         let Some(pos) = self.game.world.set_voxel(voxel, id) else { return false };
+        for item in stored {
+            self.drop(voxel, item);
+        }
+        self.storage.0.insert(voxel);
         self.dirty.0.insert(pos);
         // Culling inter-chunks : un voxel en bordure change aussi les faces
         // du chunk voisin (sa face culled peut devoir (ré)apparaître).
@@ -182,11 +200,18 @@ impl Edit<'_, '_, '_> {
         true
     }
 
-    /// Fait tomber un item au centre du voxel.
+    /// Fait tomber un item au centre du voxel — juste au-dessus s'il est
+    /// solide (produit d'un établi) : né dans un solide, l'item y resterait
+    /// coincé, son petit saut ne suffisant pas à en sortir.
     fn drop(&mut self, voxel: [i64; 3], id: ContentId) {
         let size_m = 1.0 / self.game.world.voxels_per_meter();
-        let center = (Vec3::from_array(voxel.map(|v| v as f32)) + 0.5) * size_m;
-        self.commands.spawn((DroppedItem::new(id, center), Transform::from_translation(center)));
+        let lift = if self.game.world.is_solid(voxel) { 1.0 } else { 0.0 };
+        let center = (Vec3::from_array(voxel.map(|v| v as f32)) + 0.5 + Vec3::Y * lift) * size_m;
+        self.commands.spawn((
+            DroppedItem::new(id, center),
+            ItemVisual(id),
+            Transform::from_translation(center),
+        ));
     }
 
     /// Applique les actions d'une règle au bloc `voxel`. Un `SetSelf` ne
@@ -198,6 +223,24 @@ impl Edit<'_, '_, '_> {
                     self.set(voxel, id);
                 }
                 Action::Drop(id) => self.drop(voxel, id),
+                Action::StoreHeld => {
+                    if let Some(held) = self.inventory.selected()
+                        && self.game.world.store(voxel, held)
+                    {
+                        self.inventory.take_selected();
+                        self.storage.0.insert(voxel);
+                    }
+                }
+                Action::Craft => {
+                    let items = self.game.world.take_stored(voxel);
+                    let station = self.game.world.voxel(voxel);
+                    let product = station.and_then(|s| crafting::find(&self.game.world.registry, s, &items));
+                    match product {
+                        Some((id, count)) => (0..count).for_each(|_| self.drop(voxel, id)),
+                        None => items.into_iter().for_each(|id| self.drop(voxel, id)),
+                    }
+                    self.storage.0.insert(voxel);
+                }
             }
         }
     }

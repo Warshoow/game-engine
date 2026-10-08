@@ -4,7 +4,7 @@
 //! collision que le joueur (`move_and_collide`) et se ramasse à portée. Tout
 //! cela est de la simulation (l'inventaire change) : tick fixe (§3.9).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use bevy::prelude::*;
 
@@ -22,7 +22,13 @@ const PICKUP_RANGE_M: f32 = 1.5;
 /// Petit saut à l'apparition, pour que l'item « sorte » du bloc cassé.
 const POP_SPEED_M_S: f32 = 3.0;
 
+/// Un cube d'item affiché, de la couleur de son entrée : item au sol, ou
+/// item posé sur un bloc (établi).
 #[derive(Component)]
+pub struct ItemVisual(pub ContentId);
+
+#[derive(Component)]
+#[require(Transform)]
 pub struct DroppedItem {
     pub content: ContentId,
     feet: Vec3,
@@ -86,17 +92,64 @@ pub fn add_item_visuals(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut cube: Local<Option<Handle<Mesh>>>,
     mut material_of: Local<HashMap<ContentId, Handle<StandardMaterial>>>,
-    added: Query<(Entity, &DroppedItem), Added<DroppedItem>>,
+    added: Query<(Entity, &ItemVisual), Added<ItemVisual>>,
 ) {
-    for (entity, item) in &added {
+    for (entity, &ItemVisual(content)) in &added {
         let cube = cube
             .get_or_insert_with(|| meshes.add(Cuboid::from_length(ITEM_SIZE_M)))
             .clone();
         let material = material_of
-            .entry(item.content)
-            .or_insert_with(|| materials.add(inventory::color(&game.world.registry, item.content)))
+            .entry(content)
+            .or_insert_with(|| materials.add(inventory::color(&game.world.registry, content)))
             .clone();
         commands.entity(entity).insert((Mesh3d(cube), MeshMaterial3d(material)));
+    }
+}
+
+/// Blocs dont le contenu posé (block-entity, §3.3) a changé : leurs cubes
+/// sont à refaire.
+#[derive(Resource, Default)]
+pub struct StorageChanged(pub HashSet<[i64; 3]>);
+
+/// Cube d'un item posé sur le bloc `.0`.
+#[derive(Component)]
+pub struct StoredVisual([i64; 3]);
+
+/// Refait les cubes posés sur les blocs notés dans [`StorageChanged`] :
+/// une grille 3 × 3 sur la face du dessus, puis une couche au-dessus.
+// ponytail: les cubes restent affichés si le chunk est déchargé ; à lier au
+// streaming si ça se voit.
+pub fn show_stored(
+    mut commands: Commands,
+    game: Res<GameWorld>,
+    mut changed: ResMut<StorageChanged>,
+    visuals: Query<(Entity, &StoredVisual)>,
+) {
+    if changed.0.is_empty() {
+        return;
+    }
+    for (entity, StoredVisual(v)) in &visuals {
+        if changed.0.contains(v) {
+            commands.entity(entity).despawn();
+        }
+    }
+    let size_m = 1.0 / game.world.voxels_per_meter();
+    for v in changed.0.drain() {
+        let top = (Vec3::new(v[0] as f32 + 0.5, v[1] as f32 + 1.0, v[2] as f32 + 0.5)) * size_m;
+        for (i, &id) in game.world.stored(v).unwrap_or_default().iter().enumerate() {
+            let (layer, cell) = (i / 9, i % 9);
+            let offset = Vec3::new(
+                (cell % 3) as f32 - 1.0,
+                0.0,
+                (cell / 3) as f32 - 1.0,
+            ) * ITEM_SIZE_M * 1.2
+                + Vec3::Y * ITEM_SIZE_M * (layer as f32 + 0.5);
+            commands.spawn((
+                ItemVisual(id),
+                StoredVisual(v),
+                Transform::from_translation(top + offset),
+            ));
+        }
     }
 }
 

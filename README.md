@@ -37,7 +37,7 @@ cargo run
 | Left click | enter FPS mode / break a block |
 | Right click | use the targeted block if it has a `Used` rule, otherwise place the held block |
 | Shift + right click | always place |
-| Mouse wheel | change the held block |
+| Mouse wheel | change the held block (the last slot is an empty hand) |
 | WASD + Space | move / jump |
 | F | fullscreen |
 | G | debug: one of every solid block |
@@ -69,6 +69,12 @@ what a block gives when broken (absent: itself; `Some([])`: nothing).
 `rules` gives a block behaviour as data: `(on: Used, when: [Holding("…")],
 then: [ReplaceSelf("…"), Drop("…")])` — see `crates/voxel_core/src/rules.rs`
 and the lamp in `core.ron`.
+
+**Crafting** happens *on* the workbench (`core:workbench`, G gives one): right
+click with an item in hand puts it on the bench; right click with an empty
+hand crafts if what lies there matches a recipe (the product drops), otherwise
+gives the items back. Recipes live on the produced entry:
+`recipes: [(inputs: ["core:stone", "core:stone"], count: 2, station: "core:workbench")]`.
 Never reorder or remove entries: their position is their ID.
 
 ## Layout
