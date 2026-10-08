@@ -40,6 +40,7 @@ cargo run
 | Mouse wheel | change the held block (the last slot is an empty hand) |
 | WASD + Space | move / jump |
 | F | fullscreen |
+| C | craft from the inventory (first recipe without a station you can make) |
 | G | debug: one of every solid block |
 | Esc | release the mouse |
 

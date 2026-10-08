@@ -638,3 +638,25 @@ invisible en pratique. Nouveau fichier optionnel (absent = aucun item) :
 les saves existantes restent lisibles, `FORMAT_VERSION` ne bouge pas.
 Illisible : erreur dans le log, items perdus, monde gardé (comme le
 joueur).
+
+## 2026-10-08 (suite) — Recettes sans station, touche C
+
+**Le besoin.** L'établi ne s'obtenait que par G (debug) : toute recette
+exigeait une station, et la seule station était l'établi lui-même.
+
+**Mécanisme, pas règle de jeu.** Warshow veut un moteur qui ne fige pas une
+manière de jouer (les joueurs feront leur propre jeu). Le moteur gagne donc
+une capacité générale — une recette peut ne pas avoir de `station` (§3.1
+le prévoyait : « station requise éventuelle ») — et la recette de l'établi
+n'est qu'une ligne de `core.ron`. Un autre jeu peut n'en avoir aucune.
+
+**Déclencheur : touche C.** Fabrique depuis l'inventaire la première
+recette sans station faisable, dans l'ordre du registre (déterministe).
+Pas de choix si plusieurs sont faisables : un menu le jour où ça gêne.
+
+**Compatibilité.** `station` devient `Option<String>` ; le RON est lu avec
+`IMPLICIT_SOME`, donc `station: "core:workbench"` s'écrit toujours sans
+`Some(…)` et les `registry.ron` des saves existantes se relisent.
+
+**Tests.** `craftable` (inventaire suffisant ou non, recette à station
+exclue et inversement), `Inventory::remove` garde la sélection.

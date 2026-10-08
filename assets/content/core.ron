@@ -32,11 +32,14 @@
     // §3.3). Clic droit item en main : le pose dessus ; main vide : fabrique
     // si le contenu est une recette faite ici, sinon rend les items. Les
     // recettes sont portées par l'entrée produite (`recipes`, ci-dessus).
+    // Sa propre recette est sans `station` : elle se fait depuis
+    // l'inventaire (touche C).
     (identifier: "core:workbench", kind: Block((solid: true, color: (0.55, 0.36, 0.18),
         texture: Some((side: "planks", top: Some("workbench_top"))),
         storage: Some(9),
         rules: [
             (on: Used, when: [HoldingAny], then: [StoreHeld]),
             (on: Used, when: [EmptyHand], then: [Craft]),
-        ]))),
+        ])),
+        recipes: [(inputs: ["core:dirt", "core:dirt", "core:stone", "core:stone"])]),
 ]

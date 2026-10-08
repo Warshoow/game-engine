@@ -42,7 +42,8 @@ Dernier commit de code : `3a60009` (jalon 5, #8).
 
 `cargo run` → clic gauche pour jouer, WASD/Espace, clic gauche casse,
 clic droit utilise (bloc à règle `Used`) ou pose, Maj+clic droit pose
-toujours, molette change la case, G debug, Échap libère la souris, F plein
+toujours, molette change la case, C fabrique depuis l'inventaire (recettes
+sans `station`), G debug, Échap libère la souris, F plein
 écran. **Pour juger le ressenti : build Windows** (`cargo windows`, ~10-16
 min ; copier l'exe ET `assets/` dans `Téléchargements\voxel_engine\`). Sous
 WSL le rendu est logiciel et rame — normal.
@@ -245,10 +246,9 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
 
 ## Prochaines étapes
 
-À choisir avec Warshow (proposé en fin de session, pas encore tranché ;
-reco donnée : l'établi d'abord, puis les biomes) :
-- **Recette de l'établi sans établi** — aujourd'hui il ne s'obtient que
-  par G (debug) ; seul manque pour un craft sans triche.
+À choisir avec Warshow. Principe posé par Warshow (2026-10-08) : le moteur
+ne fige pas une manière de jouer — il fournit des mécanismes, `core.ron`
+n'est qu'un jeu d'exemple, remplaçable sans toucher au Rust.
 - **#27 biomes/décor** ; mipmaps si les textures scintillent au loin.
 - Restent ouverts : #6 distance de vue, #7 AO, #12 Lua, #14/#15 modèles,
   et le reste des epics.

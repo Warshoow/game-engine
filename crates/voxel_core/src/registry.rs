@@ -103,8 +103,10 @@ pub struct Recipe {
     /// Exemplaires produits.
     #[serde(default = "one")]
     pub count: u32,
-    /// Le bloc sur lequel la recette se fait.
-    pub station: String,
+    /// Le bloc sur lequel la recette se fait ; absent : sans station,
+    /// depuis l'inventaire.
+    #[serde(default)]
+    pub station: Option<String>,
 }
 
 fn one() -> u32 {
@@ -164,7 +166,7 @@ impl Registry {
     /// Construit un registre depuis une liste d'entrées en RON. L'ordre du
     /// fichier fixe les IDs (append-only : on ajoute à la fin).
     pub fn from_ron(text: &str) -> Result<Self, LoadError> {
-        let entries: Vec<ContentEntry> = ron::from_str(text).map_err(LoadError::Parse)?;
+        let entries: Vec<ContentEntry> = parse(text)?;
         let mut registry = Self::new();
         for entry in entries {
             registry.register(entry).map_err(LoadError::Registry)?;
@@ -183,7 +185,7 @@ impl Registry {
     /// Relit un registre écrit par [`Self::to_snapshot`]. Un élément de
     /// vocabulaire inconnu (save d'une version plus récente) est refusé.
     pub fn from_snapshot(text: &str) -> Result<Self, LoadError> {
-        let snapshot: Snapshot = ron::from_str(text).map_err(LoadError::Parse)?;
+        let snapshot: Snapshot = parse(text)?;
         let mut registry = Self::new();
         for entry in snapshot.entries {
             registry.register(entry).map_err(LoadError::Registry)?;
@@ -220,7 +222,7 @@ impl Registry {
             let recipes = entry
                 .recipes
                 .iter()
-                .flat_map(|r| r.inputs.iter().chain([&r.station]));
+                .flat_map(|r| r.inputs.iter().chain(&r.station));
             for target in drops.chain(rules).chain(recipes) {
                 if registry.lookup(target).is_none() {
                     return Err(LoadError::UnknownReference {
@@ -394,6 +396,15 @@ fn read_png(path: &Path) -> Result<(u32, Vec<u8>), String> {
         png::ColorType::Indexed => unreachable!("EXPAND convertit la palette en RGB(A)"),
     };
     Ok((info.width, rgba))
+}
+
+/// RON avec `Some` implicite : un champ optionnel s'écrit `station:
+/// "core:workbench"` (comme avant qu'il soit optionnel) ou `Some(…)`.
+fn parse<T: for<'de> Deserialize<'de>>(text: &str) -> Result<T, LoadError> {
+    ron::Options::default()
+        .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
+        .from_str(text)
+        .map_err(LoadError::Parse)
 }
 
 #[cfg(test)]

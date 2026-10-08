@@ -11,6 +11,7 @@
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 
+use voxel_core::crafting;
 use voxel_core::registry::{ContentId, Kind, Registry};
 
 use crate::player::CursorCaptured;
@@ -47,10 +48,21 @@ impl Inventory {
     /// Retire un exemplaire de l'entrée en main. Une pile vide disparaît ;
     /// la sélection passe à la case suivante (au pire la main vide).
     pub fn take_selected(&mut self) {
-        let Some((_, n)) = self.slots.get_mut(self.selected) else { return };
-        *n -= 1;
-        if *n == 0 {
-            self.slots.remove(self.selected);
+        if let Some(id) = self.selected() {
+            self.remove(id);
+        }
+    }
+
+    /// Retire un exemplaire de `id`. Une pile vide disparaît ; la sélection
+    /// reste sur la même entrée (ou passe à la suivante si c'était elle).
+    pub fn remove(&mut self, id: ContentId) {
+        let Some(i) = self.slots.iter().position(|&(c, _)| c == id) else { return };
+        self.slots[i].1 -= 1;
+        if self.slots[i].1 == 0 {
+            self.slots.remove(i);
+            if i < self.selected {
+                self.selected -= 1;
+            }
         }
     }
 
@@ -83,6 +95,23 @@ pub fn scroll_selection(
     if captured.0 && scroll != 0.0 {
         inventory.scroll(if scroll > 0.0 { 1 } else { -1 });
     }
+}
+
+/// Touche C : fabrique depuis l'inventaire la première recette sans
+/// station faisable (§3.1). Le moteur ne connaît aucune recette : elles
+/// viennent du registre.
+pub fn craft_from_inventory(
+    keys: Res<ButtonInput<KeyCode>>,
+    captured: Res<CursorCaptured>,
+    game: Res<GameWorld>,
+    mut inventory: ResMut<Inventory>,
+) {
+    if !captured.0 || !keys.just_pressed(KeyCode::KeyC) {
+        return;
+    }
+    let Some((product, count, used)) = crafting::craftable(&game.world.registry, &inventory.slots) else { return };
+    used.into_iter().for_each(|id| inventory.remove(id));
+    (0..count).for_each(|_| inventory.add(product));
 }
 
 /// Debug — touche G : un exemplaire de chaque bloc solide du registre, pour
@@ -216,6 +245,16 @@ mod tests {
         assert_eq!(inv.selected(), Some(A));
         inv.scroll(-1);
         assert_eq!(inv.selected(), None);
+    }
+
+    #[test]
+    fn removing_another_stack_keeps_the_selection() {
+        let mut inv = Inventory::default();
+        inv.add(A);
+        inv.add(B);
+        inv.scroll(1);
+        inv.remove(A); // pile avant la sélection : B reste en main
+        assert_eq!(inv.selected(), Some(B));
     }
 
     #[test]
