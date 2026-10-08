@@ -35,6 +35,9 @@ fabriquer. (Fait et validé en jeu le 2026-10-08, #9.)
 
 - **Clic droit :** si le bloc visé a une règle sur `utilisé`, le clic
   droit l'utilise ; Maj + clic droit pose quand même.
+- *Fait le 2026-10-08 (#10)* : vocabulaire `Used`/`Placed`/`Broken`,
+  `Holding`, `ReplaceSelf`/`Drop` ; lampe dans `core.ron` ; touche G (debug)
+  pour obtenir un bloc absent du monde généré.
 - **Fait quand :** un bloc défini **uniquement en donnée** a un
   comportement (ex. une lampe qui bascule entre deux blocs quand on
   l'utilise), sans code Rust propre à ce bloc.

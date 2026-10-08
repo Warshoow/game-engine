@@ -67,6 +67,24 @@ pub fn scroll_selection(
     }
 }
 
+/// Debug — touche G : un exemplaire de chaque bloc solide du registre, pour
+/// essayer un contenu qui n'existe pas dans le monde généré. Découvert dans
+/// le registre, aucune liste en dur.
+pub fn give_all_blocks(
+    keys: Res<ButtonInput<KeyCode>>,
+    game: Res<GameWorld>,
+    mut inventory: ResMut<Inventory>,
+) {
+    if !keys.just_pressed(KeyCode::KeyG) {
+        return;
+    }
+    for (id, entry) in game.world.registry.iter() {
+        if entry.block().is_some_and(|b| b.solid) {
+            inventory.add(id);
+        }
+    }
+}
+
 /// Racine UI de la barre d'inventaire (bas de l'écran, centrée).
 #[derive(Component)]
 pub struct HotbarRoot;

@@ -12,4 +12,13 @@
     (identifier: "core:stone", kind: Block((solid: true,  color: (0.55, 0.55, 0.58)))),
     (identifier: "core:dirt",  kind: Block((solid: true,  color: (0.45, 0.30, 0.15)))),
     (identifier: "core:sand",  kind: Block((solid: true,  color: (0.85, 0.78, 0.55)))),
+
+    // Lampe : un clic droit bascule entre éteinte et allumée (§3.6, règles).
+    // Aucun code Rust ne la connaît. Pas de vraie lumière (non-goal §7) :
+    // seule la couleur change. Allumée, elle se casse en lampe éteinte.
+    (identifier: "core:lamp", kind: Block((solid: true, color: (0.30, 0.27, 0.12),
+        rules: [(on: Used, then: [ReplaceSelf("core:lamp_lit")])]))),
+    (identifier: "core:lamp_lit", kind: Block((solid: true, color: (1.0, 0.85, 0.35),
+        drops: Some(["core:lamp"]),
+        rules: [(on: Used, then: [ReplaceSelf("core:lamp")])]))),
 ]

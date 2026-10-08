@@ -65,6 +65,11 @@ F plein écran.
   fin, ne jamais réordonner ni supprimer. Aucun bloc défini en Rust côté
   jeu (les tests et `mesh_stats` construisent encore leurs registres en
   code, c'est voulu).
+- **Comportement = règles en donnée** (`BlockData::rules`, évaluées par
+  `voxel_core::rules::actions`, appliquées par `interact.rs`). Hooks
+  `Used`/`Placed`/`Broken`, condition `Holding`, effets `ReplaceSelf`/`Drop`.
+  Vocabulaire **append-only** (§3.6) : ajouter des variantes, ne jamais en
+  renommer ni supprimer. Un `ReplaceSelf` ne redéclenche aucun hook.
 - **`voxels_per_meter` n'existe qu'une fois** : `VoxelWorld::voxels_per_meter()`
   (gelé, §3.5). Le générateur le reçoit en paramètre.
 

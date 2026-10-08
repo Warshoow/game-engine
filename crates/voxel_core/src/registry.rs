@@ -15,6 +15,8 @@ use std::fmt;
 
 use serde::Deserialize;
 
+use crate::rules::Rule;
+
 /// ID entier stable d'une entrée du registre.
 ///
 /// `u32` : la palette de chunk mappe ses indices locaux (`u16`) vers ces IDs
@@ -49,6 +51,9 @@ pub struct BlockData {
     /// (l'herbe donne de la terre, un minerai une gemme).
     #[serde(default)]
     pub drops: Option<Vec<String>>,
+    /// Comportement en donnée (§3.6) — voir [`crate::rules`].
+    #[serde(default)]
+    pub rules: Vec<Rule>,
 }
 
 /// Une entrée de contenu : identifier stable + kind (qui porte ses données).
@@ -64,7 +69,7 @@ impl ContentEntry {
     pub fn new_block(identifier: &str, solid: bool, color: [f32; 3]) -> Self {
         Self {
             identifier: identifier.to_string(),
-            kind: Kind::Block(BlockData { solid, color, drops: None }),
+            kind: Kind::Block(BlockData { solid, color, drops: None, rules: Vec::new() }),
         }
     }
 
@@ -99,7 +104,10 @@ impl Registry {
         // Une référence vers une entrée inexistante est refusée au
         // chargement, pas découverte à la première casse.
         for (_, entry) in registry.iter() {
-            for target in entry.block().and_then(|b| b.drops.as_ref()).into_iter().flatten() {
+            let Some(block) = entry.block() else { continue };
+            let drops = block.drops.iter().flatten();
+            let rules = block.rules.iter().flat_map(Rule::references);
+            for target in drops.chain(rules) {
                 if registry.lookup(target).is_none() {
                     return Err(LoadError::UnknownReference {
                         from: entry.identifier.clone(),

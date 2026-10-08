@@ -1,8 +1,10 @@
 //! Pose / casse de voxels — critère §7.3 de la slice.
 //!
 //! Clic gauche : casser le voxel visé, qui laisse tomber ses drops
-//! (`Registry::drops`) en items au sol. Clic droit : poser le bloc en main
-//! (pris dans l'[`Inventory`]) sur la face visée. Tout est **data-driven** :
+//! (`Registry::drops`) en items au sol. Clic droit : *utiliser* le bloc visé
+//! s'il a une règle `Used` (§3.6), sinon poser le bloc en main (pris dans
+//! l'[`Inventory`]) sur la face visée ; Maj + clic droit pose toujours. Les
+//! hooks `Placed` et `Broken` déclenchent les règles du bloc concerné. Tout est **data-driven** :
 //! des `ContentId` du registre, jamais un type en dur — le système ne sait
 //! pas ce qu'il casse ni ce qu'il pose.
 //!
@@ -13,7 +15,8 @@
 
 use bevy::prelude::*;
 
-use voxel_core::chunk::ChunkPos;
+use voxel_core::registry::ContentId;
+use voxel_core::rules::{self, Action, Context, Hook};
 use voxel_core::physics::Aabb;
 use voxel_core::raycast::{raycast, RayHit};
 use voxel_core::world::VoxelWorld;
@@ -60,13 +63,14 @@ pub fn highlight_target(
     );
 }
 
-// Un système Bevy prend ses ressources en paramètres : 8 ici (entrée,
+// Un système Bevy prend ses ressources en paramètres : 9 ici (entrée,
 // monde, inventaire, caméra, joueur…), c'est la forme normale.
 #[allow(clippy::too_many_arguments)]
 pub fn interact(
     mut commands: Commands,
     mut inventory: ResMut<Inventory>,
     mouse: Res<ButtonInput<MouseButton>>,
+    keys: Res<ButtonInput<KeyCode>>,
     captured: Res<CursorCaptured>,
     mut game: ResMut<GameWorld>,
     mut dirty: ResMut<DirtyChunks>,
@@ -77,67 +81,90 @@ pub fn interact(
     // `cursor_grab` (voir l'ordre du plugin), le clic qui active le mode
     // ne casse pas de bloc au passage.
     let breaking = mouse.just_pressed(MouseButton::Left);
-    let placing = mouse.just_pressed(MouseButton::Right);
-    if !captured.0 || (!breaking && !placing) {
+    let right_click = mouse.just_pressed(MouseButton::Right);
+    if !captured.0 || (!breaking && !right_click) {
         return;
     }
     let Ok(cam) = camera.single() else { return };
-
     let Some(hit) = aim(&game.world, cam) else { return };
+    let ctx = Context { holding: inventory.selected() };
+    let mut edit = Edit { commands: &mut commands, game: &mut game, dirty: &mut dirty };
 
-    let edited: [i64; 3];
-    let touched: Option<ChunkPos> = if breaking {
-        let air = game.air;
-        edited = hit.voxel;
-        let broken = game.world.voxel(hit.voxel);
-        let touched = game.world.set_voxel(hit.voxel, air);
-        if let (Some(broken), Some(_)) = (broken, touched) {
-            let size_m = 1.0 / game.world.voxels_per_meter();
-            let center = (Vec3::from_array(hit.voxel.map(|v| v as f32)) + 0.5) * size_m;
-            for drop in game.world.registry.drops(broken) {
-                commands.spawn((DroppedItem::new(drop, center), Transform::from_translation(center)));
-            }
-        }
-        touched
-    } else {
-        // Seul un bloc se pose : un item en main (sans `places`, pas encore
-        // implémenté) ne fait rien.
-        let Some(held) = inventory.selected().filter(|&id| {
-            game.world.registry.get(id).is_some_and(|e| e.block().is_some())
-        }) else {
-            return;
-        };
-        // Poser : sur la face d'entrée du rayon. Normale nulle = l'œil est
-        // dans un solide, pas de face → rien.
-        if hit.normal == [0; 3] {
+    if breaking {
+        let Some(broken) = edit.game.world.voxel(hit.voxel) else { return };
+        let air = edit.game.air;
+        if !edit.set(hit.voxel, air) {
             return;
         }
-        let target = [
-            hit.voxel[0] + hit.normal[0] as i64,
-            hit.voxel[1] + hit.normal[1] as i64,
-            hit.voxel[2] + hit.normal[2] as i64,
-        ];
-        // Refuse de poser un bloc dans le volume du joueur.
-        if player
-            .single()
-            .is_ok_and(|p| voxel_overlaps_player(&game.world, target, p.feet()))
-        {
-            return;
+        for drop in edit.game.world.registry.drops(broken) {
+            edit.drop(hit.voxel, drop);
         }
-        edited = target;
-        let touched = game.world.set_voxel(target, held);
-        if touched.is_some() {
-            inventory.take_selected();
-        }
-        touched
+        let actions = rules::actions(&edit.game.world.registry, broken, Hook::Broken, ctx);
+        edit.apply(hit.voxel, &actions);
+        return;
+    }
+
+    // Clic droit sur un bloc qui a une règle `Used` : on l'utilise. Maj +
+    // clic droit pose quand même (sinon impossible de poser contre lui).
+    let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+    if let Some(target) = edit.game.world.voxel(hit.voxel)
+        && !shift
+        && rules::has_rule(&edit.game.world.registry, target, Hook::Used)
+    {
+        let actions = rules::actions(&edit.game.world.registry, target, Hook::Used, ctx);
+        edit.apply(hit.voxel, &actions);
+        return;
+    }
+
+    // Poser. Seul un bloc se pose : un item en main (sans `places`, pas
+    // encore implémenté) ne fait rien.
+    let Some(held) = inventory.selected().filter(|&id| {
+        edit.game.world.registry.get(id).is_some_and(|e| e.block().is_some())
+    }) else {
+        return;
     };
+    // Sur la face d'entrée du rayon. Normale nulle = l'œil est dans un
+    // solide, pas de face → rien.
+    if hit.normal == [0; 3] {
+        return;
+    }
+    let target = [
+        hit.voxel[0] + hit.normal[0] as i64,
+        hit.voxel[1] + hit.normal[1] as i64,
+        hit.voxel[2] + hit.normal[2] as i64,
+    ];
+    // Refuse de poser un bloc dans le volume du joueur.
+    if player
+        .single()
+        .is_ok_and(|p| voxel_overlaps_player(&edit.game.world, target, p.feet()))
+    {
+        return;
+    }
+    if edit.set(target, held) {
+        inventory.take_selected();
+        let actions = rules::actions(&edit.game.world.registry, held, Hook::Placed, ctx);
+        edit.apply(target, &actions);
+    }
+}
 
-    if let Some(pos) = touched {
-        dirty.0.insert(pos);
+/// Ce qu'une modification du monde touche : le monde, les chunks à
+/// re-mesher, et les entités à faire apparaître.
+struct Edit<'a, 'w, 's> {
+    commands: &'a mut Commands<'w, 's>,
+    game: &'a mut GameWorld,
+    dirty: &'a mut DirtyChunks,
+}
+
+impl Edit<'_, '_, '_> {
+    /// Écrit un voxel et note les chunks à re-mesher. `false` si le chunk
+    /// n'est pas chargé (rien n'a changé).
+    fn set(&mut self, voxel: [i64; 3], id: ContentId) -> bool {
+        let Some(pos) = self.game.world.set_voxel(voxel, id) else { return false };
+        self.dirty.0.insert(pos);
         // Culling inter-chunks : un voxel en bordure change aussi les faces
         // du chunk voisin (sa face culled peut devoir (ré)apparaître).
-        let size = game.world.chunk_size();
-        let (_, local) = game.world.split(edited);
+        let size = self.game.world.chunk_size();
+        let (_, local) = self.game.world.split(voxel);
         for (axis, &l) in local.iter().enumerate() {
             let offset: i32 = match l {
                 0 => -1,
@@ -150,7 +177,28 @@ pub fn interact(
                 1 => npos.y += offset,
                 _ => npos.z += offset,
             }
-            dirty.0.insert(npos);
+            self.dirty.0.insert(npos);
+        }
+        true
+    }
+
+    /// Fait tomber un item au centre du voxel.
+    fn drop(&mut self, voxel: [i64; 3], id: ContentId) {
+        let size_m = 1.0 / self.game.world.voxels_per_meter();
+        let center = (Vec3::from_array(voxel.map(|v| v as f32)) + 0.5) * size_m;
+        self.commands.spawn((DroppedItem::new(id, center), Transform::from_translation(center)));
+    }
+
+    /// Applique les actions d'une règle au bloc `voxel`. Un `SetSelf` ne
+    /// redéclenche aucun hook (pas de cascade de règles).
+    fn apply(&mut self, voxel: [i64; 3], actions: &[Action]) {
+        for &action in actions {
+            match action {
+                Action::SetSelf(id) => {
+                    self.set(voxel, id);
+                }
+                Action::Drop(id) => self.drop(voxel, id),
+            }
         }
     }
 }

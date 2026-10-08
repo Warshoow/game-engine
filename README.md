@@ -35,10 +35,12 @@ cargo run
 | Input | Action |
 |---|---|
 | Left click | enter FPS mode / break a block |
-| Right click | place the held block |
+| Right click | use the targeted block if it has a `Used` rule, otherwise place the held block |
+| Shift + right click | always place |
 | Mouse wheel | change the held block |
 | WASD + Space | move / jump |
 | F | fullscreen |
+| G | debug: one of every solid block |
 | Esc | release the mouse |
 
 On WSL2, rendering goes through llvmpipe (CPU) and the mouse has its quirks
@@ -64,6 +66,9 @@ startup) to the Windows side (e.g. `/mnt/c/Users/<you>/`) and run it.
 Blocks are data, not code: `assets/content/core.ron`. Add an entry at the end
 of the list and it exists on the next launch, no recompilation. `drops` says
 what a block gives when broken (absent: itself; `Some([])`: nothing).
+`rules` gives a block behaviour as data: `(on: Used, when: [Holding("…")],
+then: [ReplaceSelf("…"), Drop("…")])` — see `crates/voxel_core/src/rules.rs`
+and the lamp in `core.ron`.
 Never reorder or remove entries: their position is their ID.
 
 ## Layout

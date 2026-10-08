@@ -485,3 +485,32 @@ design doc).
 inventaire (piles, retrait, sélection), et un test headless où un item
 tombe, se pose sur le sol, puis est ramassé quand le joueur s'approche.
 49 tests, clippy propre.
+
+## 2026-10-08 (suite) — Jalon 2 : hooks et règles (#10)
+
+**Forme** (étage 2 de §3.6). Une règle est de la donnée dans l'entrée du
+bloc : `(on: Used, when: [Holding("…")], then: [ReplaceSelf("…")])`.
+Vocabulaire de départ : hooks `Used` (clic droit), `Placed`, `Broken` ;
+condition `Holding` ; effets `ReplaceSelf`, `Drop`. Le tick attend #34.
+
+**Séparation évaluer / appliquer.** `voxel_core::rules::actions` dit
+quelles actions une règle déclenche (identifiers résolus), sans toucher au
+monde : pur, testable, déterministe. `interact.rs` applique, via un petit
+`Edit` qui regroupe écrire un voxel + noter les chunks à re-mesher + faire
+tomber un item (le code de bordure de chunk n'existe plus qu'une fois).
+Un `ReplaceSelf` ne redéclenche aucun hook : pas de cascade, donc pas de
+boucle possible entre deux règles.
+
+**Refus au chargement.** Un hook, une condition ou un effet inconnu est
+une variante d'enum inconnue : le parseur RON refuse déjà, et la nomme.
+Une référence vers une entrée absente est refusée par la validation du
+registre, comme pour `drops`.
+
+**Clic droit.** Un bloc qui a une règle `Used` est *utilisé*, même si les
+conditions sont fausses (sinon le même clic poserait ou utiliserait selon
+ce qu'on tient — imprévisible). Maj + clic droit pose toujours.
+
+**Contenu.** Une lampe (`core:lamp` ⇄ `core:lamp_lit`), sans une ligne de
+Rust qui la connaisse. Comme elle n'existe pas dans le monde généré, une
+touche de debug G donne un exemplaire de chaque bloc solide (découvert
+dans le registre).

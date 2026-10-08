@@ -93,6 +93,7 @@ fn main() {
                 items::add_item_visuals,
                 items::place_items,
                 inventory::scroll_selection,
+                inventory::give_all_blocks,
                 inventory::update_hotbar.after(inventory::scroll_selection),
             ),
         )
@@ -157,7 +158,7 @@ fn setup_world(mut commands: Commands, mut materials: ResMut<Assets<StandardMate
         },
     ));
     commands.spawn((
-        Text::new("Clic gauche : jouer · Échap : libérer la souris · F : plein écran\nWASD/Espace : bouger · gauche : casser · droit : poser · molette : bloc"),
+        Text::new("Clic gauche : jouer · Échap : libérer la souris · F : plein écran\nWASD/Espace : bouger · gauche : casser · droit : utiliser/poser · Maj+droit : poser · molette : bloc · G : un de chaque bloc (debug)"),
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(12.0),
