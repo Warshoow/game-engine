@@ -1,4 +1,4 @@
-# Passation de session — 2026-10-07
+# Passation de session — 2026-10-08
 
 > Document de reprise pour une session Claude fraîche. Lire ceci, puis
 > `CLAUDE.md` (racine) et `docs/brief/voxel-engine-design.md` (canonique)
@@ -11,7 +11,9 @@
 d'apprentissage du cœur voxel sont construits — stockage (chunk paletté),
 meshing (greedy, ×12,8 vs naïf, fluidité validée en jeu par Warshow même
 sous llvmpipe), et **streaming** (§3.4 : monde qui démarre vide, chunks
-générés/déchargés autour du joueur). Dernier commit : `f135fb0`.
+générés/déchargés autour du joueur). Les **trois jalons de gameplay** de
+`docs/jalons.md` sont faits (items/inventaire, règles, craft sur l'établi).
+Dernier commit : `c2155c6`.
 
 1. Chunk généré depuis la seed (heightmap fBm maison, pierre sous 1 m de
    sol, **grottes** par bruit 3D, déterministe), **en continu autour du
@@ -20,15 +22,22 @@ générés/déchargés autour du joueur). Dernier commit : `f135fb0`.
 2. Mesher blocky **greedy** avec **raccord inter-chunks** (le naïf reste
    comme oracle de test).
 3. Pose/casse data-driven : casser fait tomber les drops du bloc en items
-   au sol, ramassés à portée ; **inventaire** (barre `bevy_ui`, molette),
-   poser consomme ; **contour noir du bloc visé** (gizmo, même raycast que
-   le clic).
-4. Déplacement FPS avec collision (AABB balayée), **figé si le chunk sous
+   au sol, ramassés à portée ; **inventaire** (barre `bevy_ui`, molette,
+   case « main vide »), poser consomme ; **contour noir du bloc visé**.
+4. **Contenu en donnée** dans `assets/content/core.ron` (blocs, drops,
+   règles, recettes) ; **règles** déclencheur → condition → effet (lampe) ;
+   **établi** : on pose les items dessus, main vide → fabrique.
+5. HUD debug (FPS, chunks), caméra interpolée entre ticks, touche **G**
+   (debug) = un exemplaire de chaque bloc solide.
+6. Déplacement FPS avec collision (AABB balayée), **figé si le chunk sous
    les pieds n'est pas chargé**.
 
 `cargo run` → clic gauche pour jouer, WASD/Espace, clic gauche casse,
-clic droit pose, molette change le bloc en main, Échap libère la souris,
-F plein écran.
+clic droit utilise (bloc à règle `Used`) ou pose, Maj+clic droit pose
+toujours, molette change la case, G debug, Échap libère la souris, F plein
+écran. **Pour juger le ressenti : build Windows** (`cargo windows`, ~10-16
+min ; copier l'exe ET `assets/` dans `Téléchargements\voxel_engine\`). Sous
+WSL le rendu est logiciel et rame — normal.
 
 ## Invariants à ne pas casser (au-delà du design doc)
 
@@ -102,7 +111,7 @@ headless, ~0 s), le binaire ne fait que brancher dans l'ECS.
 ## Vérifications avant de conclure une étape
 
 ```bash
-cargo test --workspace                    # 42 tests cœur + 2 streaming (headless)
+cargo test --workspace                    # 56 tests (51 cœur + 5 binaire), headless
 cargo clippy --workspace --all-targets    # zéro warning exigé
 cargo run                                 # smoke test à l'occasion
 cargo windows                             # .exe Windows (README, « Build Windows natif »)
@@ -130,6 +139,12 @@ retourne le code de `tail`). Vérifier `EXIT=$?` explicitement.
   Piège découvert : `Window::set_cursor_position` ignoré si la demande égale
   la précédente (cache bevy_winit). Autre renommage 0.19 : les événements
   bufferisés se lisent via `MessageReader` (ex-`EventReader`).
+- **Push** : la clé SSH n'est pas toujours chargée dans la session (« Permission
+  denied (publickey) »). Soit Warshow fait `! ssh-add`, soit pousser une fois
+  en HTTPS via gh, sans toucher la config :
+  `git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push https://github.com/Warshoow/game-engine.git master`.
+- **`rtk`** (proxy de sortie) masque parfois la sortie de `cargo test` /
+  `cargo run` : préfixer `rtk proxy` pour voir la sortie brute.
 - **Piège ECS** : les entités spawnées via `Commands` ne sont visibles dans
   les `Query` qu'à la frame suivante — d'où `DirtyChunks` + un seul système
   de meshing (`remesh_dirty`), voir les invariants.
@@ -139,7 +154,10 @@ retourne le code de `tail`). Vérifier `EXIT=$?` explicitement.
 - **Français** partout (code commenté en français, commits en français).
 - **Jamais de trailer `Co-Authored-By`** dans les commits (demande explicite).
 - Commits soignés et descriptifs, un par étape logique, **seulement sur
-  demande explicite** ; jamais de push (c'est lui qui pousse).
+  demande explicite** (« commit », ou validation après « je commite quand tu
+  valides ») ; push seulement sur demande.
+- **Pas de questionnaire** : proposer une reco tranchée avec ses raisons,
+  Warshow corrige (il a écarté le craft par proximité, préféré l'établi).
 - **Pédagogie** : projet d'apprentissage — expliquer le *pourquoi* des
   concepts (meshing, layout mémoire, déterminisme…) dans les réponses ET
   dans `docs/journal.md`, tenu à jour à chaque étape.
@@ -190,17 +208,34 @@ Proposé, non fait : ajouter à `CLAUDE.md` une règle « sans écran : prouver
 par `cargo test`/`clippy`, signaler dans la PR ce qui demande un test en
 jeu ».
 
+## Fait dans la session du 2026-10-07 → 08
+
+Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
+
+- Verticalité + grottes (#1), contour du bloc visé (#2), HUD debug (#3),
+  caméra interpolée + yaw par frame (#4), build Windows `cargo windows` (#5).
+- Design doc v0.1 : recettes sur l'entrée produite (§3.1), cycle de vie des
+  block-entities (§3.3), forme du comportement en 3 étages + vocabulaire
+  append-only (§3.6). `docs/jalons.md` créé.
+- 5 epics (label `epic`, sous-tickets GitHub) : #20 Contenu et outillage,
+  #26 Rendu, #31 Monde, #38 Simulation et jeu, #43 Technique.
+- Registre depuis `core.ron` (#16), jalon 1 items/inventaire (#9), jalon 2
+  règles (#10), jalon 3 craft sur l'établi + block-entities (#11, #13
+  fusionné). Tous validés en jeu par Warshow.
+- **Non poussé** : `40fde67` (#10) et `c2155c6` (#11) — `origin/master` est
+  à `828667c`.
+
 ## Prochaines étapes
 
-Tickets #1 à #5 faits et fermés (verticalité, contour du bloc visé, HUD
-debug, caméra interpolée, build Windows — tous validés en jeu).
-
-**Ordre des jalons : `docs/jalons.md`** (décidé avec Warshow le
-2026-10-07) — 1. items et inventaire, 2. hooks et règles, 3. craft posé sur
-l'établi (révisé : plus de proximité). Les décisions de socle correspondantes sont dans le design doc
-(§3.1 recettes, §3.3 cycle de vie des block-entities, §3.6 forme du
-comportement). Tickets ouverts hors jalons : #6 distance de vue, #7
-ambient occlusion, #8 persistance (à arbitrer).
+À choisir avec Warshow (proposé en fin de session, pas encore tranché) :
+- **#8 persistance disque** — maintenant qu'il y a quelque chose à garder
+  (inventaire, constructions, établis remplis). Non-goal §7 : le lever
+  d'abord dans le doc ; structure logique déjà figée (§3.10).
+- **Recette de l'établi sans établi** — aujourd'hui il ne s'obtient que
+  par G (debug) ; seul manque pour un craft sans triche.
+- **#21 textures** ou **#27 biomes/décor**.
+- Restent ouverts : #6 distance de vue, #7 AO, #12 Lua, #14/#15 modèles,
+  et le reste des epics.
 
 Limitations assumées (ne pas « corriger » sans besoin) : palette non
 compactée, re-mesh complet du chunk au moindre voxel, pas de persistance
