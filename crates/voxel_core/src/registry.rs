@@ -17,6 +17,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::rules::Rule;
+use crate::texgen::{self, GeneratedTexture};
 
 /// ID entier stable d'une entrée du registre.
 ///
@@ -52,6 +53,10 @@ pub struct BlockData {
     /// Absent : le bloc est rendu de sa couleur.
     #[serde(default)]
     pub texture: Option<Faces>,
+    /// Textures calculées par le moteur (#44), citées par leur nom dans
+    /// `texture` comme un PNG.
+    #[serde(default)]
+    pub generated_textures: Vec<GeneratedTexture>,
     /// Ce que le bloc donne quand on le casse, par identifier. Absent : le
     /// bloc lui-même ; `Some([])` : rien (verre…) ; sinon ces entrées
     /// (l'herbe donne de la terre, un minerai une gemme).
@@ -135,6 +140,7 @@ impl ContentEntry {
                 rules: Vec::new(),
                 storage: None,
                 texture: None,
+                generated_textures: Vec::new(),
             }),
             recipes: Vec::new(),
         }
@@ -213,7 +219,7 @@ impl Registry {
 
     /// Une référence vers une entrée inexistante est refusée au chargement,
     /// pas découverte à la première casse.
-    fn check_references(&self) -> Result<(), LoadError> {
+    pub(crate) fn check_references(&self) -> Result<(), LoadError> {
         let registry = self;
         for (_, entry) in registry.iter() {
             let block = entry.block();
@@ -238,7 +244,9 @@ impl Registry {
     /// Lit dans `dir` le PNG (`<nom>.png`) de chaque texture citée par un
     /// bloc et garde ses pixels. Sans PNG, les pixels déjà gardés (venus
     /// d'une save) restent ; sinon erreur. Toutes doivent être carrées et
-    /// de même taille (texture array).
+    /// de même taille (texture array). Une texture déclarée dans
+    /// `generated_textures` est calculée, à la taille des autres (16 px
+    /// s'il n'y en a pas).
     pub fn load_textures(&mut self, dir: &Path) -> Result<(), LoadError> {
         let mut names: Vec<String> = Vec::new();
         for (_, entry) in self.iter() {
@@ -248,8 +256,17 @@ impl Registry {
                 }
             }
         }
+        let generated: Vec<&GeneratedTexture> =
+            self.iter().filter_map(|(_, e)| e.block()).flat_map(|b| &b.generated_textures).collect();
         let mut textures = Vec::with_capacity(names.len());
+        // Calculées après les autres, quand la taille est connue : (couche, définition).
+        let mut pending = Vec::new();
         for name in names {
+            if let Some(def) = generated.iter().find(|g| g.name == name) {
+                pending.push((textures.len(), *def));
+                textures.push(Texture { name, size: 0, rgba: Vec::new() });
+                continue;
+            }
             let path = dir.join(format!("{name}.png"));
             let kept = self.textures.iter().find(|t| t.name == name).filter(|_| !path.exists());
             let texture = match kept {
@@ -258,13 +275,18 @@ impl Registry {
                     .map(|(size, rgba)| Texture { name: name.clone(), size, rgba })
                     .map_err(|reason| LoadError::Texture { name: name.clone(), reason })?,
             };
-            if let Some(first) = textures.first().filter(|t: &&Texture| t.size != texture.size) {
+            if let Some(first) = textures.iter().find(|t| t.size != 0).filter(|t| t.size != texture.size) {
                 return Err(LoadError::Texture {
                     name,
                     reason: format!("{} px, alors que {} fait {} px", texture.size, first.name, first.size),
                 });
             }
             textures.push(texture);
+        }
+        let size = textures.iter().map(|t| t.size).find(|&s| s != 0).unwrap_or(16);
+        for (layer, def) in pending {
+            textures[layer] =
+                texgen::paint(def, size).map_err(|reason| LoadError::Texture { name: def.name.clone(), reason })?;
         }
         self.textures = textures;
         Ok(())
@@ -400,7 +422,7 @@ fn read_png(path: &Path) -> Result<(u32, Vec<u8>), String> {
 
 /// RON avec `Some` implicite : un champ optionnel s'écrit `station:
 /// "core:workbench"` (comme avant qu'il soit optionnel) ou `Some(…)`.
-fn parse<T: for<'de> Deserialize<'de>>(text: &str) -> Result<T, LoadError> {
+pub(crate) fn parse<T: for<'de> Deserialize<'de>>(text: &str) -> Result<T, LoadError> {
     ron::Options::default()
         .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
         .from_str(text)

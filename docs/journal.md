@@ -711,3 +711,50 @@ rhabillent. Barre et menu se refont quand l'inventaire est marqué modifié.
 **Pourquoi une touche plutôt que surveiller les fichiers.** Explicite, et
 pas d'erreur affichée à chaque sauvegarde d'un fichier à moitié écrit.
 Surveiller les fichiers reste possible plus tard.
+
+## 2026-10-08 (suite) — Blocs générés par IA en jeu (#18, #44)
+
+**La réponse de l'IA est une donnée non fiable.** Rien de ce qu'elle écrit
+n'est exécuté : c'est du RON, lu avec les types du registre. Un hook ou un
+effet inventé ne se lit pas (même refus qu'une save d'une version plus
+récente, §3.6). Puis `accept` vérifie ce que les types ne disent pas :
+identifier neuf sous `gen:` (une entrée générée ne peut pas remplacer
+`core:stone`), références existantes (les contrôles de `from_ron`, sur une
+copie du registre), textures nouvelles et dans leurs bornes. Un refus
+s'affiche avec sa raison ; on ne demande pas au modèle de se corriger.
+
+**Pourquoi un trait `Generator`.** Warshow veut tester avec Claude Code
+maintenant et brancher une clé API plus tard. Le reste du moteur ne voit
+qu'« un texte entre, un texte sort » : changer de source ne touche ni la
+validation ni le jeu. L'appel prend plusieurs secondes ; il tourne dans un
+thread, et le résultat arrive par un `OnceLock` que le jeu regarde à chaque
+frame. `claude -p --tools "" --safe-mode` : le modèle ne peut que répondre,
+ni commande, ni fichier, ni hook de la machine.
+
+**Textures : des réglages, pas des pixels (#44, option 1).** Un modèle de
+langage dessine mal en pixel art et 256 pixels coûtent cher à écrire.
+L'entrée déclare un motif d'une liste connue, une couleur, un bruit, une
+graine ; `texgen::paint` calcule les pixels (hash entier du worldgen, donc
+déterministe). C'est un mécanisme général : `core.ron` peut s'en servir
+aussi. Les pixels restent dans le registre et la save comme ceux d'un PNG.
+
+**Déterminisme.** Le modèle ne l'est pas, mais il ne tourne pas dans la
+simulation : une fois acceptée, l'entrée est une donnée comme une autre.
+
+**Rien n'est donné au joueur.** Le bloc vit selon les règles du jeu : sa
+recette (le prompt en demande une sans station), ou G en debug.
+
+**Saisie de texte.** Premier champ texte (`ui::TextField`) : tant qu'il
+est ouvert, les raccourcis (C, R, G, I, F) sont coupés, sinon taper « r »
+rechargerait le contenu.
+
+**Bug trouvé en jeu : tous les blocs générés en bois.** Le rechargement
+remplaçait l'image du texture array sous le même handle ; le matériau
+restait lié à l'ancien array. Une couche ajoutée (la 10e) sortait donc de
+l'array et le GPU la ramenait à la dernière, `workbench_top`. La touche R
+ne l'avait pas montré : elle ne changeait que des pixels, pas le nombre de
+couches. Correctif : un nouveau handle, que Bevy attend avant de refaire le
+matériau.
+
+**Limite connue.** Une seule entrée par génération : un bloc qui bascule
+entre deux états (comme la lampe) demanderait deux entrées.

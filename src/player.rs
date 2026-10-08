@@ -53,7 +53,7 @@ impl Plugin for PlayerPlugin {
             .add_systems(
                 Update,
                 (
-                    toggle_fullscreen,
+                    toggle_fullscreen.run_if(crate::ui::not_typing),
                     // Après la pose/casse : le contour voit déjà le monde modifié.
                     crate::interact::highlight_target.after(crate::interact::interact),
                 ),

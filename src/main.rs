@@ -3,6 +3,7 @@
 //! registre → worldgen → mesher → entités Bevy, et le contrôleur joueur.
 
 mod content;
+mod generate;
 mod interact;
 mod inventory;
 mod items;
@@ -117,6 +118,8 @@ fn main() {
         .init_resource::<inventory::Inventory>()
         .init_resource::<items::StorageChanged>()
         .init_resource::<content::ReloadStatus>()
+        .init_resource::<content::Incoming>()
+        .init_resource::<generate::Generation>()
         .add_systems(
             Startup,
             (setup_world, player::spawn_player, save::restore_player, save::restore_items, inventory::spawn_hotbar).chain(),
@@ -132,12 +135,21 @@ fn main() {
                 items::place_items,
                 items::show_stored.after(interact::interact),
                 inventory::scroll_selection,
-                inventory::give_all_blocks,
-                inventory::toggle_craft_menu,
+                // Raccourcis coupés pendant la saisie d'un texte.
+                (
+                    inventory::give_all_blocks,
+                    inventory::toggle_craft_menu,
+                    generate::toggle_generate_window,
+                )
+                    .run_if(ui::not_typing),
+                content::apply_content.before(remesh_dirty),
+                ui::type_text,
+                generate::start_generation,
+                generate::finish_generation.before(content::apply_content),
+                generate::show_status.after(generate::finish_generation),
                 inventory::fill_craft_menu.after(inventory::toggle_craft_menu),
                 inventory::click_recipe,
                 ui::close_on_escape,
-                content::reload_content.before(remesh_dirty),
                 inventory::update_hotbar.after(inventory::scroll_selection),
                 save::save_edited_chunks.after(interact::interact),
             ),
@@ -221,7 +233,7 @@ fn setup_world(
         },
     ));
     commands.spawn((
-        Text::new("Clic gauche : jouer · Échap : libérer la souris · F : plein écran\nWASD/Espace : bouger · gauche : casser · droit : utiliser/poser · Maj+droit : poser · molette : bloc · C : fabriquer (menu) · R : recharger le contenu · G : un de chaque bloc (debug)"),
+        Text::new("Clic gauche : jouer · Échap : libérer la souris · F : plein écran\nWASD/Espace : bouger · gauche : casser · droit : utiliser/poser · Maj+droit : poser · molette : bloc · C : fabriquer (menu) · I : générer un bloc (IA) · R : recharger le contenu · G : un de chaque bloc (debug)"),
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(12.0),

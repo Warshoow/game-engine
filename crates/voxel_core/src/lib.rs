@@ -7,11 +7,13 @@
 
 pub mod chunk;
 pub mod crafting;
+pub mod generate;
 pub mod mesher;
 pub mod physics;
 pub mod raycast;
 pub mod registry;
 pub mod rules;
 pub mod save;
+pub mod texgen;
 pub mod worldgen;
 pub mod world;

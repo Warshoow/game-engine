@@ -8,6 +8,8 @@
 //! Ce qu'une fenêtre affiche vient du registre (§3.11) : la brique
 //! [`slot`] tire couleur et quantité de l'entrée, jamais d'une liste en dur.
 
+use bevy::input::ButtonState;
+use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
 
 use voxel_core::registry::{ContentId, Registry};
@@ -44,6 +46,38 @@ pub fn open(commands: &mut Commands, opened: &Query<Entity, With<GameWindow>>, t
             children![(Text::new(format!("{title}   (Échap : fermer)")), TextFont::from_font_size(18.0))],
         ))
         .id()
+}
+
+/// Champ de saisie : le texte tapé au clavier, affiché par son [`Text`].
+/// Tant qu'il existe, les touches de raccourci (C, R, G, I, F) sont
+/// coupées — voir [`not_typing`] (R : dans `content::apply_content`).
+#[derive(Component, Default)]
+pub struct TextField(pub String);
+
+/// Condition de système : aucun champ de saisie ouvert.
+pub fn not_typing(fields: Query<(), With<TextField>>) -> bool {
+    fields.is_empty()
+}
+
+/// Tape dans le champ ouvert : caractères, retour arrière. Entrée est lue
+/// par la fenêtre qui porte le champ.
+pub fn type_text(mut keys: MessageReader<KeyboardInput>, mut fields: Query<(&mut TextField, &mut Text)>) {
+    let Ok((mut field, mut text)) = fields.single_mut() else {
+        keys.clear();
+        return;
+    };
+    for key in keys.read().filter(|k| k.state == ButtonState::Pressed) {
+        match (&key.logical_key, &key.text) {
+            (Key::Backspace, _) => {
+                field.0.pop();
+            }
+            (_, Some(typed)) => field.0.extend(typed.chars().filter(|c| !c.is_control())),
+            _ => {}
+        }
+    }
+    if field.is_changed() || text.0.is_empty() {
+        text.0 = format!("{}_", field.0);
+    }
 }
 
 /// Échap ferme la fenêtre ouverte.

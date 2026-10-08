@@ -138,8 +138,19 @@ Touche R : `core.ron` et les PNG sont relus et fusionnés dans le registre
 courant, comme au chargement d'une save (§3.10) — les IDs ne bougent pas.
 Une erreur s'affiche et laisse le contenu en place. Textures, chunks,
 couleurs des items, barre et menu se mettent à jour ; `registry.ron` est
-réécrit. *Fait et validé en jeu (Windows) le 2026-10-08.* *Fait et validé en jeu
-(Windows) le 2026-10-08.*
+réécrit. *Fait et validé en jeu (Windows) le 2026-10-08.*
+
+## Complément — Blocs générés par IA en jeu (#18, #44)
+
+Touche I : le joueur décrit un bloc, un générateur (trait `Generator` ;
+aujourd'hui la CLI `claude` sans outils, plus tard une clé API du joueur)
+rend une entrée RON. Le moteur la valide (`voxel_core::generate::accept`) :
+lisible avec les types du registre, identifier neuf en `gen:`, références
+existantes, textures valides. Acceptée, elle passe par le chemin de la
+touche R et vit dans la save. Textures (#44) : option 1, l'entrée déclare
+un motif, une couleur, un bruit et une graine (`generated_textures`), le
+moteur calcule les pixels. *Fait et validé en jeu (Windows) le
+2026-10-08.*
 
 ## Suite : ordre des tickets ouverts
 

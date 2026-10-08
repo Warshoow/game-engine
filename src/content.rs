@@ -6,6 +6,9 @@
 //! pas (les chunks les citent), une entrée modifiée prend sa nouvelle
 //! définition, une nouvelle est ajoutée à la fin, une entrée retirée du
 //! fichier reste (append-only, §3.1).
+//!
+//! Un bloc généré en jeu (#18, `generate.rs`) entre par le même chemin :
+//! son registre arrive dans [`Incoming`].
 
 use bevy::prelude::*;
 
@@ -31,12 +34,18 @@ pub fn load(mut base: Registry) -> Result<Registry, String> {
 #[derive(Resource, Default)]
 pub struct ReloadStatus(pub String);
 
+/// Un registre déjà prêt à remplacer le courant (bloc généré).
+#[derive(Resource, Default)]
+pub struct Incoming(pub Option<Registry>);
+
 /// Touche R : relit le contenu. Une erreur (fichier mal écrit, PNG absent)
 /// laisse le registre en place et s'affiche — la partie continue.
 // Un système Bevy prend ses ressources en paramètres : c'est la forme normale.
 #[allow(clippy::too_many_arguments)]
-pub fn reload_content(
+pub fn apply_content(
     keys: Res<ButtonInput<KeyCode>>,
+    mut incoming: ResMut<Incoming>,
+    typing: Query<(), With<crate::ui::TextField>>,
     mut game: ResMut<GameWorld>,
     mut status: ResMut<ReloadStatus>,
     mut dirty: ResMut<DirtyChunks>,
@@ -47,16 +56,19 @@ pub fn reload_content(
     chunks: Query<&ChunkMesh>,
     mut visuals: Query<&mut ItemVisual>,
 ) {
-    if !keys.just_pressed(KeyCode::KeyR) {
-        return;
-    }
-    let registry = match load(game.world.registry.clone()) {
-        Ok(registry) => registry,
-        Err(err) => {
-            error!("contenu non rechargé : {err}");
-            status.0 = format!("contenu NON rechargé : {err}");
-            return;
+    let registry = if let Some(registry) = incoming.0.take() {
+        registry
+    } else if keys.just_pressed(KeyCode::KeyR) && typing.is_empty() {
+        match load(game.world.registry.clone()) {
+            Ok(registry) => registry,
+            Err(err) => {
+                error!("contenu non rechargé : {err}");
+                status.0 = format!("contenu NON rechargé : {err}");
+                return;
+            }
         }
+    } else {
+        return;
     };
     if let Some(save) = save
         && let Err(err) = save.0.write_registry(&registry)
@@ -68,12 +80,13 @@ pub fn reload_content(
     let array = texture_array(&registry);
     game.world.registry = registry;
     dirty.0.extend(chunks.iter().map(|c| c.0));
-    // Remplace l'image du texture array, et marque le matériau modifié pour
-    // que son bind group pointe sur la nouvelle.
-    if let Some(material) = materials.get_mut(&game.material)
-        && let Err(err) = images.insert(&material.extension.array, array)
-    {
-        error!("texture array non remplacé : {err}");
+    // Nouvelle image sous un nouveau handle : remplacer l'image sous le
+    // même handle laissait le matériau sur l'ancienne (un bloc généré
+    // ajoute une couche, son indice sortait de l'ancien array et le GPU le
+    // ramenait à la dernière couche). L'ancienne image est libérée avec
+    // son handle.
+    if let Some(mut material) = materials.get_mut(&game.material) {
+        material.extension.array = images.add(array);
     }
     // Couleurs et noms : cubes d'items, barre, menu de fabrication.
     visuals.iter_mut().for_each(|mut v| v.set_changed());

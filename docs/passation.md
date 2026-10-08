@@ -16,8 +16,8 @@ générés/déchargés autour du joueur). Les **trois jalons de gameplay** de
 plus les **textures** (jalon 4), la **sauvegarde sur disque** (jalon 5,
 items au sol compris), les **recettes sans station** et les **fenêtres de
 jeu** avec le menu de fabrication (#45, #46).
-Plus le **rechargement du contenu en jeu** (touche R, #17).
-Dernier commit de code : `e4c03bb` (#17).
+Plus le **rechargement du contenu en jeu** (touche R, #17) et les **blocs
+générés par IA en jeu** (touche I, #18 + #44), validés sous Windows.
 
 1. Chunk généré depuis la seed (heightmap fBm maison, pierre sous 1 m de
    sol, **grottes** par bruit 3D, déterministe), **en continu autour du
@@ -50,7 +50,8 @@ Dernier commit de code : `e4c03bb` (#17).
 `cargo run` → clic gauche pour jouer, WASD/Espace, clic gauche casse,
 clic droit utilise (bloc à règle `Used`) ou pose, Maj+clic droit pose
 toujours, molette change la case, C ouvre le menu de fabrication
-(recettes sans `station`), R recharge le contenu, G debug, Échap libère la souris, F plein
+(recettes sans `station`), I génère un bloc (IA, `claude` dans le PATH),
+R recharge le contenu, G debug, Échap libère la souris, F plein
 écran. **Pour juger le ressenti : build Windows** (`cargo windows`, ~10-16
 min ; copier l'exe ET `assets/` dans `Téléchargements\voxel_engine\`). Sous
 WSL le rendu est logiciel et rame — normal.
@@ -84,6 +85,11 @@ WSL le rendu est logiciel et rame — normal.
   Ne rien en mettre en cache qui ne se rafraîchisse pas : `reload_content`
   re-meshe tous les chunks, remplace le texture array, marque les
   `ItemVisual` et l'inventaire modifiés. Les IDs, eux, ne bougent jamais.
+- **Un contenu généré n'entre qu'après `generate::accept`** (#18) :
+  namespace `gen:`, références et textures vérifiées sur une copie du
+  registre. Ne jamais enregistrer une réponse de générateur sans passer
+  par là. Un champ texte ouvert (`ui::TextField`) coupe les raccourcis
+  (`ui::not_typing`) ; un raccourci ajouté doit en tenir compte.
 - **RON lu avec `IMPLICIT_SOME`** (`registry::parse`) : un champ
   `Option` s'écrit sans `Some(…)`. Ne pas revenir à `ron::from_str` (les
   saves dont la recette s'écrit `station: "…"` ne se reliraient plus).
@@ -134,8 +140,9 @@ src/interact.rs       pose/casse/utilisation : raycast, règles, re-mesh du chun
 src/streaming.rs      charge/décharge les chunks (relit la save, sinon génère)
 src/items.rs          items au sol (tick fixe) et cubes posés sur les blocs
 src/inventory.rs      inventaire, barre, menu de fabrication (C), G (debug)
-src/content.rs        charge core.ron + textures (démarrage et touche R)
-src/ui.rs             fenêtres de jeu : une à la fois, souris libérée, case d'item partagée
+src/content.rs        charge core.ron + textures (démarrage, touche R, bloc généré via Incoming)
+src/generate.rs       fenêtre de génération (I), trait Generator, ClaudeCli (thread + OnceLock)
+src/ui.rs             fenêtres de jeu : une à la fois, souris libérée, case d'item, champ texte
 src/save.rs           branche voxel_core::save sur l'ECS (écritures, restauration)
 assets/content/       core.ron (le contenu) ; assets/textures/ (PNG) ; assets/shaders/voxel.wgsl
 crates/voxel_core/    TOUT le cœur voxel, PUR (zéro dépendance Bevy, testable headless)
@@ -148,16 +155,19 @@ crates/voxel_core/    TOUT le cœur voxel, PUR (zéro dépendance Bevy, testable
   raycast.rs          DDA Amanatides & Woo (visée voxel + face d'entrée)
   rules.rs            règles hook → condition → effet (évaluation pure)
   crafting.rs         recherche de recette (station ou inventaire)
+  texgen.rs           textures calculées (motif + couleur + bruit + graine), déterministes
+  generate.rs         prompt envoyé au générateur, validation de sa réponse (accept)
   save.rs             dossier du monde, format binaire des chunks
 ```
 
-Règle de séparation stricte : logique voxel → `voxel_core` (60 tests
+Règle de séparation stricte : logique voxel → `voxel_core` (64 tests
 headless, ~0 s), le binaire ne fait que brancher dans l'ECS.
 
 ## Vérifications avant de conclure une étape
 
 ```bash
-cargo test --workspace                    # 67 tests (60 cœur + 7 binaire), headless
+cargo test --workspace                    # 71 tests (64 cœur + 7 binaire), headless
+cargo test -- --ignored claude            # génération réelle par claude (~6 s)
 cargo clippy --workspace --all-targets    # zéro warning exigé
 cargo run                                 # smoke test à l'occasion
 cargo windows                             # .exe Windows (README, « Build Windows natif »)
@@ -287,15 +297,18 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   fait le jeu » ; commits en anglais (`CLAUDE.md`).
 - Fenêtres de jeu + menu de fabrication (`26d8a70`, #45 #46) ;
   rechargement du contenu, touche R (`e4c03bb`, #17). Validés sous Windows.
-- Poussé jusqu'à `26d8a70` ; `e4c03bb` et ce commit de docs ne le sont pas.
+- Blocs générés par IA en jeu (#18 + #44) : trait `Generator`, CLI
+  `claude` sans outils, validation `generate::accept`, textures calculées
+  (`texgen`). Validé sous Windows. Correctif au passage : au rechargement, le
+  matériau reçoit le texture array sous un nouveau handle (sinon une
+  couche ajoutée restait invisible, ramenée à la dernière).
 
 ## Prochaines étapes
 
 Ordre décidé avec Warshow (2026-10-08) : **`docs/jalons.md`, « Suite :
-ordre des tickets ouverts »**. #45, #46 et #17 faits ; suivant : **#18 + #44 (contenu généré par IA en
-jeu)** — surtout de la conception : qui déclenche, quel modèle, validation
-d'une entrée avant acceptation, texture (3 options dans #44). Présenter une
-reco tranchée à Warshow avant de coder.
+ordre des tickets ouverts »**. #45, #46, #17, #18 + #44 faits ; suivant : **#27 biomes, arbres,
+minerais**. Pistes ouvertes par #18 : générer plusieurs entrées liées (un
+bloc à deux états), un générateur BYOK (clé API), des items avec apparence.
 Principe (design doc §2) : le moteur fournit des mécanismes, `core.ron`
 n'est qu'un jeu d'exemple. Mipmaps si les textures scintillent au loin.
 
