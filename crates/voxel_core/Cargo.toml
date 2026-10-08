@@ -6,3 +6,5 @@ edition = "2024"
 # Logique voxel pure : AUCUNE dépendance Bevy.
 # Tout ici doit être testable en headless (`cargo test -p voxel_core`).
 [dependencies]
+ron = "0.12.2"
+serde = { version = "1.0.229", features = ["derive"] }

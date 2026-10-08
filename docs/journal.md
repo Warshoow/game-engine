@@ -440,3 +440,22 @@ rien sous le fond du monde. 44 tests, clippy propre.
 
 **Pas vérifié en jeu.** Aspect des grottes, descente dans les couches
 inférieures.
+
+## 2026-10-08 — Registre chargé depuis un fichier de données (#16)
+
+**Problème.** Le registre était bien de la donnée, mais remplie en Rust
+dans `main.rs` : ajouter un bloc demandait de recompiler, et le jalon 1
+(#9) allait ajouter items, drops et « ce qu'un item pose » au même endroit.
+
+**Choix.** Fichier `assets/content/core.ron`, lu au démarrage avec
+`std::fs` (le registre doit exister avant le premier système ; le chargeur
+d'assets de Bevy est asynchrone). RON plutôt que JSON : commentaires, et
+les `enum` Rust s'y écrivent tels quels (`Block((solid: …))`). `serde` et
+`ron` entrent dans `voxel_core` : c'est la première dépendance du cœur,
+justifiée par le besoin (§1 : crates branchées quand le besoin arrive).
+Dossier résolu comme les assets Bevy : `CARGO_MANIFEST_DIR` sous
+`cargo run`, sinon à côté de l'exécutable.
+
+**Tests.** Le fichier livré est chargé par un test (un RON cassé casse
+les tests, pas le démarrage) ; ordre → IDs, doublon refusé, champ
+manquant signalé avec sa position.

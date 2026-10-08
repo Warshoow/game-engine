@@ -16,7 +16,7 @@ use bevy::render::render_resource::PrimitiveTopology;
 
 use voxel_core::chunk::{ChunkPos, CHUNK_SIZE};
 use voxel_core::mesher::{mesh_chunk_in_world, MeshData};
-use voxel_core::registry::{ContentEntry, ContentId, Registry};
+use voxel_core::registry::{ContentId, Registry};
 use voxel_core::world::VoxelWorld;
 use voxel_core::worldgen::HeightmapGenerator;
 
@@ -101,28 +101,21 @@ fn main() {
 }
 
 fn setup_world(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
-    // --- Le monde possède son contenu (§3.1) : tout part du registre. ---
-    let mut registry = Registry::new();
-    let air = registry
-        .register(ContentEntry::new_block("core:air", false, [0.0; 3]))
-        .expect("registre vide");
-    let grass = registry
-        .register(ContentEntry::new_block("core:grass", true, [0.35, 0.6, 0.25]))
-        .expect("identifier unique");
-    let stone = registry
-        .register(ContentEntry::new_block("core:stone", true, [0.55, 0.55, 0.58]))
-        .expect("identifier unique");
-    // Du contenu, pas du code (§0) : ces blocs n'existent qu'ici, en donnée.
-    // Aucun système ne les connaît — ils arrivent dans la hotbar par
-    // découverte du registre, et le worldgen n'en pose aucun.
-    for (identifier, color) in [
-        ("core:dirt", [0.45, 0.30, 0.15]),
-        ("core:sand", [0.85, 0.78, 0.55]),
-    ] {
+    // --- Le monde possède son contenu (§3.1) : tout part du registre, lu
+    //     depuis un fichier de données — aucun bloc n'est défini en Rust. ---
+    let path = content_dir().join("core.ron");
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|err| panic!("lecture de {} impossible : {err}", path.display()));
+    let registry = Registry::from_ron(&text)
+        .unwrap_or_else(|err| panic!("contenu invalide dans {} : {err}", path.display()));
+    // Le worldgen a besoin de quelques matériaux : résolus par identifier,
+    // une fois ici. Le reste du contenu, aucun système ne le nomme.
+    let id = |identifier: &str| {
         registry
-            .register(ContentEntry::new_block(identifier, true, color))
-            .expect("identifier unique");
-    }
+            .lookup(identifier)
+            .unwrap_or_else(|| panic!("{identifier} absent de {}", path.display()))
+    };
+    let (air, grass, stone) = (id("core:air"), id("core:grass"), id("core:stone"));
 
     // Gameplay en mètres (§2) : le relief est défini en mètres, la
     // résolution voxel ne fait que convertir.
@@ -289,6 +282,18 @@ fn update_debug_text(
         .and_then(|d| d.smoothed())
         .unwrap_or(0.0);
     text.0 = format!("{fps:.0} FPS · {} chunks", chunks.iter().count());
+}
+
+/// Dossier des fichiers de contenu : `assets/content/`, à côté du
+/// `Cargo.toml` sous `cargo run`, à côté de l'exécutable sinon (build
+/// Windows : copier `assets/` avec le `.exe`). Même règle que les assets
+/// Bevy.
+fn content_dir() -> std::path::PathBuf {
+    let base = std::env::var_os("CARGO_MANIFEST_DIR")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::current_exe().ok()?.parent().map(Into::into))
+        .unwrap_or_default();
+    base.join("assets").join("content")
 }
 
 /// Libellé HUD du bloc en main — l'identifier vient du registre, le HUD ne

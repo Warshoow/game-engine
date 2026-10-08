@@ -7,6 +7,13 @@
 //!
 //! Append-only par *construction* : l'API n'expose ni suppression ni
 //! réordonnancement. C'est le type qui porte l'invariant, pas la discipline.
+//!
+//! Le contenu s'écrit en donnée (RON, voir `assets/content/`) et se charge
+//! par [`Registry::from_ron`] : ajouter un bloc ne demande pas de recompiler.
+
+use std::fmt;
+
+use serde::Deserialize;
 
 /// ID entier stable d'une entrée du registre.
 ///
@@ -20,7 +27,7 @@ pub struct ContentId(pub u32);
 /// Chaque variante porte ses propres données : un `Block` sans `BlockData`
 /// (ou un `Item` avec) est irreprésentable — c'est le type qui porte
 /// l'invariant, pas la discipline de l'appelant.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub enum Kind {
     Block(BlockData),
     Item,
@@ -31,7 +38,7 @@ pub enum Kind {
 ///
 /// Volontairement minimal pour la tranche verticale : le comportement riche
 /// viendra par la couche script/data (§3.6), pas en gonflant cette struct.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct BlockData {
     /// Un bloc non-solide (air…) n'est ni meshé ni collidable.
     pub solid: bool,
@@ -40,7 +47,7 @@ pub struct BlockData {
 }
 
 /// Une entrée de contenu : identifier stable + kind (qui porte ses données).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct ContentEntry {
     /// Identifiant namespacé, ex. `core:air`, `core:stone`.
     pub identifier: String,
@@ -74,6 +81,17 @@ pub struct Registry {
 impl Registry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Construit un registre depuis une liste d'entrées en RON. L'ordre du
+    /// fichier fixe les IDs (append-only : on ajoute à la fin).
+    pub fn from_ron(text: &str) -> Result<Self, LoadError> {
+        let entries: Vec<ContentEntry> = ron::from_str(text).map_err(LoadError::Parse)?;
+        let mut registry = Self::new();
+        for entry in entries {
+            registry.register(entry).map_err(LoadError::Registry)?;
+        }
+        Ok(registry)
     }
 
     /// Ajoute une entrée et retourne son ID stable.
@@ -119,9 +137,60 @@ pub enum RegistryError {
     DuplicateIdentifier(String),
 }
 
+/// Échec de chargement d'un fichier de contenu.
+#[derive(Debug)]
+pub enum LoadError {
+    /// RON invalide ou entrée mal formée (ligne:colonne dans le message).
+    Parse(ron::error::SpannedError),
+    Registry(RegistryError),
+}
+
+impl fmt::Display for LoadError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Parse(err) => write!(f, "{err}"),
+            Self::Registry(RegistryError::DuplicateIdentifier(id)) => {
+                write!(f, "identifier en double : {id}")
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shipped_content_file_loads() {
+        // Le fichier livré avec le jeu : un RON cassé doit casser les tests,
+        // pas le démarrage.
+        let reg = Registry::from_ron(include_str!("../../../assets/content/core.ron")).unwrap();
+        let air = reg.lookup("core:air").expect("core:air");
+        assert_eq!(air, ContentId(0));
+        assert!(!reg.get(air).unwrap().block().unwrap().solid);
+        assert!(reg.lookup("core:grass").is_some() && reg.lookup("core:stone").is_some());
+    }
+
+    #[test]
+    fn ron_order_gives_ids_and_errors_are_reported() {
+        let reg = Registry::from_ron(
+            r#"[
+                (identifier: "a:x", kind: Block((solid: true, color: (1.0, 0.0, 0.0)))),
+                (identifier: "a:y", kind: Item),
+            ]"#,
+        )
+        .unwrap();
+        assert_eq!(reg.lookup("a:y"), Some(ContentId(1)));
+        assert_eq!(reg.get(ContentId(0)).unwrap().block().unwrap().color, [1.0, 0.0, 0.0]);
+
+        let dup = Registry::from_ron(r#"[(identifier: "a:x", kind: Item), (identifier: "a:x", kind: Item)]"#);
+        assert!(matches!(dup, Err(LoadError::Registry(RegistryError::DuplicateIdentifier(_)))));
+
+        // Champ manquant (`solid`) : erreur de parse avec position.
+        let bad = Registry::from_ron(r#"[(identifier: "a:x", kind: Block((color: (1.0, 0.0, 0.0))))]"#);
+        let msg = bad.unwrap_err().to_string();
+        assert!(msg.contains("solid"), "{msg}");
+    }
 
     #[test]
     fn ids_follow_insertion_order() {

@@ -57,6 +57,11 @@ F plein écran.
 - **La position du joueur est `Player::feet`**, pas son `Transform` : le
   `Transform` n'est que l'affichage, interpolé entre deux ticks
   (`smooth_transform`). La simu et la pose de bloc lisent `feet()`.
+- **Le contenu est dans `assets/content/core.ron`**, chargé au démarrage
+  (`Registry::from_ron`). L'ordre du fichier fixe les IDs : ajouter à la
+  fin, ne jamais réordonner ni supprimer. Aucun bloc défini en Rust côté
+  jeu (les tests et `mesh_stats` construisent encore leurs registres en
+  code, c'est voulu).
 - **`voxels_per_meter` n'existe qu'une fois** : `VoxelWorld::voxels_per_meter()`
   (gelé, §3.5). Le générateur le reçoit en paramètre.
 

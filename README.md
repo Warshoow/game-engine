@@ -55,7 +55,14 @@ cargo windows                              # alias from .cargo/config.toml
 ```
 
 The executable lands in `target/x86_64-pc-windows-gnu/release/voxel_engine.exe`;
-copy it to the Windows side (e.g. `/mnt/c/Users/<you>/`) and run it.
+copy it **with the `assets/` folder next to it** (content files are read at
+startup) to the Windows side (e.g. `/mnt/c/Users/<you>/`) and run it.
+
+### Content
+
+Blocks are data, not code: `assets/content/core.ron`. Add an entry at the end
+of the list and it becomes placeable on the next launch, no recompilation.
+Never reorder or remove entries: their position is their ID.
 
 ## Layout
 

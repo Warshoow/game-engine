@@ -1,0 +1,14 @@
+// Contenu de base du monde (§3.1). Chargé au démarrage par le binaire.
+//
+// L'ORDRE FIXE LES IDs : ajouter à la fin, ne jamais réordonner ni
+// supprimer une entrée — les chunks référencent les IDs.
+//
+// Tout bloc solide arrive dans la hotbar : ajouter une entrée ici suffit à
+// le rendre posable, sans recompiler.
+[
+    (identifier: "core:air",   kind: Block((solid: false, color: (0.0, 0.0, 0.0)))),
+    (identifier: "core:grass", kind: Block((solid: true,  color: (0.35, 0.6, 0.25)))),
+    (identifier: "core:stone", kind: Block((solid: true,  color: (0.55, 0.55, 0.58)))),
+    (identifier: "core:dirt",  kind: Block((solid: true,  color: (0.45, 0.30, 0.15)))),
+    (identifier: "core:sand",  kind: Block((solid: true,  color: (0.85, 0.78, 0.55)))),
+]
