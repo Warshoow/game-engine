@@ -12,12 +12,18 @@ use std::collections::{HashMap, HashSet};
 
 use bevy::asset::RenderAssetUsages;
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
+use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::mesh::{Indices, Mesh};
+use bevy::pbr::{ExtendedMaterial, MaterialExtension};
 use bevy::prelude::*;
-use bevy::render::render_resource::PrimitiveTopology;
+use bevy::render::render_resource::{
+    AsBindGroup, Extent3d, PrimitiveTopology, TextureDimension, TextureFormat, TextureViewDescriptor,
+    TextureViewDimension,
+};
+use bevy::shader::ShaderRef;
 
 use voxel_core::chunk::{ChunkPos, CHUNK_SIZE};
-use voxel_core::mesher::{mesh_chunk_in_world, MeshData};
+use voxel_core::mesher::{mesh_chunk_in_world, MeshData, NO_TEXTURE};
 use voxel_core::registry::{ContentId, Registry};
 use voxel_core::world::VoxelWorld;
 use voxel_core::worldgen::HeightmapGenerator;
@@ -32,8 +38,30 @@ pub struct GameWorld {
     /// IDs résolus une fois au setup — le gameplay manipule des `ContentId`,
     /// jamais des identifiers en dur dans les systèmes.
     pub air: ContentId,
-    /// Matériau partagé des chunks (blanc, couleurs aux sommets).
-    pub material: Handle<StandardMaterial>,
+    /// Matériau partagé des chunks : les textures du registre, couleurs aux
+    /// sommets pour les blocs sans texture.
+    pub material: Handle<VoxelMaterial>,
+}
+
+/// `StandardMaterial` (éclairage de Bevy) + les textures des blocs.
+pub type VoxelMaterial = ExtendedMaterial<StandardMaterial, BlockTextures>;
+
+/// Les textures du registre en **texture array** : une pile d'images de
+/// même taille, la couche choisie par sommet (`UV_1.x`, voir
+/// [`to_bevy_mesh`]). Contrairement à un atlas, le GPU répète une couche
+/// seul : c'est ce qui permet aux faces fusionnées du greedy de répéter la
+/// texture.
+#[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
+pub struct BlockTextures {
+    #[texture(100, dimension = "2d_array")]
+    #[sampler(101)]
+    array: Handle<Image>,
+}
+
+impl MaterialExtension for BlockTextures {
+    fn fragment_shader() -> ShaderRef {
+        "shaders/voxel.wgsl".into()
+    }
 }
 
 /// Marque l'entité d'un chunk **chargé** (côté affichage). L'entité existe
@@ -76,7 +104,11 @@ fn main() {
             }),
             ..default()
         }))
-        .add_plugins((player::PlayerPlugin, FrameTimeDiagnosticsPlugin::default()))
+        .add_plugins((
+            player::PlayerPlugin,
+            FrameTimeDiagnosticsPlugin::default(),
+            MaterialPlugin::<VoxelMaterial>::default(),
+        ))
         .init_resource::<DirtyChunks>()
         .init_resource::<inventory::Inventory>()
         .init_resource::<items::StorageChanged>()
@@ -106,14 +138,22 @@ fn main() {
         .run();
 }
 
-fn setup_world(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
+fn setup_world(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<VoxelMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+) {
     // --- Le monde possède son contenu (§3.1) : tout part du registre, lu
     //     depuis un fichier de données — aucun bloc n'est défini en Rust. ---
-    let path = content_dir().join("core.ron");
+    let path = assets_dir().join("content/core.ron");
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|err| panic!("lecture de {} impossible : {err}", path.display()));
-    let registry = Registry::from_ron(&text)
+    let mut registry = Registry::from_ron(&text)
         .unwrap_or_else(|err| panic!("contenu invalide dans {} : {err}", path.display()));
+    registry
+        .load_textures(&assets_dir().join("textures"))
+        .unwrap_or_else(|err| panic!("{err}"));
+    let array = images.add(texture_array(&registry));
     // Le worldgen a besoin de quelques matériaux : résolus par identifier,
     // une fois ici. Le reste du contenu, aucun système ne le nomme.
     let id = |identifier: &str| {
@@ -140,7 +180,10 @@ fn setup_world(mut commands: Commands, mut materials: ResMut<Assets<StandardMate
     //     meshe les chunks autour du joueur, dès la première frame. La
     //     physique se fige tant que le sol sous le joueur n'est pas chargé.
     let world = VoxelWorld::new(registry, CHUNK_SIZE, voxels_per_meter);
-    let material = materials.add(Color::WHITE); // blanc : les couleurs viennent des sommets
+    let material = materials.add(ExtendedMaterial {
+        base: StandardMaterial::from(Color::WHITE), // la couleur vient des sommets et des textures
+        extension: BlockTextures { array },
+    });
 
     commands.insert_resource(GameWorld {
         world,
@@ -231,7 +274,7 @@ pub fn remesh_dirty(
                 meshes.remove(mesh3d.id());
                 commands
                     .entity(entity)
-                    .remove::<(Mesh3d, MeshMaterial3d<StandardMaterial>)>();
+                    .remove::<(Mesh3d, MeshMaterial3d<VoxelMaterial>)>();
             }
             (Some(&(entity, None)), false) => {
                 commands.entity(entity).insert((
@@ -276,16 +319,50 @@ fn update_debug_text(
     text.0 = format!("{fps:.0} FPS · {} chunks", chunks.iter().count());
 }
 
-/// Dossier des fichiers de contenu : `assets/content/`, à côté du
-/// `Cargo.toml` sous `cargo run`, à côté de l'exécutable sinon (build
-/// Windows : copier `assets/` avec le `.exe`). Même règle que les assets
-/// Bevy.
-fn content_dir() -> std::path::PathBuf {
+/// Dossier `assets/` : à côté du `Cargo.toml` sous `cargo run`, à côté de
+/// l'exécutable sinon (build Windows : copier `assets/` avec le `.exe`).
+/// Même règle que les assets Bevy.
+fn assets_dir() -> std::path::PathBuf {
     let base = std::env::var_os("CARGO_MANIFEST_DIR")
         .map(std::path::PathBuf::from)
         .or_else(|| std::env::current_exe().ok()?.parent().map(Into::into))
         .unwrap_or_default();
-    base.join("assets").join("content")
+    base.join("assets")
+}
+
+/// Empile les textures du registre (couche = index dans le registre). Un
+/// registre sans texture donne une couche blanche 1 × 1 : un texture array
+/// vide n'existe pas côté GPU.
+fn texture_array(registry: &Registry) -> Image {
+    let textures = registry.textures();
+    let size = textures.first().map_or(1, |t| t.size);
+    let data: Vec<u8> = if textures.is_empty() {
+        vec![255; 4]
+    } else {
+        textures.iter().flat_map(|t| t.rgba.iter().copied()).collect()
+    };
+    let mut image = Image::new(
+        Extent3d { width: size, height: size, depth_or_array_layers: textures.len().max(1) as u32 },
+        TextureDimension::D2,
+        data,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    // Vue « array » même avec une seule couche (sinon Bevy en ferait une 2D).
+    image.texture_view_descriptor = Some(TextureViewDescriptor {
+        dimension: Some(TextureViewDimension::D2Array),
+        ..default()
+    });
+    // Répétition (les coordonnées vont au-delà de 1 sur une face fusionnée)
+    // et filtrage au plus proche : des pixels nets, pas un flou.
+    // ponytail: sans mipmaps, les textures fourmillent au loin ; à générer
+    // si ça gêne.
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::Repeat,
+        ..ImageSamplerDescriptor::nearest()
+    });
+    image
 }
 
 /// Convertit les tampons purs du mesher en `Mesh` Bevy.
@@ -297,5 +374,15 @@ fn to_bevy_mesh(data: MeshData) -> Mesh {
     .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, data.positions)
     .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, data.normals)
     .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, data.colors)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, data.uvs)
+    // La couche passe par le 2ᵉ jeu d'UV, que le shader standard transmet
+    // déjà au fragment : pas de vertex shader à écrire. -1 : pas de texture.
+    .with_inserted_attribute(
+        Mesh::ATTRIBUTE_UV_1,
+        data.layers
+            .iter()
+            .map(|&l| [if l == NO_TEXTURE { -1.0 } else { l as f32 }, 0.0])
+            .collect::<Vec<[f32; 2]>>(),
+    )
     .with_inserted_indices(Indices::U32(data.indices))
 }

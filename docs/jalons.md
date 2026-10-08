@@ -70,6 +70,29 @@ items.
 - La proximité et le menu (piste « à la Minecraft ») restent possibles
   plus tard pour d'autres stations.
 
+## 4. Textures
+
+Choix de Warshow (2026-10-08). Remplace les couleurs par sommet par des
+textures déclarées dans l'entrée (§3.1, apparence).
+
+- **Socle :**
+  - l'entrée nomme ses textures (`side`, `top` et `bottom` en option) ; le
+    registre charge les PNG de `assets/textures/` et garde les pixels ;
+  - rendu par **texture array** (une pile d'images de même taille, chacune
+    repérée par un numéro) plutôt qu'un atlas : le GPU répète une image
+    seul, alors qu'avec un atlas la répétition déborderait sur les images
+    voisines ;
+  - coordonnées de texture en mètres, calculées par le mesher : une face
+    fusionnée de 5 × 3 m répète la texture 5 × 3 fois au lieu de l'étirer ;
+  - shader : extension de `StandardMaterial` (garde l'éclairage de Bevy).
+- **Fait quand :** les blocs de `core.ron` sont texturés, l'herbe a un
+  dessus et des côtés différents, un bloc sans texture garde sa couleur ;
+  tests headless (PNG manquant refusé au chargement, coordonnées de
+  texture d'une face fusionnée).
+- Items au sol et barre d'inventaire gardent la couleur dans ce jalon.
+- *Fait et validé en jeu (Windows) le 2026-10-08 (#21)* : 10 textures
+  16 × 16 générées par script (à redessiner librement).
+
 ## Plus tard (non ordonné)
 
 - **Script Lua** (`mlua`, étage 3 de §3.6) — quand un bloc concret ne

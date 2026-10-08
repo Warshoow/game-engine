@@ -3,24 +3,28 @@
 // L'ORDRE FIXE LES IDs : ajouter à la fin, ne jamais réordonner ni
 // supprimer une entrée — les chunks référencent les IDs.
 //
-// Tout bloc solide arrive dans la hotbar : ajouter une entrée ici suffit à
-// le rendre posable, sans recompiler.
+// `texture` : PNG de `assets/textures/` (sans `.png`), 1 image = 1 m. `side`
+// sert aussi au dessus et au dessous s'ils ne sont pas précisés. Sans
+// texture, le bloc est rendu de sa `color` ; `color` sert aussi aux items.
 [
     (identifier: "core:air",   kind: Block((solid: false, color: (0.0, 0.0, 0.0)))),
     // `drops` : ce que donne le bloc cassé. Absent = lui-même, Some([]) = rien.
-    (identifier: "core:grass", kind: Block((solid: true,  color: (0.35, 0.6, 0.25), drops: Some(["core:dirt"])))),
-    (identifier: "core:stone", kind: Block((solid: true,  color: (0.55, 0.55, 0.58)))),
-    (identifier: "core:dirt",  kind: Block((solid: true,  color: (0.45, 0.30, 0.15)))),
-    (identifier: "core:sand",  kind: Block((solid: true,  color: (0.85, 0.78, 0.55))),
+    (identifier: "core:grass", kind: Block((solid: true,  color: (0.35, 0.6, 0.25), drops: Some(["core:dirt"]),
+        texture: Some((side: "grass_side", top: Some("grass_top"), bottom: Some("dirt")))))),
+    (identifier: "core:stone", kind: Block((solid: true,  color: (0.55, 0.55, 0.58), texture: Some((side: "stone"))))),
+    (identifier: "core:dirt",  kind: Block((solid: true,  color: (0.45, 0.30, 0.15), texture: Some((side: "dirt"))))),
+    (identifier: "core:sand",  kind: Block((solid: true,  color: (0.85, 0.78, 0.55), texture: Some((side: "sand")))),
         recipes: [(inputs: ["core:stone", "core:stone"], count: 2, station: "core:workbench")]),
 
     // Lampe : un clic droit bascule entre éteinte et allumée (§3.6, règles).
     // Aucun code Rust ne la connaît. Pas de vraie lumière (non-goal §7) :
     // seule la couleur change. Allumée, elle se casse en lampe éteinte.
     (identifier: "core:lamp", kind: Block((solid: true, color: (0.30, 0.27, 0.12),
+        texture: Some((side: "lamp")),
         rules: [(on: Used, then: [ReplaceSelf("core:lamp_lit")])])),
         recipes: [(inputs: ["core:stone", "core:stone", "core:stone", "core:dirt"], station: "core:workbench")]),
     (identifier: "core:lamp_lit", kind: Block((solid: true, color: (1.0, 0.85, 0.35),
+        texture: Some((side: "lamp_lit")),
         drops: Some(["core:lamp"]),
         rules: [(on: Used, then: [ReplaceSelf("core:lamp")])]))),
 
@@ -29,6 +33,7 @@
     // si le contenu est une recette faite ici, sinon rend les items. Les
     // recettes sont portées par l'entrée produite (`recipes`, ci-dessus).
     (identifier: "core:workbench", kind: Block((solid: true, color: (0.55, 0.36, 0.18),
+        texture: Some((side: "planks", top: Some("workbench_top"))),
         storage: Some(9),
         rules: [
             (on: Used, when: [HoldingAny], then: [StoreHeld]),

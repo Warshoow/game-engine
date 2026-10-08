@@ -74,6 +74,7 @@ Les règles transverses dont dérive tout le modèle de données.
 - **World-owned.** La définition complète d'une entrée (composants, apparence, comportement) est sérialisée **dans la save**, à côté des données voxel. La save n'est plus « quels blocs sont où » mais « quels blocs *existent* dans ce monde **+** où ». C'est ce qui permet à un contenu généré en runtime (par une IA, plus tard) d'exister sans registre statique externe.
 - **Kinds unifiés.** Bloc, item, mob, item au sol, véhicule : côté ECS ce sont tous des entités ; côté contenu, une seule table avec un champ `kind`. L'item et le bloc générés par IA sortent de la même table. Pas de registres séparés qui divergent.
 - **Les recettes sont une donnée de l'entrée qu'elles produisent** (ajout 2026-10-07). Une entrée peut porter zéro, une ou plusieurs recettes (entrées consommées, quantité produite, station requise éventuelle). Pas de kind `recipe` : une recette n'est pas une chose qui existe dans le monde, et la porter sur l'entrée produite rend un contenu généré **autonome** — une seule entrée à ajouter pour qu'un nouvel item existe *et* soit fabricable. Lister les recettes d'une station = parcourir le registre (même principe que la hotbar découverte).
+- **L'apparence est une donnée de l'entrée, pixels compris** (ajout 2026-10-08). Une entrée de bloc nomme ses textures (une pour les côtés, et en option une pour le dessus et une pour le dessous). Le nom désigne un PNG de `assets/textures/` : c'est l'outil d'écriture, on dessine dans un vrai logiciel. Au chargement, le registre lit et garde **les pixels**, et c'est eux que la save stockera, pas le chemin : une save reste lisible sans les fichiers d'origine, et un contenu généré peut apporter ses propres pixels. Toutes les textures d'un registre ont la même taille (un texture array GPU l'exige). Une texture couvre **1 m** de surface, quelle que soit la résolution voxel (§2 : en mètres). `color` reste : couleur de secours sans texture, et couleur des items tant qu'ils n'ont pas d'apparence propre. *Coût de changement :* Day-1 pour « les pixels sont dans le registre » ; le format d'image et la façon de déclarer les faces sont mous.
 
 **Implémentation (piste).** Arène append-only, ou `Arc<RegistrySnapshot>` swappé en RCU à chaque ajout pour garder des lectures lock-free côté systèmes ECS.
 
@@ -320,6 +321,7 @@ Ces non-goals sont *prévus par le data model* (§3) mais *pas implémentés* da
 | Gameplay | En mètres, jamais en blocs | Figé | — |
 | Comportement | Couche script/data, primitives composables | Figé | Day-1 |
 | Recettes | Donnée de l'entrée produite, pas de kind dédié | Figé (2026-10-07) | Day-1 |
+| Apparence | Textures nommées par l'entrée, pixels gardés dans le registre (donc dans la save), 1 texture = 1 m | Figé (2026-10-08) | Day-1 |
 | Block-entities (vie) | État initial déclaré par l'entrée ; créé à la pose, supprimé à la casse | Figé (2026-10-07) | Day-1 |
 | Forme du comportement | Propriétés → règles déclencheur/condition/effet → script ; garde-fous script | Figé (2026-10-07) | Day-1 (forme) |
 | Vocabulaire | Append-only ; save à élément inconnu refusée | Figé (2026-10-07) | Day-1 |

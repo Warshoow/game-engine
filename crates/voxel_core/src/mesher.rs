@@ -34,12 +34,21 @@ use crate::chunk::{Chunk, ChunkPos};
 use crate::registry::{ContentId, Registry};
 use crate::world::VoxelWorld;
 
+/// Couche d'un bloc sans texture.
+pub const NO_TEXTURE: u32 = u32::MAX;
+
 /// Tampons de mesh bruts, agnostiques du moteur de rendu.
 #[derive(Debug, Default, Clone)]
 pub struct MeshData {
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
     pub colors: Vec<[f32; 4]>,
+    /// Coordonnées de texture **en mètres** : une texture couvre 1 m, donc
+    /// une face fusionnée de 5 × 3 m va de 0 à 5 et de 0 à 3 — le sampler en
+    /// mode répétition répète l'image au lieu de l'étirer.
+    pub uvs: Vec<[f32; 2]>,
+    /// Couche du texture array par sommet ; [`NO_TEXTURE`] : couleur seule.
+    pub layers: Vec<u32>,
     /// Triangles, en sens antihoraire (CCW) vu de l'extérieur — la
     /// convention de face avant de Bevy/wgpu.
     pub indices: Vec<u32>,
@@ -109,7 +118,7 @@ fn mesh_chunk_with(
         if p.iter().any(|&c| c < 0 || c >= size) {
             return outside_solid(p); // hors chunk : décidé par l'appelant
         }
-        resolved[chunk.get_local(p[0] as u32, p[1] as u32, p[2] as u32) as usize].0
+        resolved[chunk.get_local(p[0] as u32, p[1] as u32, p[2] as u32) as usize].solid
     };
 
     let mut mesh = MeshData::default();
@@ -185,7 +194,7 @@ fn mesh_chunk_with(
                             origin: [iu as i32, iv as i32],
                             extent: [w as i32, h as i32],
                         };
-                        emit_rect(&mut mesh, &quad, normal, resolved[key as usize].1, voxel_size_m);
+                        emit_rect(&mut mesh, &quad, normal, &resolved[key as usize], voxel_size_m);
                     }
                 }
             }
@@ -208,7 +217,7 @@ struct SliceQuad {
     extent: [i32; 2],
 }
 
-fn emit_rect(mesh: &mut MeshData, quad: &SliceQuad, normal: [f32; 3], color: [f32; 4], scale: f32) {
+fn emit_rect(mesh: &mut MeshData, quad: &SliceQuad, normal: [f32; 3], block: &Resolved, scale: f32) {
     let [d, u, v] = quad.axes;
     // La face d'un voxel `layer` côté +d est dans le plan `layer + 1` ;
     // côté -d, dans le plan `layer`.
@@ -228,28 +237,66 @@ fn emit_rect(mesh: &mut MeshData, quad: &SliceQuad, normal: [f32; 3], color: [f3
         p[d] = plane;
         p[u] = quad.origin[0] + cu;
         p[v] = quad.origin[1] + cv;
-        mesh.positions
-            .push([p[0] as f32 * scale, p[1] as f32 * scale, p[2] as f32 * scale]);
-        mesh.normals.push(normal);
-        mesh.colors.push(color);
+        let pos = [p[0] as f32 * scale, p[1] as f32 * scale, p[2] as f32 * scale];
+        push_vertex(mesh, pos, normal, block);
     }
     // Deux triangles CCW sur les coins [0,1,2] et [0,2,3].
     mesh.indices
         .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
 }
 
-/// Palette résolue : index local → (solide, couleur).
-fn resolve_palette(chunk: &Chunk, registry: &Registry) -> Vec<(bool, [f32; 4])> {
+/// Un sommet : position, normale, couleur, et sa texture (couche +
+/// coordonnées en mètres, prises dans le plan de la face).
+fn push_vertex(mesh: &mut MeshData, pos: [f32; 3], normal: [f32; 3], block: &Resolved) {
+    let [x, y, z] = pos;
+    // Sur les côtés, v descend avec y : l'image est à l'endroit (le haut du
+    // PNG en haut du bloc).
+    let (uv, layer) = if normal[1] > 0.0 {
+        ([x, z], block.layers[1])
+    } else if normal[1] < 0.0 {
+        ([x, z], block.layers[2])
+    } else if normal[0] != 0.0 {
+        ([z, -y], block.layers[0])
+    } else {
+        ([x, -y], block.layers[0])
+    };
+    mesh.positions.push(pos);
+    mesh.normals.push(normal);
+    mesh.colors.push(block.color);
+    mesh.uvs.push(uv);
+    mesh.layers.push(layer);
+}
+
+/// Ce que le mesher lit d'une entrée de palette, résolu une fois.
+struct Resolved {
+    solid: bool,
+    color: [f32; 4],
+    /// Couche du côté, du dessus, du dessous.
+    layers: [u32; 3],
+}
+
+fn resolve_palette(chunk: &Chunk, registry: &Registry) -> Vec<Resolved> {
     chunk.palette().iter().map(|&id| resolve(registry, id)).collect()
 }
 
-fn resolve(registry: &Registry, id: ContentId) -> (bool, [f32; 4]) {
-    match registry.get(id).and_then(|e| e.block()) {
-        Some(b) => (b.solid, [b.color[0], b.color[1], b.color[2], 1.0]),
+fn resolve(registry: &Registry, id: ContentId) -> Resolved {
+    let Some(b) = registry.get(id).and_then(|e| e.block()) else {
         // ID inconnu du registre : on le rend visible et criard plutôt
         // qu'invisible — un bug de contenu doit se voir.
-        None => (true, [1.0, 0.0, 1.0, 1.0]),
-    }
+        return Resolved { solid: true, color: [1.0, 0.0, 1.0, 1.0], layers: [NO_TEXTURE; 3] };
+    };
+    // Texture absente ou non chargée : couleur seule.
+    let layer = |name: &String| registry.texture_layer(name).unwrap_or(NO_TEXTURE);
+    let layers = match &b.texture {
+        None => [NO_TEXTURE; 3],
+        Some(t) => {
+            let side = layer(&t.side);
+            [side, t.top.as_ref().map_or(side, layer), t.bottom.as_ref().map_or(side, layer)]
+        }
+    };
+    // Texturé : sommets blancs, la couleur vient de l'image.
+    let color = if layers[0] == NO_TEXTURE { [b.color[0], b.color[1], b.color[2], 1.0] } else { [1.0; 4] };
+    Resolved { solid: b.solid, color, layers }
 }
 
 // ---------------------------------------------------------------------------
@@ -294,15 +341,15 @@ pub fn mesh_chunk_naive(chunk: &Chunk, registry: &Registry, voxel_size_m: f32) -
         if x < 0 || y < 0 || z < 0 || x >= size as i32 || y >= size as i32 || z >= size as i32 {
             return false; // hors chunk = air
         }
-        resolved[chunk.get_local(x as u32, y as u32, z as u32) as usize].0
+        resolved[chunk.get_local(x as u32, y as u32, z as u32) as usize].solid
     };
 
     let mut mesh = MeshData::default();
     for z in 0..size {
         for y in 0..size {
             for x in 0..size {
-                let (solid, color) = resolved[chunk.get_local(x, y, z) as usize];
-                if !solid {
+                let block = &resolved[chunk.get_local(x, y, z) as usize];
+                if !block.solid {
                     continue;
                 }
                 for face in &FACES {
@@ -310,7 +357,7 @@ pub fn mesh_chunk_naive(chunk: &Chunk, registry: &Registry, voxel_size_m: f32) -
                     let ny = y as i32 + face.neighbor[1];
                     let nz = z as i32 + face.neighbor[2];
                     if !solid_at(nx, ny, nz) {
-                        emit_quad(&mut mesh, [x, y, z], face, color, voxel_size_m);
+                        emit_quad(&mut mesh, [x, y, z], face, block, voxel_size_m);
                     }
                 }
             }
@@ -319,16 +366,15 @@ pub fn mesh_chunk_naive(chunk: &Chunk, registry: &Registry, voxel_size_m: f32) -
     mesh
 }
 
-fn emit_quad(mesh: &mut MeshData, voxel: [u32; 3], face: &Face, color: [f32; 4], scale: f32) {
+fn emit_quad(mesh: &mut MeshData, voxel: [u32; 3], face: &Face, block: &Resolved, scale: f32) {
     let base = mesh.positions.len() as u32;
     for corner in &face.corners {
-        mesh.positions.push([
+        let pos = [
             (voxel[0] + corner[0]) as f32 * scale,
             (voxel[1] + corner[1]) as f32 * scale,
             (voxel[2] + corner[2]) as f32 * scale,
-        ]);
-        mesh.normals.push(face.normal);
-        mesh.colors.push(color);
+        ];
+        push_vertex(mesh, pos, face.normal, block);
     }
     // Deux triangles CCW sur les coins [0,1,2] et [0,2,3].
     mesh.indices
@@ -542,6 +588,44 @@ mod tests {
         let xs: Vec<f32> = mesh.positions.iter().map(|p| p[0]).collect();
         assert!(xs.iter().all(|&x| (1.0..=1.5).contains(&x)));
         assert!(xs.contains(&1.0) && xs.contains(&1.5));
+    }
+
+    #[test]
+    fn merged_face_repeats_texture_in_meters() {
+        // Dalle d'herbe 5 × 1 × 3 : le dessus est un seul quad, dont les
+        // coordonnées de texture couvrent 5 × 3 (une image par mètre).
+        let mut reg = Registry::from_ron(include_str!("../../../assets/content/core.ron")).unwrap();
+        reg.load_textures(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/textures"))
+            .unwrap();
+        let (air, grass) = (reg.lookup("core:air").unwrap(), reg.lookup("core:grass").unwrap());
+        let faces = reg.get(grass).unwrap().block().unwrap().texture.clone().unwrap();
+        let top_layer = reg.texture_layer(faces.top.as_ref().unwrap()).unwrap();
+        let side_layer = reg.texture_layer(&faces.side).unwrap();
+        let mut chunk = Chunk::filled(8, air);
+        for z in 0..3 {
+            for x in 0..5 {
+                chunk.set(x, 0, z, grass);
+            }
+        }
+        let mesh = mesh_chunk(&chunk, &reg, 1.0);
+        let top: Vec<usize> = (0..mesh.normals.len()).filter(|&i| mesh.normals[i][1] > 0.0).collect();
+        assert_eq!(top.len(), 4, "un seul quad");
+        assert!(top.iter().all(|&i| mesh.layers[i] == top_layer && mesh.colors[i] == [1.0; 4]));
+        let span = |axis: usize| {
+            let vals = top.iter().map(|&i| mesh.uvs[i][axis]);
+            vals.clone().fold(f32::MIN, f32::max) - vals.fold(f32::MAX, f32::min)
+        };
+        assert_eq!((span(0), span(1)), (5.0, 3.0));
+        let side = (0..mesh.normals.len()).find(|&i| mesh.normals[i][1] == 0.0).unwrap();
+        assert_eq!(mesh.layers[side], side_layer);
+
+        // Sans texture : couleur du registre, pas de couche.
+        let (reg, air, stone) = test_registry();
+        let mut chunk = Chunk::filled(4, air);
+        chunk.set(0, 0, 0, stone);
+        let mesh = mesh_chunk(&chunk, &reg, 1.0);
+        assert!(mesh.layers.iter().all(|&l| l == NO_TEXTURE));
+        assert_eq!(mesh.colors[0], [0.5, 0.5, 0.5, 1.0]);
     }
 
     #[test]

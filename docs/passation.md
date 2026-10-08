@@ -12,8 +12,9 @@ d'apprentissage du cœur voxel sont construits — stockage (chunk paletté),
 meshing (greedy, ×12,8 vs naïf, fluidité validée en jeu par Warshow même
 sous llvmpipe), et **streaming** (§3.4 : monde qui démarre vide, chunks
 générés/déchargés autour du joueur). Les **trois jalons de gameplay** de
-`docs/jalons.md` sont faits (items/inventaire, règles, craft sur l'établi).
-Dernier commit : `c2155c6`.
+`docs/jalons.md` sont faits (items/inventaire, règles, craft sur l'établi),
+plus les **textures** (jalon 4).
+Dernier commit : celui du jalon 4 (#21).
 
 1. Chunk généré depuis la seed (heightmap fBm maison, pierre sous 1 m de
    sol, **grottes** par bruit 3D, déterministe), **en continu autour du
@@ -27,9 +28,12 @@ Dernier commit : `c2155c6`.
 4. **Contenu en donnée** dans `assets/content/core.ron` (blocs, drops,
    règles, recettes) ; **règles** déclencheur → condition → effet (lampe) ;
    **établi** : on pose les items dessus, main vide → fabrique.
-5. HUD debug (FPS, chunks), caméra interpolée entre ticks, touche **G**
+5. **Textures** (texture array, PNG de `assets/textures/` nommés par
+   l'entrée, pixels gardés dans le registre ; 1 image = 1 m, répétée sur
+   les faces fusionnées). Shader `assets/shaders/voxel.wgsl`.
+6. HUD debug (FPS, chunks), caméra interpolée entre ticks, touche **G**
    (debug) = un exemplaire de chaque bloc solide.
-6. Déplacement FPS avec collision (AABB balayée), **figé si le chunk sous
+7. Déplacement FPS avec collision (AABB balayée), **figé si le chunk sous
    les pieds n'est pas chargé**.
 
 `cargo run` → clic gauche pour jouer, WASD/Espace, clic gauche casse,
@@ -221,7 +225,7 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   #26 Rendu, #31 Monde, #38 Simulation et jeu, #43 Technique.
 - Registre depuis `core.ron` (#16), jalon 1 items/inventaire (#9), jalon 2
   règles (#10), jalon 3 craft sur l'établi + block-entities (#11, #13
-  fusionné). Tous validés en jeu par Warshow.
+  fusionné), jalon 4 textures (#21). Tous validés en jeu par Warshow.
 - **Non poussé** : `40fde67` (#10) et `c2155c6` (#11) — `origin/master` est
   à `828667c`.
 
@@ -233,7 +237,7 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   d'abord dans le doc ; structure logique déjà figée (§3.10).
 - **Recette de l'établi sans établi** — aujourd'hui il ne s'obtient que
   par G (debug) ; seul manque pour un craft sans triche.
-- **#21 textures** ou **#27 biomes/décor**.
+- **#27 biomes/décor** ; mipmaps si les textures scintillent au loin.
 - Restent ouverts : #6 distance de vue, #7 AO, #12 Lua, #14/#15 modèles,
   et le reste des epics.
 

@@ -549,3 +549,37 @@ Un item qui naît dans un solide apparaît donc un voxel au-dessus.
 **Tests.** Stockage (capacité, vidage, disparition avec le bloc),
 recherche de recette (ordre, station, manque, surplus), conditions de
 main, inventaire avec main vide. 56 tests, clippy propre.
+
+## 2026-10-08 (suite) — Jalon 4 : textures (#21)
+
+Choix de Warshow. Deux décisions avant de coder, écrites dans §3.1.
+
+**Où vivent les pixels.** §3.1 veut l'apparence dans la save (world-owned).
+Un chemin de fichier ne suffit pas : une save sans le PNG donnerait un
+bloc invisible. L'entrée nomme donc un PNG (outil d'écriture), mais le
+registre lit et garde les pixels (`Registry::load_textures`, crate `png`
+déjà présente via Bevy) : c'est eux que la save stockera.
+
+**Texture array plutôt qu'atlas.** Le greedy fusionne les faces : un quad
+de 5 × 3 m doit répéter l'image 5 × 3 fois. Dans un atlas, répéter une
+image déborderait sur les voisines ; dans un array, chaque couche est une
+image à part que le sampler répète seul (mode `Repeat`). Contrainte : toutes
+les textures ont la même taille, vérifié au chargement.
+
+**Coordonnées en mètres.** Le mesher calcule les UV depuis la position du
+sommet, en mètres : une image couvre 1 m quelle que soit la résolution
+voxel. Sur les côtés, v descend avec y pour que l'image soit à l'endroit.
+
+**Shader minimal.** Extension de `StandardMaterial` (éclairage de Bevy
+conservé). La couche passe par le 2ᵉ jeu d'UV, que le shader standard
+transmet déjà au fragment : pas de vertex shader à écrire. Piège WGSL :
+`textureSample` est interdit dans une branche dépendant d'une valeur
+interpolée — on échantillonne toujours et on choisit avec `select`.
+
+**Vérification visuelle sous WSL.** `xwd` échoue sous WSLg ; une capture
+via `Screenshot::primary_window()` de Bevy (code temporaire, retiré) a
+suffi pour vérifier l'orientation avant le test Windows.
+
+**Tests.** PNG des blocs livrés chargés, PNG manquant refusé, face
+fusionnée 5 × 3 aux UV couvrant 5 × 3, bloc sans texture en couleur.
+59 tests, clippy propre.

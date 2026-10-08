@@ -70,6 +70,12 @@ what a block gives when broken (absent: itself; `Some([])`: nothing).
 then: [ReplaceSelf("…"), Drop("…")])` — see `crates/voxel_core/src/rules.rs`
 and the lamp in `core.ron`.
 
+**Textures**: `texture: Some((side: "stone"))` names a PNG in
+`assets/textures/` (without `.png`); `top` and `bottom` are optional
+(`side` is used otherwise). All textures are square and the same size; one
+image covers 1 m and repeats across large faces. A block without a texture is
+drawn in its `color`, which items also use.
+
 **Crafting** happens *on* the workbench (`core:workbench`, G gives one): right
 click with an item in hand puts it on the bench; right click with an empty
 hand crafts if what lies there matches a recipe (the product drops), otherwise

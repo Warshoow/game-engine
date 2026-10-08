@@ -12,6 +12,7 @@
 //! par [`Registry::from_ron`] : ajouter un bloc ne demande pas de recompiler.
 
 use std::fmt;
+use std::path::Path;
 
 use serde::Deserialize;
 
@@ -44,8 +45,13 @@ pub enum Kind {
 pub struct BlockData {
     /// Un bloc non-solide (air…) n'est ni meshé ni collidable.
     pub solid: bool,
-    /// Couleur de base RGB — suffit pour la slice (pas de textures encore).
+    /// Couleur RGB : celle du bloc sans texture, et des items (cube au
+    /// sol, barre d'inventaire).
     pub color: [f32; 3],
+    /// Apparence (§3.1) : textures par nom, voir [`Registry::load_textures`].
+    /// Absent : le bloc est rendu de sa couleur.
+    #[serde(default)]
+    pub texture: Option<Faces>,
     /// Ce que le bloc donne quand on le casse, par identifier. Absent : le
     /// bloc lui-même ; `Some([])` : rien (verre…) ; sinon ces entrées
     /// (l'herbe donne de la terre, un minerai une gemme).
@@ -58,6 +64,34 @@ pub struct BlockData {
     /// (un établi). Absent : pas d'état, jamais de ligne dans le canal creux.
     #[serde(default)]
     pub storage: Option<u32>,
+}
+
+/// Les textures d'un bloc, par nom (un PNG de `assets/textures/`).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Faces {
+    /// Côtés, et dessus/dessous quand ils ne sont pas précisés.
+    pub side: String,
+    #[serde(default)]
+    pub top: Option<String>,
+    #[serde(default)]
+    pub bottom: Option<String>,
+}
+
+impl Faces {
+    /// Les noms cités (le même peut revenir).
+    fn names(&self) -> impl Iterator<Item = &String> {
+        [Some(&self.side), self.top.as_ref(), self.bottom.as_ref()].into_iter().flatten()
+    }
+}
+
+/// Une texture chargée : ses pixels, que la save stockera (§3.1).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Texture {
+    pub name: String,
+    /// Côté en pixels (carrée).
+    pub size: u32,
+    /// RGBA 8 bits, ligne par ligne depuis le haut.
+    pub rgba: Vec<u8>,
 }
 
 /// Une façon de fabriquer l'entrée qui la porte (§3.1 : les recettes sont
@@ -98,6 +132,7 @@ impl ContentEntry {
                 drops: None,
                 rules: Vec::new(),
                 storage: None,
+                texture: None,
             }),
             recipes: Vec::new(),
         }
@@ -116,6 +151,9 @@ impl ContentEntry {
 #[derive(Debug, Default)]
 pub struct Registry {
     entries: Vec<ContentEntry>,
+    /// Textures citées par les blocs ; l'index est la couche du texture
+    /// array côté rendu.
+    textures: Vec<Texture>,
 }
 
 impl Registry {
@@ -151,6 +189,46 @@ impl Registry {
             }
         }
         Ok(registry)
+    }
+
+    /// Lit dans `dir` le PNG (`<nom>.png`) de chaque texture citée par un
+    /// bloc et garde ses pixels. Toutes doivent être carrées et de même
+    /// taille (texture array).
+    pub fn load_textures(&mut self, dir: &Path) -> Result<(), LoadError> {
+        let mut names: Vec<String> = Vec::new();
+        for (_, entry) in self.iter() {
+            for name in entry.block().and_then(|b| b.texture.as_ref()).into_iter().flat_map(Faces::names) {
+                if !names.contains(name) {
+                    names.push(name.clone());
+                }
+            }
+        }
+        let mut textures = Vec::with_capacity(names.len());
+        for name in names {
+            let path = dir.join(format!("{name}.png"));
+            let texture = read_png(&path)
+                .map(|(size, rgba)| Texture { name: name.clone(), size, rgba })
+                .map_err(|reason| LoadError::Texture { name: name.clone(), reason })?;
+            if let Some(first) = textures.first().filter(|t: &&Texture| t.size != texture.size) {
+                return Err(LoadError::Texture {
+                    name,
+                    reason: format!("{} px, alors que {} fait {} px", texture.size, first.name, first.size),
+                });
+            }
+            textures.push(texture);
+        }
+        self.textures = textures;
+        Ok(())
+    }
+
+    /// Les textures chargées ; l'index est leur couche.
+    pub fn textures(&self) -> &[Texture] {
+        &self.textures
+    }
+
+    /// La couche de la texture `name`, si elle est chargée.
+    pub fn texture_layer(&self, name: &str) -> Option<u32> {
+        self.textures.iter().position(|t| t.name == name).map(|i| i as u32)
     }
 
     /// Ce que donne le bloc `id` quand on le casse (voir [`BlockData::drops`]).
@@ -217,6 +295,8 @@ pub enum LoadError {
     Registry(RegistryError),
     /// Une entrée cite un identifier qui n'existe pas dans le registre.
     UnknownReference { from: String, to: String },
+    /// PNG absent, illisible ou de mauvaise taille.
+    Texture { name: String, reason: String },
 }
 
 impl fmt::Display for LoadError {
@@ -229,8 +309,31 @@ impl fmt::Display for LoadError {
             Self::UnknownReference { from, to } => {
                 write!(f, "{from} cite {to}, absent du registre")
             }
+            Self::Texture { name, reason } => write!(f, "texture {name} : {reason}"),
         }
     }
+}
+
+/// Décode un PNG carré en RGBA 8 bits → (côté, pixels).
+fn read_png(path: &Path) -> Result<(u32, Vec<u8>), String> {
+    let file = std::fs::File::open(path).map_err(|e| format!("{} : {e}", path.display()))?;
+    let mut decoder = png::Decoder::new(std::io::BufReader::new(file));
+    decoder.set_transformations(png::Transformations::normalize_to_color8());
+    let mut reader = decoder.read_info().map_err(|e| e.to_string())?;
+    let mut buf = vec![0; reader.output_buffer_size().ok_or("image trop grande")?];
+    let info = reader.next_frame(&mut buf).map_err(|e| e.to_string())?;
+    if info.width != info.height {
+        return Err(format!("{} × {} px, doit être carrée", info.width, info.height));
+    }
+    buf.truncate(info.line_size * info.height as usize);
+    let rgba = match info.color_type {
+        png::ColorType::Rgba => buf,
+        png::ColorType::Rgb => buf.chunks(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect(),
+        png::ColorType::GrayscaleAlpha => buf.chunks(2).flat_map(|p| [p[0], p[0], p[0], p[1]]).collect(),
+        png::ColorType::Grayscale => buf.iter().flat_map(|&g| [g, g, g, 255]).collect(),
+        png::ColorType::Indexed => unreachable!("EXPAND convertit la palette en RGB(A)"),
+    };
+    Ok((info.width, rgba))
 }
 
 #[cfg(test)]
@@ -246,6 +349,29 @@ mod tests {
         assert_eq!(air, ContentId(0));
         assert!(!reg.get(air).unwrap().block().unwrap().solid);
         assert!(reg.lookup("core:grass").is_some() && reg.lookup("core:stone").is_some());
+    }
+
+    #[test]
+    fn shipped_textures_load_and_get_layers() {
+        let mut reg = Registry::from_ron(include_str!("../../../assets/content/core.ron")).unwrap();
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/textures");
+        reg.load_textures(&dir).unwrap();
+        let grass = reg.get(reg.lookup("core:grass").unwrap()).unwrap().block().unwrap();
+        let faces = grass.texture.as_ref().unwrap();
+        let top = reg.texture_layer(faces.top.as_ref().unwrap()).unwrap();
+        assert_ne!(top, reg.texture_layer(&faces.side).unwrap());
+        let t = &reg.textures()[top as usize];
+        assert_eq!(t.rgba.len(), (t.size * t.size * 4) as usize);
+    }
+
+    #[test]
+    fn missing_texture_is_refused_at_load() {
+        let mut reg = Registry::from_ron(
+            r#"[(identifier: "a:x", kind: Block((solid: true, color: (1.0, 1.0, 1.0), texture: Some((side: "nope")))))]"#,
+        )
+        .unwrap();
+        let err = reg.load_textures(Path::new("/nonexistent")).unwrap_err();
+        assert!(matches!(&err, LoadError::Texture { name, .. } if name == "nope"), "{err}");
     }
 
     #[test]
