@@ -1,6 +1,6 @@
 # Moteur Voxel — Design du Socle
 
-> **Statut :** v0.1 — v0 figé pour le prototypage ; 2026-10-07 : recettes (§3.1), cycle de vie des block-entities (§3.3), forme du comportement (§3.6).
+> **Statut :** v0.1 — v0 figé pour le prototypage ; 2026-10-07 : recettes (§3.1), cycle de vie des block-entities (§3.3), forme du comportement (§3.6) ; 2026-10-08 : apparence (§3.1), persistance (§3.10), principe « mécanismes, pas règles de jeu » (§2).
 > **Nature :** ceci est un `intent/` — la source de vérité du socle. On lit **avant** d'écrire. Toute décision qui contredit ce doc doit d'abord **modifier ce doc** (avec sa justification), pas le contourner en douce dans le code.
 > **Portée :** ce document décrit un **socle**, pas un jeu. Aucun système de gameplay (survie, magie, armes, quêtes…) n'est spécifié ici. Le socle est le substrat sur lequel ces systèmes se branchent sans toucher au core.
 
@@ -54,6 +54,8 @@ Les règles transverses dont dérive tout le modèle de données.
 **Gameplay en mètres.** Le rayon d'une torche = *X mètres*, pas *X blocs*. Sinon la sémantique du jeu se casse dès qu'on change la résolution. La résolution ne doit **jamais fuiter dans les règles du jeu**.
 
 **Contenu data-driven & world-owned.** Voir §3.1. C'est le pivot entre « clone figé » et « socle à construire à l'envie » — et c'est ce qui rend possible la génération de contenu en runtime (y compris par IA).
+
+**Le moteur fournit des mécanismes, le contenu fait le jeu** (ajout 2026-10-08, Warshow). Les fichiers de contenu livrés (`core.ron`) ne sont **qu'un jeu d'exemple** : un autre jeu les remplace sans toucher au Rust. Un besoin de jeu se règle d'abord en donnée ; si la donnée n'y suffit pas, on ajoute au moteur un **mécanisme général**, utilisable par n'importe quel contenu — jamais une règle propre à un bloc ou à une manière de jouer. Exemple : l'établi n'était pas fabricable (toute recette exigeait une station) → le moteur a gagné les recettes sans station, et la recette de l'établi est une ligne de contenu.
 
 **Composition depuis primitives.** Le comportement se compose depuis un vocabulaire de briques (« émet de la lumière », « inflammable », « flotte »…), jamais depuis du code arbitraire. C'est ce qui rend la génération de contenu *safe* et cohérente par construction.
 
@@ -131,7 +133,9 @@ Un coffre a un inventaire ; un bloc-IA peut avoir de l'état. Cet état ne peut 
 **Décision.** Le comportement des blocs/items/entités vit dans une **couche script/data**, **jamais en Rust natif compilé**. Le contenu est produit en **composant des primitives**, pas en écrivant du code arbitraire.
 
 - **Pourquoi pas du natif.** On ne compile pas du Rust au runtime pour le hot-loader. Si une IA (ou un moddeur) doit fabriquer un bloc en jeu, son comportement *doit* être du data ou du script.
-- **Composition depuis primitives.** L'IA/le moddeur assemble un vocabulaire de briques existantes (`emits_light`, `flammable`, `damage_on_contact`, `floats`…). Failure modes bien plus safe ; cohérence quasi gratuite, car tout est fait de morceaux qui respectent déjà les règles du monde.
+- **Le moteur fournit des mécanismes, le contenu fait le jeu** (ajout 2026-10-08, Warshow). Les fichiers de contenu livrés (`core.ron`) ne sont **qu'un jeu d'exemple** : un autre jeu les remplace sans toucher au Rust. Un besoin de jeu se règle d'abord en donnée ; si la donnée n'y suffit pas, on ajoute au moteur un **mécanisme général**, utilisable par n'importe quel contenu — jamais une règle propre à un bloc ou à une manière de jouer. Exemple : l'établi n'était pas fabricable (toute recette exigeait une station) → le moteur a gagné les recettes sans station, et la recette de l'établi est une ligne de contenu.
+
+**Composition depuis primitives.** L'IA/le moddeur assemble un vocabulaire de briques existantes (`emits_light`, `flammable`, `damage_on_contact`, `floats`…). Failure modes bien plus safe ; cohérence quasi gratuite, car tout est fait de morceaux qui respectent déjà les règles du monde.
 - **C'est le levier n°1** de « construire à l'envie » **et** ce qui rend la génération runtime possible. Le socle modulaire pur et le rêve « IA qui génère du contenu in-game » sont **la même architecture**. Cette contrainte discipline le core dès maintenant.
 - **Runtime précis : décision ouverte** (voir §5), mais la *forme* est figée : hooks événementiels + API capability-scoped.
 
