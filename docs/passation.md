@@ -65,6 +65,10 @@ WSL le rendu est logiciel et rame — normal.
   Deux obligations en découlent, déjà codées mais faciles à casser :
   un chunk qui apparaît → re-mesh de ses voisins affichés ; un voxel
   édité en bordure → re-mesh du chunk voisin. Oublier l'une = trous.
+- **Une face est cachée par un voisin opaque, ou par un voisin identique
+  s'il est à trous** (`alpha: Mask`, #22 ; `mesher::hides`). Le greedy et
+  l'oracle naïf partagent cette règle : la changer dans l'un seul casse
+  les tests d'équivalence. `solid` reste « meshé et collidable ».
 - **La solidité hors chunk est une fermeture injectée** dans le mesher :
   `mesh_chunk` = chunk isolé (air dehors, pour les tests purs),
   `mesh_chunk_in_world` = raccordé au monde. Ne pas re-hardcoder.
@@ -168,13 +172,13 @@ crates/voxel_core/    TOUT le cœur voxel, PUR (zéro dépendance Bevy, testable
   save.rs             dossier du monde, format binaire des chunks
 ```
 
-Règle de séparation stricte : logique voxel → `voxel_core` (67 tests
+Règle de séparation stricte : logique voxel → `voxel_core` (69 tests
 headless, ~0 s), le binaire ne fait que brancher dans l'ECS.
 
 ## Vérifications avant de conclure une étape
 
 ```bash
-cargo test --workspace                    # 74 tests (67 cœur + 7 binaire), headless
+cargo test --workspace                    # 76 tests (69 cœur + 7 binaire), headless
 cargo test -- --ignored claude            # génération réelle par claude (~6 s)
 cargo clippy --workspace --all-targets    # zéro warning exigé
 cargo run                                 # smoke test à l'occasion
@@ -310,12 +314,14 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   (`texgen`). Validé sous Windows. Correctif au passage : au rechargement, le
   matériau reçoit le texture array sous un nouveau handle (sinon une
   couche ajoutée restait invisible, ramenée à la dernière).
+- Worldgen en donnée (#27, `4bc3951`) et blocs à trous (#22) : en attente
+  de validation Windows.
 
 ## Prochaines étapes
 
 Ordre décidé avec Warshow (2026-10-08) : **`docs/jalons.md`, « Suite :
-ordre des tickets ouverts »**. #45, #46, #17, #18 + #44, #27 faits ; suivant : **#22 blocs
-transparents** (feuilles, verre), puis #34, #28. Ce qui a été reporté (#18, #27) est listé
+ordre des tickets ouverts »**. #45, #46, #17, #18 + #44, #27, #22 faits ; suivant : **#34 blocs
+qui changent seuls au tick**, puis #28 (eau, avec le semi-transparent). Ce qui a été reporté (#18, #27) est listé
 dans `docs/jalons.md`, « Plus tard ».
 Principe (design doc §2) : le moteur fournit des mécanismes, `core.ron`
 n'est qu'un jeu d'exemple. Mipmaps si les textures scintillent au loin.

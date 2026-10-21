@@ -69,6 +69,20 @@ pub struct BlockData {
     /// (un établi). Absent : pas d'état, jamais de ligne dans le canal creux.
     #[serde(default)]
     pub storage: Option<u32>,
+    /// Ce que font les pixels transparents de ses textures (#22).
+    #[serde(default)]
+    pub alpha: Alpha,
+}
+
+/// Rendu des pixels transparents d'un bloc. Append-only (§3.6) : une save
+/// le cite par son nom.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub enum Alpha {
+    /// Le bloc cache ce qu'il y a derrière.
+    #[default]
+    Opaque,
+    /// Pixel plein ou vide (feuilles, verre) : derrière se voit par les trous.
+    Mask,
 }
 
 /// Les textures d'un bloc, par nom (un PNG de `assets/textures/`).
@@ -141,6 +155,7 @@ impl ContentEntry {
                 storage: None,
                 texture: None,
                 generated_textures: Vec::new(),
+                alpha: Alpha::Opaque,
             }),
             recipes: Vec::new(),
         }

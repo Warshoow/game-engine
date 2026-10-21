@@ -161,6 +161,14 @@ copie de la save prime (§3.10). Nouveaux blocs (bûche, feuilles, planches,
 cactus, charbon, fer) aux textures calculées (#44). *Fait le 2026-10-08,
 en attente de validation Windows.*
 
+## Complément — Blocs à trous (#22)
+
+`alpha: Mask` sur l'entrée : chaque pixel est plein ou vide. Feuilles
+percées, verre (2 sable, sans station). Textures calculées : `holes`, part
+de pixels transparents, les traits du motif restent. Le semi-transparent
+(`Blend`, ordre de dessin) part avec l'eau (#28), seul contenu qui en a
+besoin. *Fait le 2026-10-21, en attente de validation Windows.*
+
 ## Suite : ordre des tickets ouverts
 
 Décidé avec Warshow le 2026-10-08. Principe : d'abord ce qui débloque le
@@ -177,9 +185,10 @@ quand une mesure la réclame.
    le vrai test du principe « mécanismes, pas règles de jeu » (§2).
    Après #17, c'est surtout valider une entrée générée contre le format.
 4. **#27 biomes, arbres, minerais** — des ressources à trouver donnent un
-   sens aux recettes. Arbres à feuilles opaques en attendant #22.
+   sens aux recettes.
 5. **#22 → #34 → #28** — blocs transparents, puis blocs qui changent seuls
-   au tick, puis eau et lave (dépend des deux premiers).
+   au tick, puis eau et lave (dépend des deux premiers). #28 apporte aussi
+   le semi-transparent (`Blend`) laissé de côté par #22.
 6. **#23 éclairage réel + #7 coins de grottes assombris, puis #30
    jour/nuit** — le jour/nuit n'a de sens qu'avec un vrai éclairage.
 7. **#14 / #15 → #32 → #33** — formes non cubiques et modèles, puis mobs,

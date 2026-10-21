@@ -1,5 +1,10 @@
 //! Mesher blocky — étape 2 : greedy meshing (fusion des faces coplanaires).
 //!
+//! **Quelle face est cachée** (#22) : celle collée à un bloc opaque, ou à un
+//! bloc identique quand il est à trous (`alpha: Mask`). Derrière une feuille
+//! on voit à travers les trous, donc la terre dessous garde sa face ; entre
+//! deux feuilles, la face commune n'apporterait que du travail au GPU.
+//!
 //! **Étape 1 (culling naïf)** : un chunk plein de pierre n'a pas besoin de
 //! 32³ cubes — seules les faces **au contact de l'air** existent
 //! visuellement. On émet une face uniquement si le voisin dans cette
@@ -31,7 +36,7 @@
 //! placée par l'ECS, pas par le mesher).
 
 use crate::chunk::{Chunk, ChunkPos};
-use crate::registry::{ContentId, Registry};
+use crate::registry::{Alpha, ContentId, Registry};
 use crate::world::VoxelWorld;
 
 /// Couche d'un bloc sans texture.
@@ -75,11 +80,11 @@ impl MeshData {
 /// bordure est émise. C'est la variante « chunk isolé » (tests, outillage) —
 /// en jeu, préférer [`mesh_chunk_in_world`] qui raccorde les chunks entre eux.
 pub fn mesh_chunk(chunk: &Chunk, registry: &Registry, voxel_size_m: f32) -> MeshData {
-    mesh_chunk_with(chunk, registry, voxel_size_m, |_| false)
+    mesh_chunk_with(chunk, registry, voxel_size_m, |_| None)
 }
 
-/// Meshe le chunk `pos` en interrogeant le **monde** pour la solidité hors
-/// chunk : les faces au contact d'un voisin solide d'un autre chunk sont
+/// Meshe le chunk `pos` en interrogeant le **monde** pour les voxels hors
+/// chunk : les faces cachées par un voisin d'un autre chunk sont
 /// culled — c'est le raccord inter-chunks. Un chunk voisin **non chargé**
 /// compte comme de l'air : ses faces de bordure sont émises, et il faudra
 /// re-mesher ce chunk quand le voisin apparaîtra (streaming).
@@ -94,7 +99,7 @@ pub fn mesh_chunk_in_world(world: &VoxelWorld, pos: ChunkPos, voxel_size_m: f32)
         pos.z as i64 * size,
     ];
     Some(mesh_chunk_with(chunk, &world.registry, voxel_size_m, |p| {
-        world.is_solid([
+        world.voxel([
             base[0] + p[0] as i64,
             base[1] + p[1] as i64,
             base[2] + p[2] as i64,
@@ -102,23 +107,29 @@ pub fn mesh_chunk_in_world(world: &VoxelWorld, pos: ChunkPos, voxel_size_m: f32)
     }))
 }
 
-/// Cœur du greedy : `outside_solid` décide la solidité des coordonnées
-/// (locales au chunk) hors bornes — c'est là que se joue le raccord.
+/// Cœur du greedy : `outside` donne le contenu des coordonnées (locales au
+/// chunk) hors bornes, `None` = rien (air) — c'est là que se joue le raccord.
 fn mesh_chunk_with(
     chunk: &Chunk,
     registry: &Registry,
     voxel_size_m: f32,
-    outside_solid: impl Fn([i32; 3]) -> bool,
+    outside: impl Fn([i32; 3]) -> Option<ContentId>,
 ) -> MeshData {
     let size = chunk.size() as i32;
     let n = chunk.size() as usize;
     let resolved = resolve_palette(chunk, registry);
 
-    let solid_at = |p: [i32; 3]| -> bool {
-        if p.iter().any(|&c| c < 0 || c >= size) {
-            return outside_solid(p); // hors chunk : décidé par l'appelant
-        }
-        resolved[chunk.get_local(p[0] as u32, p[1] as u32, p[2] as u32) as usize].solid
+    // Index de palette de `p` si sa face vers `q` se voit. `p` est toujours
+    // dans le chunk, `q` peut en sortir.
+    let visible_face = |p: [i32; 3], q: [i32; 3]| -> Option<u16> {
+        let idx = chunk.get_local(p[0] as u32, p[1] as u32, p[2] as u32);
+        let hidden = if q.iter().any(|&c| c < 0 || c >= size) {
+            outside(q).is_some_and(|id| hides(&resolve(registry, id), &resolved[idx as usize]))
+        } else {
+            let other = chunk.get_local(q[0] as u32, q[1] as u32, q[2] as u32);
+            hides(&resolved[other as usize], &resolved[idx as usize])
+        };
+        (resolved[idx as usize].solid && !hidden).then_some(idx)
     };
 
     let mut mesh = MeshData::default();
@@ -149,9 +160,7 @@ fn mesh_chunk_with(
                         p[v] = iv;
                         let mut q = p;
                         q[d] += step;
-                        let cell = (solid_at(p) && !solid_at(q)).then(|| {
-                            chunk.get_local(p[0] as u32, p[1] as u32, p[2] as u32)
-                        });
+                        let cell = visible_face(p, q);
                         any |= cell.is_some();
                         mask[(iu + iv * size) as usize] = cell;
                     }
@@ -269,7 +278,10 @@ fn push_vertex(mesh: &mut MeshData, pos: [f32; 3], normal: [f32; 3], block: &Res
 
 /// Ce que le mesher lit d'une entrée de palette, résolu une fois.
 struct Resolved {
+    id: ContentId,
     solid: bool,
+    /// Cache entièrement ce qu'il y a derrière lui.
+    opaque: bool,
     color: [f32; 4],
     /// Couche du côté, du dessus, du dessous.
     layers: [u32; 3],
@@ -283,7 +295,7 @@ fn resolve(registry: &Registry, id: ContentId) -> Resolved {
     let Some(b) = registry.get(id).and_then(|e| e.block()) else {
         // ID inconnu du registre : on le rend visible et criard plutôt
         // qu'invisible — un bug de contenu doit se voir.
-        return Resolved { solid: true, color: [1.0, 0.0, 1.0, 1.0], layers: [NO_TEXTURE; 3] };
+        return Resolved { id, solid: true, opaque: true, color: [1.0, 0.0, 1.0, 1.0], layers: [NO_TEXTURE; 3] };
     };
     // Texture absente ou non chargée : couleur seule.
     let layer = |name: &String| registry.texture_layer(name).unwrap_or(NO_TEXTURE);
@@ -296,7 +308,12 @@ fn resolve(registry: &Registry, id: ContentId) -> Resolved {
     };
     // Texturé : sommets blancs, la couleur vient de l'image.
     let color = if layers[0] == NO_TEXTURE { [b.color[0], b.color[1], b.color[2], 1.0] } else { [1.0; 4] };
-    Resolved { solid: b.solid, color, layers }
+    Resolved { id, solid: b.solid, opaque: b.alpha == Alpha::Opaque, color, layers }
+}
+
+/// `neighbor` cache-t-il la face de `block` qui le touche ?
+fn hides(neighbor: &Resolved, block: &Resolved) -> bool {
+    neighbor.solid && (neighbor.opaque || neighbor.id == block.id)
 }
 
 // ---------------------------------------------------------------------------
@@ -337,11 +354,11 @@ struct Face {
 pub fn mesh_chunk_naive(chunk: &Chunk, registry: &Registry, voxel_size_m: f32) -> MeshData {
     let size = chunk.size();
     let resolved = resolve_palette(chunk, registry);
-    let solid_at = |x: i32, y: i32, z: i32| -> bool {
+    let hidden_by = |x: i32, y: i32, z: i32, block: &Resolved| -> bool {
         if x < 0 || y < 0 || z < 0 || x >= size as i32 || y >= size as i32 || z >= size as i32 {
             return false; // hors chunk = air
         }
-        resolved[chunk.get_local(x as u32, y as u32, z as u32) as usize].solid
+        hides(&resolved[chunk.get_local(x as u32, y as u32, z as u32) as usize], block)
     };
 
     let mut mesh = MeshData::default();
@@ -356,7 +373,7 @@ pub fn mesh_chunk_naive(chunk: &Chunk, registry: &Registry, voxel_size_m: f32) -
                     let nx = x as i32 + face.neighbor[0];
                     let ny = y as i32 + face.neighbor[1];
                     let nz = z as i32 + face.neighbor[2];
-                    if !solid_at(nx, ny, nz) {
+                    if !hidden_by(nx, ny, nz, block) {
                         emit_quad(&mut mesh, [x, y, z], face, block, voxel_size_m);
                     }
                 }
@@ -470,6 +487,26 @@ mod tests {
         chunk.set(3, 3, 3, stone);
         chunk.set(4, 3, 3, stone);
         assert_eq!(mesh_chunk_naive(&chunk, &reg, 1.0).face_count(), 10);
+    }
+
+    #[test]
+    fn mask_block_shows_its_neighbours_but_not_its_twin() {
+        // Pierre, feuille, feuille en ligne : la pierre garde sa face vers la
+        // feuille (on la voit par les trous), les deux feuilles perdent leur
+        // face commune ; celle collée à la pierre reste cachée. Faces :
+        // pierre 6, feuilles 5 + 4.
+        let (mut reg, air, stone) = test_registry();
+        let mut leaves = ContentEntry::new_block("core:leaves", true, [0.2, 0.5, 0.2]);
+        if let crate::registry::Kind::Block(b) = &mut leaves.kind {
+            b.alpha = Alpha::Mask;
+        }
+        let leaves = reg.register(leaves).unwrap();
+        let mut chunk = Chunk::filled(8, air);
+        chunk.set(2, 3, 3, stone);
+        chunk.set(3, 3, 3, leaves);
+        chunk.set(4, 3, 3, leaves);
+        assert_eq!(mesh_chunk_naive(&chunk, &reg, 1.0).face_count(), 15);
+        assert_eq!(area_by_normal(&mesh_chunk(&chunk, &reg, 1.0)), area_by_normal(&mesh_chunk_naive(&chunk, &reg, 1.0)));
     }
 
     #[test]

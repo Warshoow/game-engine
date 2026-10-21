@@ -23,6 +23,11 @@ pub struct GeneratedTexture {
     pub noise: f32,
     #[serde(default)]
     pub seed: u32,
+    /// Part des pixels rendus transparents, dans [0, 1] (#22). Les traits du
+    /// motif restent : `Frame` avec 1.0 ne garde que le cadre (verre). Ne se
+    /// voit que sur un bloc `alpha: Mask`.
+    #[serde(default)]
+    pub holes: f32,
 }
 
 /// Les motifs connus du moteur. Append-only comme le vocabulaire des
@@ -50,6 +55,9 @@ pub fn paint(def: &GeneratedTexture, size: u32) -> Result<Texture, String> {
     if !(0.0..=1.0).contains(&def.noise) {
         return Err(format!("bruit {} hors de [0, 1]", def.noise));
     }
+    if !(0.0..=1.0).contains(&def.holes) {
+        return Err(format!("trous {} hors de [0, 1]", def.holes));
+    }
     let s = size as usize;
     let seed = u64::from(def.seed);
     // Un nombre stable dans [0, 1) par (graine, n).
@@ -58,7 +66,13 @@ pub fn paint(def: &GeneratedTexture, size: u32) -> Result<Texture, String> {
     let mut light: Vec<f32> = (0..s * s).map(|i| 1.0 + def.noise * (rand(i as u64) - 0.5)).collect();
     // Épaisseur d'un trait : 1 px pour 16 px de côté.
     let w = (s / 16).max(1);
-    let mut shade = |x: usize, y: usize, k: f32| light[(y % s) * s + x % s] *= k;
+    // Pixels d'un trait du motif (assombris), jamais percés.
+    let mut line = vec![false; s * s];
+    let mut shade = |x: usize, y: usize, k: f32| {
+        let i = (y % s) * s + x % s;
+        light[i] *= k;
+        line[i] |= k < 0.7;
+    };
     match def.pattern {
         Pattern::Plain => {}
         Pattern::Cracks => {
@@ -112,9 +126,11 @@ pub fn paint(def: &GeneratedTexture, size: u32) -> Result<Texture, String> {
     }
     let rgba = light
         .iter()
-        .flat_map(|&l| {
+        .enumerate()
+        .flat_map(|(i, &l)| {
             let [r, g, b] = def.color.map(|c| ((c * l).clamp(0.0, 1.0) * 255.0).round() as u8);
-            [r, g, b, 255]
+            let hole = !line[i] && rand(9000 + i as u64) < def.holes;
+            [r, g, b, if hole { 0 } else { 255 }]
         })
         .collect();
     Ok(Texture { name: def.name.clone(), size, rgba })
@@ -125,7 +141,7 @@ mod tests {
     use super::*;
 
     fn def(pattern: Pattern, seed: u32) -> GeneratedTexture {
-        GeneratedTexture { name: "t".into(), pattern, color: [0.5, 0.3, 0.2], noise: 0.2, seed }
+        GeneratedTexture { name: "t".into(), pattern, color: [0.5, 0.3, 0.2], noise: 0.2, seed, holes: 0.0 }
     }
 
     #[test]
@@ -146,5 +162,20 @@ mod tests {
         let mut d = def(Pattern::Plain, 0);
         d.noise = -0.1;
         assert!(paint(&d, 16).is_err());
+        let mut d = def(Pattern::Plain, 0);
+        d.holes = 2.0;
+        assert!(paint(&d, 16).is_err());
+    }
+
+    #[test]
+    fn full_holes_on_a_frame_keep_only_the_frame() {
+        let mut d = def(Pattern::Frame, 0);
+        d.holes = 1.0;
+        let t = paint(&d, 16).unwrap();
+        let alpha = |x: usize, y: usize| t.rgba[(y * 16 + x) * 4 + 3];
+        assert_eq!(alpha(0, 5), 255); // bord
+        assert_eq!(alpha(8, 8), 0); // centre
+        // Sans trous, tout est plein.
+        assert!(paint(&def(Pattern::Frame, 0), 16).unwrap().rgba.chunks(4).all(|p| p[3] == 255));
     }
 }

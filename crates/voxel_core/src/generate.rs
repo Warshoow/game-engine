@@ -33,6 +33,7 @@ Format (les champs optionnels peuvent être omis) :
         ],
         drops: Some(["core:dirt"]),    // optionnel : ce que donne le bloc cassé ; absent = lui-même
         rules: [(on: Used, when: [EmptyHand], then: [Drop("core:stone")])],  // optionnel
+        alpha: Mask,                   // optionnel : bloc à trous (verre, feuillage), avec holes > 0
     )),
     recipes: [(inputs: ["core:stone", "core:dirt"], count: 1)],  // optionnel ; station: "core:workbench" possible
 )
@@ -40,6 +41,8 @@ Format (les champs optionnels peuvent être omis) :
 Règles :
 - identifier et noms de textures générées commencent par "gen:" et sont nouveaux.
 - pattern : Plain, Cracks, Planks, Spots ou Frame. noise dans [0, 1].
+  holes (optionnel, [0, 1]) : part de pixels transparents, les traits du motif restent ;
+  Frame avec holes: 1.0 ne garde que le cadre. Seulement sur un bloc alpha: Mask.
 - texture peut aussi citer une texture existante : {textures:?}.
 - Hooks (on) : Used, Placed, Broken. Conditions (when) : Holding("id"), EmptyHand, HoldingAny.
   Effets (then) : ReplaceSelf("id"), Drop("id"), StoreHeld, Craft.

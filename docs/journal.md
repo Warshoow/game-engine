@@ -797,3 +797,31 @@ besoin.
 **Spawn 8 m au-dessus du sol** : un arbre peut pousser à l'origine ; le
 joueur tombe dessus au lieu de naître dans le tronc.
 
+## 2026-10-21 — Blocs à trous (#22)
+
+**`solid` faisait trois métiers** : collision, « à mesher », « cache la
+face voisine ». Une feuille est solide (on marche dessus) mais ne cache
+pas la terre derrière elle. Le troisième métier sort dans un champ à part,
+`alpha`, nom repris de Bevy (`AlphaMode`).
+
+**Mask seulement, pas Blend.** Mask : chaque pixel est plein ou vide, le
+pixel vide est jeté dans le shader (`alpha_discard`, déjà là). Rien à
+trier : le tampon de profondeur suffit, le bloc reste dans le mesh du
+chunk. Blend (semi-transparent) mélange avec ce qui est derrière, donc il
+faut dessiner de l'arrière vers l'avant : un mesh à part par chunk, trié
+par distance. Seule l'eau en a besoin ; ça part avec #28.
+
+**Règle de culling.** Une face est cachée si le voisin est opaque, ou si
+c'est le même bloc à trous. La seconde moitié évite de dessiner chaque
+face interne d'un feuillage ou d'un mur de verre (un feuillage de 5³ en
+aurait 600 de plus). Prix : par un trou on voit à travers tout le
+feuillage d'un coup, pas les feuilles de l'intérieur. Au bord d'un chunk,
+le monde rend maintenant l'ID du voisin, plus seulement sa solidité.
+
+**Un seul matériau en Mask.** Les blocs opaques passent aussi par le test
+d'alpha ; leurs pixels valent 255, rien n'est jeté. Plus simple que deux
+meshes par chunk ; à séparer si le profilage (#41) le montre.
+
+**Textures.** `holes` sur une texture calculée : un tirage par pixel,
+sauf sur les traits du motif (pixels assombris d'au moins 30 %). Feuilles :
+`Spots` + 0,3. Verre : `Frame` + 1,0, seul le cadre reste.

@@ -51,10 +51,10 @@
             (name: "log_side", pattern: Cracks, color: (0.40, 0.28, 0.15), noise: 0.25, seed: 1),
             (name: "log_top", pattern: Frame, color: (0.62, 0.48, 0.30), noise: 0.15, seed: 2),
         ]))),
-    // Opaques en attendant les blocs transparents (#22).
-    (identifier: "core:leaves", kind: Block((solid: true, color: (0.22, 0.45, 0.16),
+    // `alpha: Mask` + `holes` : on voit à travers le feuillage (#22).
+    (identifier: "core:leaves", kind: Block((solid: true, color: (0.22, 0.45, 0.16), alpha: Mask,
         texture: Some((side: "leaves")),
-        generated_textures: [(name: "leaves", pattern: Spots, color: (0.22, 0.45, 0.16), noise: 0.35, seed: 3)],
+        generated_textures: [(name: "leaves", pattern: Spots, color: (0.22, 0.45, 0.16), noise: 0.35, seed: 3, holes: 0.3)],
         drops: Some([])))),
     (identifier: "core:planks", kind: Block((solid: true, color: (0.62, 0.45, 0.25),
         texture: Some((side: "planks")))),
@@ -71,4 +71,10 @@
     (identifier: "core:iron_ore", kind: Block((solid: true, color: (0.62, 0.50, 0.42),
         texture: Some((side: "iron_ore")),
         generated_textures: [(name: "iron_ore", pattern: Spots, color: (0.62, 0.50, 0.42), noise: 0.3, seed: 7)]))),
+    // Verre : `Frame` percé partout, seul le cadre reste. Se casse en rien.
+    (identifier: "core:glass", kind: Block((solid: true, color: (0.75, 0.88, 0.92), alpha: Mask,
+        texture: Some((side: "glass")),
+        generated_textures: [(name: "glass", pattern: Frame, color: (0.75, 0.88, 0.92), noise: 0.1, seed: 8, holes: 1.0)],
+        drops: Some([]))),
+        recipes: [(inputs: ["core:sand", "core:sand"], count: 1)]),
 ]

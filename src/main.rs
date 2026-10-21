@@ -204,7 +204,14 @@ fn setup_world(
     //     physique se fige tant que le sol sous le joueur n'est pas chargé.
     let world = VoxelWorld::new(registry, meta.chunk_size, meta.voxels_per_meter);
     let material = materials.add(ExtendedMaterial {
-        base: StandardMaterial::from(Color::WHITE), // la couleur vient des sommets et des textures
+        // La couleur vient des sommets et des textures. Mask : un pixel
+        // transparent est jeté (feuilles, verre, #22).
+        // shortcut: tout le chunk passe par le test d'alpha, opaque compris ;
+        // séparer un mesh opaque si le profilage (#41) le montre.
+        base: StandardMaterial {
+            alpha_mode: AlphaMode::Mask(0.5),
+            ..StandardMaterial::from(Color::WHITE)
+        },
         extension: BlockTextures { array },
     });
 
