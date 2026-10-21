@@ -30,7 +30,7 @@ use voxel_core::chunk::{ChunkPos, CHUNK_SIZE};
 use voxel_core::mesher::{mesh_chunk_in_world, MeshData, NO_TEXTURE};
 use voxel_core::registry::{ContentId, Registry};
 use voxel_core::save::{Save, WorldMeta, FORMAT_VERSION};
-use voxel_core::world::VoxelWorld;
+use voxel_core::world::{VoxelWorld, TICKS_PER_SECOND};
 use voxel_core::worldgen::Worldgen;
 
 /// Le monde côté app : le `VoxelWorld` (qui possède registre + chunks, §3.1)
@@ -120,6 +120,7 @@ fn main() {
         .init_resource::<content::ReloadStatus>()
         .init_resource::<content::Incoming>()
         .init_resource::<generate::Generation>()
+        .insert_resource(Time::<Fixed>::from_hz(f64::from(TICKS_PER_SECOND)))
         .add_systems(
             Startup,
             (setup_world, player::spawn_player, save::restore_player, save::restore_items, inventory::spawn_hotbar).chain(),
@@ -157,7 +158,7 @@ fn main() {
         .add_systems(Last, save::save_player_and_items.after(bevy::window::ExitSystems))
         .add_systems(
             FixedUpdate,
-            items::simulate_items.after(player::physics_step),
+            (items::simulate_items.after(player::physics_step), interact::tick_blocks),
         )
         .run();
 }
@@ -202,12 +203,13 @@ fn setup_world(
     // --- Le monde démarre VIDE : c'est le streaming (Update) qui génère et
     //     meshe les chunks autour du joueur, dès la première frame. La
     //     physique se fige tant que le sol sous le joueur n'est pas chargé.
-    let world = VoxelWorld::new(registry, meta.chunk_size, meta.voxels_per_meter);
+    let mut world = VoxelWorld::new(registry, meta.chunk_size, meta.voxels_per_meter);
+    world.set_tick(save.read_clock().unwrap_or_else(|e| refuse(e)).unwrap_or(0));
     let material = materials.add(ExtendedMaterial {
         // La couleur vient des sommets et des textures. Mask : un pixel
         // transparent est jeté (feuilles, verre, #22).
         // shortcut: tout le chunk passe par le test d'alpha, opaque compris ;
-        // séparer un mesh opaque si le profilage (#41) le montre.
+        // séparer un mesh opaque si le profilage (#41) le montre (#47).
         base: StandardMaterial {
             alpha_mode: AlphaMode::Mask(0.5),
             ..StandardMaterial::from(Color::WHITE)

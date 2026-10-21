@@ -18,9 +18,10 @@
 use serde::{Deserialize, Serialize};
 
 use crate::registry::{ContentId, Registry};
+use crate::worldgen::hash64;
 
 /// Événement du moteur auquel une règle se branche.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub enum Hook {
     /// Clic droit sur le bloc.
     Used,
@@ -28,6 +29,12 @@ pub enum Hook {
     Placed,
     /// Le bloc vient d'être cassé (ses drops sont déjà tombés).
     Broken,
+    /// De temps en temps, au hasard (#34) : en moyenne une fois par minute
+    /// pour un bloc donné, voir [`crate::ticks`]. Pousse, dépérissement…
+    Tick,
+    /// Ces secondes après l'apparition du bloc (#34) : minuteur, voir
+    /// [`crate::world::VoxelWorld::start_timers`]. Culture, feu…
+    After(f32),
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -38,6 +45,11 @@ pub enum Condition {
     EmptyHand,
     /// Le joueur tient quelque chose, peu importe quoi.
     HoldingAny,
+    /// Vraie avec cette probabilité, dans [0, 1] (#34). Un tirage par
+    /// règle, déterministe : dérivé de [`Context::seed`].
+    Chance(f32),
+    /// Le bloc juste au-dessus est cette entrée (#34).
+    Above(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -68,8 +80,8 @@ impl Rule {
     /// Les identifiers que cite la règle (validés au chargement du registre).
     pub fn references(&self) -> impl Iterator<Item = &String> {
         let conditions = self.when.iter().filter_map(|c| match c {
-            Condition::Holding(id) => Some(id),
-            Condition::EmptyHand | Condition::HoldingAny => None,
+            Condition::Holding(id) | Condition::Above(id) => Some(id),
+            Condition::EmptyHand | Condition::HoldingAny | Condition::Chance(_) => None,
         });
         let effects = self.then.iter().filter_map(|e| match e {
             Effect::ReplaceSelf(id) | Effect::Drop(id) => Some(id),
@@ -92,6 +104,17 @@ pub enum Action {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Context {
     pub holding: Option<ContentId>,
+    /// Source du hasard de `Chance`, voir [`event_seed`] : jamais d'aléa
+    /// libre (§3.6, déterminisme).
+    pub seed: u64,
+    /// Le bloc au-dessus de celui de la règle (`None` : non chargé).
+    pub above: Option<ContentId>,
+}
+
+/// Graine d'un événement : la même seed de monde, le même tick et le même
+/// voxel donnent le même tirage.
+pub fn event_seed(world_seed: u64, tick: u64, voxel: [i64; 3]) -> u64 {
+    voxel.iter().fold(hash64(world_seed ^ hash64(tick)), |h, &c| hash64(h ^ c as u64))
 }
 
 /// Le bloc `block` a-t-il au moins une règle sur `hook` (conditions mises à
@@ -103,19 +126,47 @@ pub fn has_rule(registry: &Registry, block: ContentId, hook: Hook) -> bool {
 /// Les actions déclenchées par `hook` sur `block`, dans l'ordre des règles
 /// puis des effets.
 pub fn actions(registry: &Registry, block: ContentId, hook: Hook, ctx: Context) -> Vec<Action> {
+    rules(registry, block)
+        .enumerate()
+        .filter(|(_, r)| r.on == hook)
+        .flat_map(|(i, r)| fire(registry, i, r, ctx))
+        .collect()
+}
+
+/// Les actions de la règle n° `rule` de `block` seule : celle dont le
+/// minuteur est échu.
+pub fn rule_actions(registry: &Registry, block: ContentId, rule: usize, ctx: Context) -> Vec<Action> {
+    rules(registry, block).nth(rule).map(|r| fire(registry, rule, r, ctx)).unwrap_or_default()
+}
+
+/// Les règles `After` de `block` : (n° de règle, délai en secondes).
+pub fn delays(registry: &Registry, block: ContentId) -> impl Iterator<Item = (usize, f32)> + '_ {
+    rules(registry, block).enumerate().filter_map(|(i, r)| match r.on {
+        Hook::After(s) => Some((i, s)),
+        _ => None,
+    })
+}
+
+/// Les actions de la règle `r` (n° `i`) si ses conditions tiennent.
+fn fire(registry: &Registry, i: usize, r: &Rule, ctx: Context) -> Vec<Action> {
     // Références validées au chargement : un lookup raté ne peut venir que
     // d'un registre construit en code (tests) — l'effet est ignoré.
     let id = |s: &String| registry.lookup(s);
-    rules(registry, block)
-        .filter(|r| r.on == hook)
-        .filter(|r| {
-            r.when.iter().all(|c| match c {
-                Condition::Holding(s) => ctx.holding.is_some() && ctx.holding == id(s),
-                Condition::EmptyHand => ctx.holding.is_none(),
-                Condition::HoldingAny => ctx.holding.is_some(),
-            })
-        })
-        .flat_map(|r| &r.then)
+    // Dans [0, 1), propre à la règle : deux règles à `Chance` ne tombent
+    // pas ensemble.
+    let roll = (hash64(ctx.seed ^ hash64(i as u64)) >> 40) as f32 / (1u64 << 24) as f32;
+    let holds = r.when.iter().all(|c| match c {
+        Condition::Holding(s) => ctx.holding.is_some() && ctx.holding == id(s),
+        Condition::EmptyHand => ctx.holding.is_none(),
+        Condition::HoldingAny => ctx.holding.is_some(),
+        Condition::Chance(p) => roll < *p,
+        Condition::Above(s) => ctx.above.is_some() && ctx.above == id(s),
+    });
+    if !holds {
+        return Vec::new();
+    }
+    r.then
+        .iter()
         .filter_map(|e| match e {
             Effect::ReplaceSelf(s) => id(s).map(Action::SetSelf),
             Effect::Drop(s) => id(s).map(Action::Drop),
@@ -176,7 +227,7 @@ mod tests {
         // fait rien.
         assert!(has_rule(&reg, log, Hook::Used));
         assert!(actions(&reg, log, Hook::Used, Context::default()).is_empty());
-        let holding_flint = Context { holding: Some(id("t:flint")) };
+        let holding_flint = Context { holding: Some(id("t:flint")), ..Context::default() };
         assert_eq!(
             actions(&reg, log, Hook::Used, holding_flint),
             vec![Action::SetSelf(id("t:lamp_lit")), Action::Drop(id("t:flint"))]
@@ -199,9 +250,47 @@ mod tests {
         .unwrap();
         let id = |s| reg.lookup(s).unwrap();
         let bench = id("t:bench");
-        let holding = Context { holding: Some(id("t:stone")) };
+        let holding = Context { holding: Some(id("t:stone")), ..Context::default() };
         assert_eq!(actions(&reg, bench, Hook::Used, holding), vec![Action::StoreHeld]);
         assert_eq!(actions(&reg, bench, Hook::Used, Context::default()), vec![Action::Craft]);
+    }
+
+    #[test]
+    fn chance_fires_in_proportion_and_repeats_with_the_same_seed() {
+        let reg = Registry::from_ron(
+            r#"[
+                (identifier: "t:seed", kind: Block((solid: true, color: (1.0, 1.0, 1.0),
+                    rules: [(on: Tick, when: [Chance(0.25)], then: [ReplaceSelf("t:plant")])]))),
+                (identifier: "t:plant", kind: Block((solid: true, color: (1.0, 1.0, 1.0)))),
+            ]"#,
+        )
+        .unwrap();
+        let seed = reg.lookup("t:seed").unwrap();
+        let fires = |tick| {
+            let ctx = Context { seed: event_seed(42, tick, [1, 2, 3]), ..Context::default() };
+            !actions(&reg, seed, Hook::Tick, ctx).is_empty()
+        };
+        let hits = (0..4000).filter(|&t| fires(t)).count();
+        assert!((800..1200).contains(&hits), "{hits}");
+        assert!((0..100).all(|t| fires(t) == fires(t)));
+    }
+
+    #[test]
+    fn above_reads_the_block_on_top() {
+        let reg = Registry::from_ron(
+            r#"[
+                (identifier: "t:air", kind: Block((solid: false, color: (0.0, 0.0, 0.0)))),
+                (identifier: "t:dirt", kind: Block((solid: true, color: (1.0, 1.0, 1.0),
+                    rules: [(on: Tick, when: [Above("t:air")], then: [ReplaceSelf("t:grass")])]))),
+                (identifier: "t:grass", kind: Block((solid: true, color: (1.0, 1.0, 1.0)))),
+            ]"#,
+        )
+        .unwrap();
+        let id = |s| reg.lookup(s).unwrap();
+        let under = |above| Context { above, ..Context::default() };
+        assert_eq!(actions(&reg, id("t:dirt"), Hook::Tick, under(Some(id("t:air")))), vec![Action::SetSelf(id("t:grass"))]);
+        assert!(actions(&reg, id("t:dirt"), Hook::Tick, under(Some(id("t:dirt")))).is_empty());
+        assert!(actions(&reg, id("t:dirt"), Hook::Tick, under(None)).is_empty());
     }
 
     #[test]

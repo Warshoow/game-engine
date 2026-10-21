@@ -44,7 +44,10 @@ Règles :
   holes (optionnel, [0, 1]) : part de pixels transparents, les traits du motif restent ;
   Frame avec holes: 1.0 ne garde que le cadre. Seulement sur un bloc alpha: Mask.
 - texture peut aussi citer une texture existante : {textures:?}.
-- Hooks (on) : Used, Placed, Broken. Conditions (when) : Holding("id"), EmptyHand, HoldingAny.
+- Hooks (on) : Used, Placed, Broken, After(60.0) (secondes après l'apparition du bloc, exact :
+  culture, feu), Tick (au hasard, une fois par minute en moyenne : évolution lente de fond).
+  Conditions (when) : Holding("id"), EmptyHand, HoldingAny, Chance(0.3) (probabilité dans [0, 1]),
+  Above("id") (le bloc au-dessus).
   Effets (then) : ReplaceSelf("id"), Drop("id"), StoreHeld, Craft.
 - Les identifiers cités (drops, règles, recettes) doivent exister : {existing:?}.
 - Donne une recette sans station, faite d'entrées courantes, pour que le joueur puisse le fabriquer.

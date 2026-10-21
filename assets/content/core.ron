@@ -10,9 +10,14 @@
     (identifier: "core:air",   kind: Block((solid: false, color: (0.0, 0.0, 0.0)))),
     // `drops` : ce que donne le bloc cassé. Absent = lui-même, Some([]) = rien.
     (identifier: "core:grass", kind: Block((solid: true,  color: (0.35, 0.6, 0.25), drops: Some(["core:dirt"]),
-        texture: Some((side: "grass_side", top: Some("grass_top"), bottom: Some("dirt")))))),
+        texture: Some((side: "grass_side", top: Some("grass_top"), bottom: Some("dirt"))),
+        // Une fois sur cinq, une graine de blé en plus de la terre (#34).
+        rules: [(on: Broken, when: [Chance(0.2)], then: [Drop("core:wheat_seeds")])]))),
     (identifier: "core:stone", kind: Block((solid: true,  color: (0.55, 0.55, 0.58), texture: Some((side: "stone"))))),
-    (identifier: "core:dirt",  kind: Block((solid: true,  color: (0.45, 0.30, 0.15), texture: Some((side: "dirt"))))),
+    // À l'air libre, la terre redevient de l'herbe (#34, tick aléatoire :
+    // deux minutes en moyenne, ici et là).
+    (identifier: "core:dirt",  kind: Block((solid: true,  color: (0.45, 0.30, 0.15), texture: Some((side: "dirt")),
+        rules: [(on: Tick, when: [Above("core:air"), Chance(0.5)], then: [ReplaceSelf("core:grass")])]))),
     (identifier: "core:sand",  kind: Block((solid: true,  color: (0.85, 0.78, 0.55), texture: Some((side: "sand")))),
         recipes: [(inputs: ["core:stone", "core:stone"], count: 2, station: "core:workbench")]),
 
@@ -77,4 +82,22 @@
         generated_textures: [(name: "glass", pattern: Frame, color: (0.75, 0.88, 0.92), noise: 0.1, seed: 8, holes: 1.0)],
         drops: Some([]))),
         recipes: [(inputs: ["core:sand", "core:sand"], count: 1)]),
+
+    // Blé (#34) : graine → pousse → blé mûr, une minute par stade
+    // (minuteur : exact, et ça pousse aussi en l'absence du joueur). Mûr, il
+    // se casse en blé + deux graines.
+    (identifier: "core:wheat_seeds", kind: Block((solid: true, color: (0.55, 0.45, 0.25), alpha: Mask,
+        texture: Some((side: "wheat_seeds")),
+        generated_textures: [(name: "wheat_seeds", pattern: Spots, color: (0.55, 0.45, 0.25), noise: 0.3, seed: 9, holes: 0.85)],
+        rules: [(on: After(60.0), then: [ReplaceSelf("core:wheat_sprout")])],
+        drops: Some(["core:wheat_seeds"])))),
+    (identifier: "core:wheat_sprout", kind: Block((solid: true, color: (0.35, 0.65, 0.25), alpha: Mask,
+        texture: Some((side: "wheat_sprout")),
+        generated_textures: [(name: "wheat_sprout", pattern: Planks, color: (0.35, 0.65, 0.25), noise: 0.3, seed: 10, holes: 0.6)],
+        rules: [(on: After(60.0), then: [ReplaceSelf("core:wheat")])],
+        drops: Some(["core:wheat_seeds"])))),
+    (identifier: "core:wheat", kind: Block((solid: true, color: (0.85, 0.72, 0.30), alpha: Mask,
+        texture: Some((side: "wheat")),
+        generated_textures: [(name: "wheat", pattern: Planks, color: (0.85, 0.72, 0.30), noise: 0.3, seed: 11, holes: 0.4)],
+        drops: Some(["core:wheat", "core:wheat_seeds", "core:wheat_seeds"])))),
 ]

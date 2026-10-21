@@ -8,6 +8,13 @@
 //! des `ContentId` du registre, jamais un type en dur — le système ne sait
 //! pas ce qu'il casse ni ce qu'il pose.
 //!
+//! Blocs qui évoluent seuls (#34) : au tick fixe, [`tick_blocks`] avance
+//! l'horloge du monde, passe le hook `Tick` aux voxels tirés par
+//! `voxel_core::ticks` et déclenche les minuteurs (`After`) échus. Leurs
+//! règles passent par le même chemin que le joueur, sans main ni
+//! inventaire. Un bloc qui apparaît, quelle qu'en soit la cause, lance ses
+//! minuteurs ([`Edit::set`]).
+//!
 //! Après une écriture, le chunk touché est noté à re-mesher intégralement
 //! ([`DirtyChunks`]). C'est brut (on reconstruit 32³ voxels pour un
 //! changement d'un seul) mais largement assez rapide — et c'est le *même*
@@ -18,17 +25,21 @@ use bevy::prelude::*;
 use voxel_core::crafting;
 use voxel_core::registry::ContentId;
 use voxel_core::rules::{self, Action, Context, Hook};
+use voxel_core::ticks;
 use voxel_core::physics::Aabb;
 use voxel_core::raycast::{raycast, RayHit};
-use voxel_core::world::VoxelWorld;
+use voxel_core::world::{VoxelWorld, TICKS_PER_SECOND};
 
 use crate::player::{CursorCaptured, Player, PLAYER_HEIGHT_M, PLAYER_WIDTH_M, PlayerCamera};
 use crate::inventory::Inventory;
 use crate::items::{DroppedItem, ItemVisual, StorageChanged};
-use crate::{DirtyChunks, GameWorld};
+use crate::{ChunkMesh, DirtyChunks, GameWorld};
 
 /// Portée de la main, en mètres (§2 — jamais « en blocs »).
 const REACH_M: f32 = 5.0;
+
+/// Temps moyen entre deux ticks d'un même bloc, en secondes.
+const TICK_PERIOD_S: f64 = 60.0;
 
 /// Le voxel visé depuis l'œil, à portée de main. Partagé par la pose/casse
 /// et la surbrillance : le contour montre exactement ce qu'un clic touchera.
@@ -89,13 +100,17 @@ pub fn interact(
     }
     let Ok(cam) = camera.single() else { return };
     let Some(hit) = aim(&game.world, cam) else { return };
-    let ctx = Context { holding: inventory.selected() };
+    let now = game.world.tick();
+    let holding = inventory.selected();
+    let ctx = context(&game, holding, now, hit.voxel);
     let mut edit = Edit {
         commands: &mut commands,
         game: &mut game,
         dirty: &mut dirty,
         storage: &mut storage,
-        inventory: &mut inventory,
+        inventory: Some(&mut *inventory),
+        from: now,
+        late: 0,
     };
 
     if breaking {
@@ -126,7 +141,7 @@ pub fn interact(
 
     // Poser. Seul un bloc se pose : un item en main (sans `places`, pas
     // encore implémenté) ne fait rien.
-    let Some(held) = edit.inventory.selected().filter(|&id| {
+    let Some(held) = holding.filter(|&id| {
         edit.game.world.registry.get(id).is_some_and(|e| e.block().is_some())
     }) else {
         return;
@@ -149,9 +164,20 @@ pub fn interact(
         return;
     }
     if edit.set(target, held) {
-        edit.inventory.take_selected();
+        edit.inventory.as_deref_mut().map(Inventory::take_selected);
+        let ctx = context(edit.game, holding, now, target);
         let actions = rules::actions(&edit.game.world.registry, held, Hook::Placed, ctx);
         edit.apply(target, &actions);
+    }
+}
+
+/// Ce que les conditions d'une règle peuvent lire, pour le bloc `voxel` au
+/// tick `tick`.
+fn context(game: &GameWorld, holding: Option<ContentId>, tick: u64, voxel: [i64; 3]) -> Context {
+    Context {
+        holding,
+        seed: rules::event_seed(game.generator.terrain.seed, tick, voxel),
+        above: game.world.voxel([voxel[0], voxel[1] + 1, voxel[2]]),
     }
 }
 
@@ -163,7 +189,13 @@ struct Edit<'a, 'w, 's> {
     game: &'a mut GameWorld,
     dirty: &'a mut DirtyChunks,
     storage: &'a mut StorageChanged,
-    inventory: &'a mut Inventory,
+    /// `None` hors d'une action du joueur (tick) : `StoreHeld` ne fait rien.
+    inventory: Option<&'a mut Inventory>,
+    /// Tick depuis lequel comptent les minuteurs d'un bloc posé : maintenant,
+    /// ou l'échéance du minuteur qui l'a posé (rattrapage, §3.6).
+    from: u64,
+    /// Étapes de retard déjà rattrapées par cette chaîne de minuteurs.
+    late: u8,
 }
 
 impl Edit<'_, '_, '_> {
@@ -174,6 +206,7 @@ impl Edit<'_, '_, '_> {
         // disparaît avec le bloc).
         let stored = self.game.world.take_stored(voxel);
         let Some(pos) = self.game.world.set_voxel(voxel, id) else { return false };
+        self.game.world.start_timers(voxel, self.from, self.late);
         for item in stored {
             self.drop(voxel, item);
         }
@@ -224,10 +257,11 @@ impl Edit<'_, '_, '_> {
                 }
                 Action::Drop(id) => self.drop(voxel, id),
                 Action::StoreHeld => {
-                    if let Some(held) = self.inventory.selected()
+                    if let Some(inventory) = self.inventory.as_deref_mut()
+                        && let Some(held) = inventory.selected()
                         && self.game.world.store(voxel, held)
                     {
-                        self.inventory.take_selected();
+                        inventory.take_selected();
                         self.storage.0.insert(voxel);
                     }
                 }
@@ -260,4 +294,58 @@ fn voxel_overlaps_player(
     let vmax = [vmin[0] + 1.0 / vpm, vmin[1] + 1.0 / vpm, vmin[2] + 1.0 / vpm];
     let p = Aabb::from_feet(player_feet.to_array(), PLAYER_WIDTH_M, PLAYER_HEIGHT_M);
     (0..3).all(|a| vmin[a] < p.max[a] && vmax[a] > p.min[a])
+}
+
+/// Blocs qui évoluent seuls (#34), au tick fixe : tick aléatoire (`Tick`)
+/// dans les chunks affichés, puis minuteurs échus (`After`) partout où le
+/// chunk est en mémoire.
+pub fn tick_blocks(
+    mut commands: Commands,
+    mut game: ResMut<GameWorld>,
+    mut dirty: ResMut<DirtyChunks>,
+    mut storage: ResMut<StorageChanged>,
+    chunks: Query<&ChunkMesh>,
+) {
+    game.world.advance();
+    let now = game.world.tick();
+    let world_seed = game.generator.terrain.seed;
+    // Assez de tirages par chunk pour qu'un bloc en reçoive un toutes les
+    // TICK_PERIOD_S secondes en moyenne.
+    let volume = f64::from(game.world.chunk_size()).powi(3);
+    let picks = (volume / (TICK_PERIOD_S * f64::from(TICKS_PER_SECOND))).round().max(1.0) as u32;
+    let displayed: Vec<_> = chunks.iter().map(|c| c.0).collect();
+    let picked = ticks::pick(&game.world, &displayed, picks, rules::event_seed(world_seed, now, [0; 3]));
+    let due = game.world.take_due_timers();
+
+    // Un minuteur peut changer un chunk hors de vue : on ne re-meshe que les
+    // chunks affichés (sinon `remesh_dirty` les ferait apparaître) ; les
+    // autres le seront quand le streaming les raffichera.
+    let mut changed = DirtyChunks::default();
+    let mut edit = Edit {
+        commands: &mut commands,
+        game: &mut game,
+        dirty: &mut changed,
+        storage: &mut storage,
+        inventory: None,
+        from: now,
+        late: 0,
+    };
+    for voxel in picked {
+        // Un tick précédent de ce même tour a pu changer le voxel.
+        let Some(block) = edit.game.world.voxel(voxel) else { continue };
+        let ctx = context(edit.game, None, now, voxel);
+        let actions = rules::actions(&edit.game.world.registry, block, Hook::Tick, ctx);
+        edit.apply(voxel, &actions);
+    }
+    for (voxel, timer) in due {
+        let Some(block) = edit.game.world.voxel(voxel) else { continue };
+        let ctx = context(edit.game, None, timer.due, voxel);
+        let actions = rules::rule_actions(&edit.game.world.registry, block, timer.rule as usize, ctx);
+        // Le bloc suivant compte depuis l'échéance, pas depuis maintenant :
+        // une chaîne en retard (chunk relu de la save) rattrape.
+        edit.from = timer.due;
+        edit.late = timer.late.saturating_add(u8::from(timer.due < now));
+        edit.apply(voxel, &actions);
+    }
+    dirty.0.extend(changed.0.into_iter().filter(|p| displayed.contains(p)));
 }

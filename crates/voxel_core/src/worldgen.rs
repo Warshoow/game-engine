@@ -211,7 +211,15 @@ impl Worldgen {
         if s.biomes.is_empty() {
             return Err("worldgen : au moins un biome".into());
         }
-        let id = |name: &String| registry.lookup(name).ok_or_else(|| format!("worldgen cite {name}, absent du registre"));
+        let id = |name: &String| {
+            let id = registry.lookup(name).ok_or_else(|| format!("worldgen cite {name}, absent du registre"))?;
+            // §3.6 : un minuteur par bloc posé, le coût suivrait la taille du
+            // monde exploré.
+            if crate::rules::delays(registry, id).next().is_some() {
+                return Err(format!("worldgen pose {name}, un bloc à minuteur (After) : refusé"));
+            }
+            Ok(id)
+        };
         let biomes = s
             .biomes
             .into_iter()
@@ -657,5 +665,12 @@ mod tests {
         let (_, registry) = shipped();
         let text = include_str!("../../../assets/content/worldgen.ron").replace("core:coal_ore", "core:gold_ore");
         assert!(Worldgen::from_ron(&text, 42, &registry).unwrap_err().contains("core:gold_ore"));
+    }
+
+    #[test]
+    fn worldgen_refuses_blocks_with_a_timer() {
+        let (_, registry) = shipped();
+        let text = include_str!("../../../assets/content/worldgen.ron").replace("core:coal_ore", "core:wheat_seeds");
+        assert!(Worldgen::from_ron(&text, 42, &registry).unwrap_err().contains("After"));
     }
 }

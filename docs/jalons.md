@@ -169,6 +169,18 @@ de pixels transparents, les traits du motif restent. Le semi-transparent
 (`Blend`, ordre de dessin) part avec l'eau (#28), seul contenu qui en a
 besoin. *Fait le 2026-10-21, en attente de validation Windows.*
 
+## Complément — Blocs qui évoluent seuls (#34)
+
+Choix de Warshow (2026-10-22), après comparaison : **hybride**, le contenu
+choisit son hook. `After(secondes)` = minuteur par bloc, exact, sauvé,
+rattrape au rechargement (culture, feu) ; `Tick` = tick aléatoire, coût
+fixe par chunk, rien de sauvé (évolution lente de fond). Conditions
+`Chance` (hasard dérivé de la seed) et `Above`. Exemples : le blé (graine
+de l'herbe cassée → pousse → blé, une minute par stade), la terre à l'air
+libre qui redevient de l'herbe. Options écartées ou reportées : #48
+(réagir à un voisin modifié → avec #28). *Fait le 2026-10-22, en attente
+de validation Windows.*
+
 ## Suite : ordre des tickets ouverts
 
 Décidé avec Warshow le 2026-10-08. Principe : d'abord ce qui débloque le

@@ -5,7 +5,8 @@
 //!   de chunk) — ce qui est gelé à la création (§3.5) ;
 //! - `registry.ron` : le registre complet, pixels compris (§3.1) ;
 //! - `chunks/x_y_z.bin` : un fichier par chunk **modifié**, block-entities
-//!   comprises. Un chunk absent se régénère depuis la seed ;
+//!   et minuteurs compris. Un chunk absent se régénère depuis la seed ;
+//! - `clock.ron` : le numéro du tick fixe courant (horloge des minuteurs) ;
 //! - `player.ron` : position, regard, inventaire ;
 //! - `items.ron` : les items au sol (entrée + position des pieds, en mètres).
 //!
@@ -19,7 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::chunk::{Chunk, ChunkPos};
 use crate::registry::{ContentId, Registry};
-use crate::world::VoxelWorld;
+use crate::world::{Timer, VoxelWorld};
 
 /// Version du format de save. À incrémenter à tout changement de format ;
 /// une save d'une autre version est refusée.
@@ -54,6 +55,9 @@ pub type DroppedItems = Vec<(ContentId, [f32; 3])>;
 
 /// Block-entities d'un chunk : position locale → items posés.
 pub type ChunkEntities = Vec<([u32; 3], Vec<ContentId>)>;
+
+/// Minuteurs d'un chunk, en positions locales.
+pub type ChunkTimers = Vec<([u32; 3], Timer)>;
 
 /// Le dossier d'un monde.
 #[derive(Debug, Clone)]
@@ -130,8 +134,18 @@ impl Save {
         self.write_ron("items.ron", items)
     }
 
+    /// L'horloge du monde ; `None` pour un monde sauvé avant qu'elle existe
+    /// (elle repart de 0, ses chunks n'ont aucun minuteur).
+    pub fn read_clock(&self) -> Result<Option<u64>, String> {
+        self.read_ron("clock.ron")
+    }
+
+    pub fn write_clock(&self, tick: u64) -> Result<(), String> {
+        self.write_ron("clock.ron", &tick)
+    }
+
     /// Le chunk `pos` s'il a été sauvé ; `None` s'il est à générer.
-    pub fn read_chunk(&self, pos: ChunkPos) -> Result<Option<(Chunk, ChunkEntities)>, String> {
+    pub fn read_chunk(&self, pos: ChunkPos) -> Result<Option<(Chunk, ChunkEntities, ChunkTimers)>, String> {
         let path = self.dir.join(chunk_file(pos));
         match fs::read(&path) {
             Ok(bytes) => decode_chunk(&bytes).map(Some).map_err(|e| format!("{} : {e}", path.display())),
@@ -143,7 +157,7 @@ impl Save {
     /// Écrit le chunk `pos` du monde (s'il est chargé).
     pub fn write_chunk(&self, world: &VoxelWorld, pos: ChunkPos) -> Result<(), String> {
         let Some(chunk) = world.chunk(pos) else { return Ok(()) };
-        self.write(&chunk_file(pos), &encode_chunk(chunk, &world.chunk_block_entities(pos)))
+        self.write(&chunk_file(pos), &encode_chunk(chunk, &world.chunk_block_entities(pos), &world.chunk_timers(pos)))
     }
 
     fn read_ron<T: for<'de> Deserialize<'de>>(&self, name: &str) -> Result<Option<T>, String> {
@@ -182,12 +196,17 @@ fn chunk_file(pos: ChunkPos) -> String {
 /// "VXC1" | taille u32 | n palette u32 | palette : n × ContentId u32
 ///        | voxels : taille³ × index u16 (layout de Chunk)
 ///        | n block-entities u32 | par entité : x y z u32, n items u32, items u32…
+///        | n minuteurs u32 | par minuteur : x y z u32, échéance u64, règle u32, retard u8
 /// ```
+///
+/// La section des minuteurs (#34) est optionnelle à la lecture : un chunk
+/// sauvé avant elle se relit, sans minuteur. Pas de `FORMAT_VERSION` à
+/// incrémenter, comme pour un fichier optionnel.
 ///
 /// Brut, sans compression : 64 Kio par chunk de 32³, et seuls les chunks
 /// modifiés sont écrits.
 // ponytail: pas de compression ; un RLE sur les voxels si la save grossit.
-pub fn encode_chunk(chunk: &Chunk, entities: &[([u32; 3], Vec<ContentId>)]) -> Vec<u8> {
+pub fn encode_chunk(chunk: &Chunk, entities: &[([u32; 3], Vec<ContentId>)], timers: &[([u32; 3], Timer)]) -> Vec<u8> {
     let mut out = Vec::with_capacity(16 + chunk.voxels().len() * 2);
     let u32_ = |out: &mut Vec<u8>, v: u32| out.extend_from_slice(&v.to_le_bytes());
     out.extend_from_slice(CHUNK_MAGIC);
@@ -205,10 +224,17 @@ pub fn encode_chunk(chunk: &Chunk, entities: &[([u32; 3], Vec<ContentId>)]) -> V
         u32_(&mut out, items.len() as u32);
         items.iter().for_each(|id| u32_(&mut out, id.0));
     }
+    u32_(&mut out, timers.len() as u32);
+    for (local, t) in timers {
+        local.iter().for_each(|&c| u32_(&mut out, c));
+        out.extend_from_slice(&t.due.to_le_bytes());
+        u32_(&mut out, t.rule);
+        out.push(t.late);
+    }
     out
 }
 
-pub fn decode_chunk(bytes: &[u8]) -> Result<(Chunk, ChunkEntities), String> {
+pub fn decode_chunk(bytes: &[u8]) -> Result<(Chunk, ChunkEntities, ChunkTimers), String> {
     let mut r = Reader(bytes);
     if r.take(4)? != CHUNK_MAGIC {
         return Err("pas un fichier de chunk (ou autre version)".into());
@@ -230,10 +256,19 @@ pub fn decode_chunk(bytes: &[u8]) -> Result<(Chunk, ChunkEntities), String> {
         let items = (0..r.u32()?).map(|_| r.u32().map(ContentId)).collect::<Result<Vec<_>, _>>()?;
         entities.push((local, items));
     }
+    let mut timers = Vec::new();
+    if !r.0.is_empty() {
+        for _ in 0..r.u32()? {
+            let local = [r.u32()?, r.u32()?, r.u32()?];
+            let due = r.take(8).map(|b| u64::from_le_bytes(b.try_into().expect("8 octets")))?;
+            let (rule, late) = (r.u32()?, r.take(1)?[0]);
+            timers.push((local, Timer { due, rule, late }));
+        }
+    }
     if !r.0.is_empty() {
         return Err("octets en trop en fin de fichier".into());
     }
-    Ok((chunk, entities))
+    Ok((chunk, entities, timers))
 }
 
 /// Lecture séquentielle avec erreur sur fichier tronqué.
@@ -290,9 +325,10 @@ mod tests {
         save.write_chunk(&w, pos).unwrap();
         assert!(save.read_chunk(ChunkPos { x: 0, y: 0, z: 0 }).unwrap().is_none(), "jamais sauvé");
 
-        let (chunk, entities) = save.read_chunk(pos).unwrap().unwrap();
+        let (chunk, entities, timers) = save.read_chunk(pos).unwrap().unwrap();
+        assert!(timers.is_empty());
         let mut back = VoxelWorld::new(Registry::new(), 8, 1.0);
-        back.insert_saved_chunk(pos, chunk, entities);
+        back.insert_saved_chunk(pos, chunk, entities, timers);
         assert_eq!(back.voxel([-8, 0, 16]), Some(stone));
         assert_eq!(back.voxel(v), Some(bench));
         assert_eq!(back.stored(v), Some(&[stone][..]));
@@ -303,8 +339,12 @@ mod tests {
     fn corrupted_chunk_is_refused() {
         let mut reg = Registry::new();
         let air = reg.register(ContentEntry::new_block("t:air", false, [0.0; 3])).unwrap();
-        let bytes = encode_chunk(&Chunk::filled(4, air), &[]);
-        assert!(decode_chunk(&bytes).is_ok());
+        let timer = Timer { due: 1 << 40, rule: 2, late: 3 };
+        let bytes = encode_chunk(&Chunk::filled(4, air), &[], &[([1, 2, 3], timer)]);
+        assert_eq!(decode_chunk(&bytes).unwrap().2, vec![([1, 2, 3], timer)]);
+        // Chunk sauvé avant les minuteurs : relu, sans minuteur.
+        let empty = encode_chunk(&Chunk::filled(4, air), &[], &[]);
+        assert!(decode_chunk(&empty[..empty.len() - 4]).unwrap().2.is_empty());
         assert!(decode_chunk(&bytes[..bytes.len() - 1]).is_err(), "tronqué");
         let mut bad = bytes.clone();
         bad[16] = 9; // premier voxel → index hors palette

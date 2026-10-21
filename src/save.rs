@@ -31,10 +31,13 @@ pub fn save_edited_chunks(mut game: ResMut<GameWorld>, save: Option<Res<WorldSav
     }
 }
 
-/// Écrit le joueur (position, regard, inventaire) et les items au sol :
+/// Écrit le joueur (position, regard, inventaire), les items au sol et
+/// l'horloge du monde :
 /// périodiquement, et à la fermeture (le `AppExit` est émis dans `Last`,
 /// d'où l'ordre). Les items bougent sans cesse (chute, ramassage) : les
 /// écrire au même rythme que le joueur plutôt qu'à chaque changement.
+// Paramètres de système Bevy : c'est la forme normale (cf. `interact`).
+#[allow(clippy::too_many_arguments)]
 pub fn save_player_and_items(
     time: Res<Time>,
     mut since: Local<f32>,
@@ -43,6 +46,7 @@ pub fn save_player_and_items(
     player: Query<&Player>,
     inventory: Res<Inventory>,
     items: Query<&DroppedItem>,
+    game: Res<GameWorld>,
 ) {
     *since += time.delta_secs();
     let exiting = exit.read().count() > 0;
@@ -51,6 +55,9 @@ pub fn save_player_and_items(
     }
     *since = 0.0;
     let Some(save) = save else { return };
+    if let Err(err) = save.0.write_clock(game.world.tick()) {
+        error!("sauvegarde de l'horloge impossible : {err}");
+    }
     let dropped = items.iter().map(|i| (i.content, i.feet().to_array())).collect();
     if let Err(err) = save.0.write_items(&dropped) {
         error!("sauvegarde des items au sol impossible : {err}");

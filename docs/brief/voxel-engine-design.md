@@ -1,6 +1,6 @@
 # Moteur Voxel — Design du Socle
 
-> **Statut :** v0.1 — v0 figé pour le prototypage ; 2026-10-07 : recettes (§3.1), cycle de vie des block-entities (§3.3), forme du comportement (§3.6) ; 2026-10-08 : apparence (§3.1), persistance (§3.10), principe « mécanismes, pas règles de jeu » (§2), textures calculées (§3.1), génération en jeu (§3.6), réglages du worldgen dans la save (§3.10) ; 2026-10-21 : blocs à trous (§3.1).
+> **Statut :** v0.1 — v0 figé pour le prototypage ; 2026-10-07 : recettes (§3.1), cycle de vie des block-entities (§3.3), forme du comportement (§3.6) ; 2026-10-08 : apparence (§3.1), persistance (§3.10), principe « mécanismes, pas règles de jeu » (§2), textures calculées (§3.1), génération en jeu (§3.6), réglages du worldgen dans la save (§3.10) ; 2026-10-21 : blocs à trous (§3.1) ; 2026-10-22 : blocs qui évoluent seuls (§3.6, §3.10).
 > **Nature :** ceci est un `intent/` — la source de vérité du socle. On lit **avant** d'écrire. Toute décision qui contredit ce doc doit d'abord **modifier ce doc** (avec sa justification), pas le contourner en douce dans le code.
 > **Portée :** ce document décrit un **socle**, pas un jeu. Aucun système de gameplay (survie, magie, armes, quêtes…) n'est spécifié ici. Le socle est le substrat sur lequel ces systèmes se branchent sans toucher au core.
 
@@ -154,6 +154,12 @@ Un coffre a un inventaire ; un bloc-IA peut avoir de l'état. Cet état ne peut 
 
 **Génération en jeu** (ajout 2026-10-08, #18). Le joueur décrit un bloc en texte dans une fenêtre ; un **générateur** (aujourd'hui la CLI `claude` sans outils, plus tard une clé API du joueur — une implémentation de plus, rien d'autre ne change) rend une entrée en RON. Cette réponse est une donnée **non fiable** : elle n'est acceptée qu'après validation par le moteur — lecture avec les types du registre (un élément de vocabulaire inconnu est refusé), identifier neuf sous le namespace `gen:`, références vers des entrées existantes, textures calculées (§3.1) dans leurs bornes. Acceptée, elle est ajoutée au registre comme n'importe quelle entrée, donc sauvée avec le monde. Le générateur n'est pas déterministe, mais il ne tourne pas dans la simulation : une fois acceptée, l'entrée n'est que de la donnée. Rien n'est donné au joueur : l'entrée vit selon les règles du jeu (ses recettes, l'outil de debug).
 
+**Blocs qui évoluent seuls** (ajout 2026-10-22, #34). Deux hooks, deux coûts ; le contenu choisit :
+- **`After(secondes)`** — minuteur par bloc. Il part quand le bloc apparaît, quelle qu'en soit la cause (pose, règle, autre minuteur) ; il s'arrête si le bloc change. Durée exacte, sauvé avec le chunk, et il tourne tant que le chunk est en mémoire ; au rechargement d'un chunk, les minuteurs échus s'appliquent, et le suivant part de l'échéance du précédent (pas du rechargement) : une culture a poussé pendant l'absence du joueur, au même stade que s'il était resté. Pour ce que le joueur suit : culture, feu, four. Coût : quelques dizaines d'octets par bloc en attente. **Le worldgen ne pose jamais de bloc à `After`** (refusé au chargement) : le coût suivrait la taille du monde exploré. Un cycle (un bloc qui revient à lui-même) ne rattrape qu'un nombre borné d'étapes, puis reprend au rythme normal.
+- **`Tick`** — tick aléatoire : à chaque tick fixe, quelques voxels tirés au hasard par chunk chargé. Coût fixe par chunk, rien de sauvé, valable pour des blocs posés par milliers par le worldgen. Durée très variable, et rien ne bouge hors des chunks chargés. Pour ce qui se passe en fond : herbe, neige, mousse.
+
+Le hasard des règles (condition `Chance`) dérive de la seed, du numéro de tick et du voxel (§2, déterminisme). Options écartées ou reportées (réagir à un voisin modifié, rattrapage du tick aléatoire, avance à heure fixe) : ticket #48.
+
 **La limite assumée :** un contenu, même scripté, ne fait que combiner ce que le moteur expose. Il invente de la logique, pas un nouveau rendu, un nouveau type de physique ou un nouveau genre de fenêtre. La surface du vocabulaire borne la créativité ; elle s'élargit quand un contenu concret en a besoin (§4).
 
 **Coût de changement :** Day-1 pour le principe (comportement = data/script) et pour le contrat append-only du vocabulaire. Le runtime concret et la surface exacte du vocabulaire sont mous.
@@ -197,6 +203,7 @@ Contenu logique d'une save :
 4. **Entités** (état ECS persistant).
 5. **Métadonnées de monde** : seed, `voxels_per_meter`, taille de monde, version de format.
 6. **Réglages du worldgen** (ajout 2026-10-08, #27) : relief, biomes, minerais, features, en donnée (`assets/content/worldgen.ron`). Copiés dans la save à la création du monde, puis la copie de la save prime : un chunk jamais modifié n'est pas sauvé mais régénéré, et il doit se régénérer à l'identique — comme la seed. Changer le worldgen du jeu ne touche que les mondes neufs.
+7. **Horloge du monde et minuteurs** (ajout 2026-10-22, #34) : le numéro du tick fixe courant, et pour chaque chunk ses minuteurs en attente (position, échéance en ticks, règle). Le tick fixe vaut 1/64 s, constante du moteur : changer ce pas change le sens des échéances sauvées.
 
 **Coût de changement :** Day-1 pour la structure. Le moteur (region-files vs `redb`/`sled`) est un choix ultérieur.
 

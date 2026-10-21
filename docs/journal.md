@@ -825,3 +825,41 @@ meshes par chunk ; à séparer si le profilage (#41) le montre.
 **Textures.** `holes` sur une texture calculée : un tirage par pixel,
 sauf sur les traits du motif (pixels assombris d'au moins 30 %). Feuilles :
 `Spots` + 0,3. Verre : `Frame` + 1,0, seul le cadre reste.
+
+## 2026-10-22 — Blocs qui évoluent seuls (#34)
+
+**Premier jet : tick aléatoire seul** (à la Minecraft : quelques voxels
+tirés au hasard par chunk et par tick). Warshow a demandé de ne pas
+reprendre les défauts de Minecraft : rien ne pousse loin du joueur ni jeu
+fermé, et la durée varie beaucoup (un plant sur vingt met plus de 3× la
+moyenne). Comparaison faite (ticket #48 pour le détail) ; retenu :
+**hybride**, deux hooks, le contenu choisit.
+
+**`After(s)` : minuteur par bloc.** Une map position → minuteurs (la
+vérité, filtrée par chunk à la save comme les block-entities) plus une
+file triée par échéance (`BinaryHeap`) pour ne lire que les échus. Une
+entrée de la file devenue fausse (bloc cassé) n'est jamais cherchée : elle
+ne trouve plus rien dans la map à sa sortie. Le minuteur suivant d'une
+chaîne compte depuis l'échéance du précédent : un chunk relu après une
+heure rattrape graine → pousse → blé en deux ticks, au même état que si le
+joueur était resté. Un cycle ne rattrape que `MAX_CATCH_UP` étapes, sinon
+« toutes les 10 s » absent une journée ferait 8 640 étapes au rechargement.
+
+**Pourquoi le worldgen refuse `After`.** Un minuteur coûte ~50 octets et
+une écriture de save ; posé par le worldgen, le coût suivrait la surface
+explorée. Le tick aléatoire n'a pas ce problème : coût fixe par chunk.
+
+**Save.** Section des minuteurs en fin de fichier de chunk, optionnelle à
+la lecture : les chunks d'avant se relisent, pas de `FORMAT_VERSION` à
+incrémenter (même logique qu'un fichier optionnel). L'horloge du monde
+(`clock.ron`) est écrite avec le joueur, toutes les 5 s : après un arrêt
+brutal, les minuteurs ont au pire 5 s de retard.
+
+**Hasard déterministe.** `Chance` tire dans un hash (seed, tick, voxel),
+un tirage par règle. `TICKS_PER_SECOND` (64) devient une constante du cœur
+et règle `Time<Fixed>` : les échéances sauvées en dépendent.
+
+**`Above`.** Sans elle, la terre enterrée deviendrait de l'herbe. Premier
+contenu qui lit le monde autour de son bloc ; le contexte d'une règle se
+construit pour le voxel de la règle (le bloc posé, pas le bloc visé).
+

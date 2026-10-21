@@ -8,10 +8,31 @@
 //! - **mètres** (`f32`) : le world-space où vivent entités et physique (§2).
 //!   `voxels_per_meter` est l'unique pont entre les deux.
 
-use std::collections::{HashMap, HashSet};
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap, HashSet};
 
 use crate::chunk::{Chunk, ChunkPos};
 use crate::registry::{ContentId, Registry};
+use crate::rules;
+
+/// Ticks fixes par seconde (§3.9). Les échéances des minuteurs sont sauvées
+/// en ticks : changer ce pas change leur sens (§3.10).
+pub const TICKS_PER_SECOND: u32 = 64;
+
+/// Étapes de retard qu'une chaîne de minuteurs rattrape d'affilée avant de
+/// reprendre au rythme normal : une culture (2-3 stades) rattrape tout, un
+/// cycle ne tourne pas des milliers de fois au rechargement.
+pub const MAX_CATCH_UP: u8 = 16;
+
+/// Minuteur d'un bloc (#34) : sa règle `After` n° `rule` se déclenche au
+/// tick `due`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Timer {
+    pub due: u64,
+    pub rule: u32,
+    /// Étapes de retard rattrapées d'affilée par la chaîne qui l'a lancé.
+    pub late: u8,
+}
 
 /// Nommé `VoxelWorld` (pas `World`) pour ne pas entrer en collision avec le
 /// `World` de l'ECS côté app.
@@ -32,6 +53,14 @@ pub struct VoxelWorld {
     /// Chunks modifiés depuis le dernier [`Self::take_edited`] : à écrire
     /// dans la save.
     edited: HashSet<ChunkPos>,
+    /// Numéro du tick fixe courant (§3.10, sauvé).
+    tick: u64,
+    /// Minuteurs en attente par position, supprimés quand le voxel change.
+    /// Vérité ; `queue` ne sert qu'à trouver les échus sans tout parcourir.
+    timers: HashMap<[i64; 3], Vec<Timer>>,
+    /// (échéance, position), la plus proche en tête. Une entrée périmée (bloc
+    /// changé entre-temps) est ignorée à la sortie, jamais cherchée.
+    queue: BinaryHeap<Reverse<(u64, [i64; 3])>>,
 }
 
 impl VoxelWorld {
@@ -43,16 +72,99 @@ impl VoxelWorld {
             chunks: HashMap::new(),
             block_entities: HashMap::new(),
             edited: HashSet::new(),
+            tick: 0,
+            timers: HashMap::new(),
+            queue: BinaryHeap::new(),
         }
     }
 
-    /// Insère un chunk lu dans la save, avec ses block-entities (positions
-    /// locales au chunk).
-    pub fn insert_saved_chunk(&mut self, pos: ChunkPos, chunk: Chunk, entities: Vec<([u32; 3], Vec<ContentId>)>) {
+    /// Insère un chunk lu dans la save, avec ses block-entities et ses
+    /// minuteurs (positions locales au chunk).
+    pub fn insert_saved_chunk(
+        &mut self,
+        pos: ChunkPos,
+        chunk: Chunk,
+        entities: Vec<([u32; 3], Vec<ContentId>)>,
+        timers: Vec<([u32; 3], Timer)>,
+    ) {
         for (local, items) in entities {
             self.block_entities.insert(self.to_world(pos, local), items);
         }
+        for (local, timer) in timers {
+            self.push_timer(self.to_world(pos, local), timer);
+        }
         self.insert_chunk(pos, chunk);
+    }
+
+    /// Les minuteurs du chunk `pos`, en positions locales.
+    pub fn chunk_timers(&self, pos: ChunkPos) -> Vec<([u32; 3], Timer)> {
+        let mut out: Vec<_> = self
+            .timers
+            .iter()
+            .filter(|(v, _)| self.split(**v).0 == pos)
+            .flat_map(|(&v, list)| list.iter().map(move |&t| (self.split(v).1, t)))
+            .collect();
+        out.sort_by_key(|&(l, t)| (l, t.due, t.rule)); // fichier stable
+        out
+    }
+
+    pub fn tick(&self) -> u64 {
+        self.tick
+    }
+
+    /// Reprend l'horloge sauvée (chargement d'un monde).
+    pub fn set_tick(&mut self, tick: u64) {
+        self.tick = tick;
+    }
+
+    /// Passe au tick fixe suivant.
+    pub fn advance(&mut self) {
+        self.tick += 1;
+    }
+
+    /// Lance les minuteurs du bloc qui vient d'apparaître en `v` (règles
+    /// `After`), comptés depuis le tick `from`. `late` : étapes de retard
+    /// déjà rattrapées par la chaîne ; au-delà de [`MAX_CATCH_UP`], on repart
+    /// de maintenant.
+    pub fn start_timers(&mut self, v: [i64; 3], from: u64, late: u8) {
+        let Some(block) = self.voxel(v) else { return };
+        let (from, late) = if late > MAX_CATCH_UP { (self.tick, 0) } else { (from, late) };
+        let delays: Vec<_> = rules::delays(&self.registry, block).collect();
+        for (rule, secs) in delays {
+            // Au moins un tick : un délai nul ne s'exécute pas deux fois
+            // dans le même tick.
+            let ticks = ((secs * TICKS_PER_SECOND as f32).ceil() as u64).max(1);
+            self.push_timer(v, Timer { due: from + ticks, rule: rule as u32, late });
+        }
+    }
+
+    /// Retire et rend les minuteurs échus, par échéance puis position
+    /// (ordre stable : déterministe).
+    pub fn take_due_timers(&mut self) -> Vec<([i64; 3], Timer)> {
+        let mut due = Vec::new();
+        while let Some(&Reverse((when, v))) = self.queue.peek() {
+            if when > self.tick {
+                break;
+            }
+            self.queue.pop();
+            let Some(list) = self.timers.get_mut(&v) else { continue };
+            list.retain(|t| {
+                let fire = t.due == when;
+                if fire {
+                    due.push((v, *t));
+                }
+                !fire
+            });
+            if list.is_empty() {
+                self.timers.remove(&v);
+            }
+        }
+        due
+    }
+
+    fn push_timer(&mut self, v: [i64; 3], timer: Timer) {
+        self.timers.entry(v).or_default().push(timer);
+        self.queue.push(Reverse((timer.due, v)));
     }
 
     /// Les block-entities du chunk `pos`, en positions locales.
@@ -140,6 +252,10 @@ impl VoxelWorld {
         let chunk = self.chunks.get_mut(&pos)?;
         chunk.set(l[0], l[1], l[2], material);
         self.block_entities.remove(&v);
+        // Les minuteurs de l'ancien bloc meurent avec lui ; ceux du nouveau,
+        // c'est l'appelant qui les lance (`start_timers`), lui sait depuis
+        // quand compter.
+        self.timers.remove(&v);
         if self.capacity(material).is_some() {
             self.block_entities.insert(v, Vec::new());
         }
@@ -248,6 +364,47 @@ mod tests {
         assert_eq!(w.voxel([100, 0, 0]), None);
         assert!(!w.is_solid([100, 0, 0]));
         assert_eq!(w.set_voxel([100, 0, 0], stone), None);
+    }
+
+    #[test]
+    fn timers_fire_on_time_chain_from_their_due_and_die_with_their_block() {
+        let reg = Registry::from_ron(
+            r#"[
+                (identifier: "t:air", kind: Block((solid: false, color: (0.0, 0.0, 0.0)))),
+                (identifier: "t:seed", kind: Block((solid: true, color: (1.0, 1.0, 1.0),
+                    rules: [(on: After(1.0), then: [ReplaceSelf("t:plant")])]))),
+                (identifier: "t:plant", kind: Block((solid: true, color: (1.0, 1.0, 1.0)))),
+            ]"#,
+        )
+        .unwrap();
+        let (air, seed) = (reg.lookup("t:air").unwrap(), reg.lookup("t:seed").unwrap());
+        let mut w = VoxelWorld::new(reg, 8, 1.0);
+        let pos = ChunkPos { x: 0, y: 0, z: 0 };
+        w.insert_chunk(pos, Chunk::filled(8, air));
+        let hz = u64::from(TICKS_PER_SECOND);
+
+        w.set_voxel([1, 1, 1], seed);
+        w.start_timers([1, 1, 1], w.tick(), 0);
+        w.set_voxel([2, 2, 2], seed);
+        w.start_timers([2, 2, 2], w.tick(), 0);
+        w.set_voxel([2, 2, 2], air); // cassé : son minuteur meurt
+        assert_eq!(w.chunk_timers(pos), vec![([1, 1, 1], Timer { due: hz, rule: 0, late: 0 })]);
+        for _ in 0..hz - 1 {
+            w.advance();
+            assert!(w.take_due_timers().is_empty());
+        }
+        w.advance();
+        assert_eq!(w.take_due_timers(), vec![([1, 1, 1], Timer { due: hz, rule: 0, late: 0 })]);
+        assert!(w.take_due_timers().is_empty());
+
+        // Retard : la chaîne repart de l'échéance, pas de maintenant.
+        w.set_tick(100 * hz);
+        w.start_timers([1, 1, 1], hz, 1);
+        assert_eq!(w.take_due_timers()[0].1.due, 2 * hz);
+        // Trop de retard rattrapé : on repart de maintenant.
+        w.start_timers([1, 1, 1], hz, MAX_CATCH_UP + 1);
+        assert!(w.take_due_timers().is_empty());
+        assert_eq!(w.chunk_timers(pos)[0].1, Timer { due: 101 * hz, rule: 0, late: 0 });
     }
 
     #[test]

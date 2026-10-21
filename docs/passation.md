@@ -97,6 +97,19 @@ WSL le rendu est logiciel et rame — normal.
   parcours des candidats se fait dans l'ordre du monde : c'est ce qui rend
   un arbre identique des deux côtés d'un bord de chunk (test
   `small_chunks_match_one_big_chunk`).
+- **Minuteurs (`After`, #34)** : tout bloc qui apparaît lance les siens
+  dans `Edit::set` (interact.rs) — pose, règle ou autre minuteur ; une
+  nouvelle façon d'écrire un voxel doit passer par là ou appeler
+  `start_timers`. `set_voxel` les tue avec le bloc. Une chaîne compte
+  depuis l'échéance précédente (rattrapage au rechargement), bornée par
+  `MAX_CATCH_UP`. Le worldgen refuse les blocs à `After`. Échéances en
+  ticks de 1/64 s (`TICKS_PER_SECOND`, sauvé dans `clock.ron`) : ne pas
+  changer ce pas. Les minuteurs tournent pour tout chunk en mémoire, mais
+  `tick_blocks` ne re-meshe que les chunks affichés (sinon `remesh_dirty`
+  ferait apparaître des chunks lointains).
+- **Le hasard des règles (`Chance`) vient de `rules::event_seed`** (seed,
+  tick, voxel), jamais d'un aléa libre. Le contexte d'une règle se
+  construit par `interact::context`, pour le voxel de la règle.
 - **Un contenu généré n'entre qu'après `generate::accept`** (#18) :
   namespace `gen:`, références et textures vérifiées sur une copie du
   registre. Ne jamais enregistrer une réponse de générateur sans passer
@@ -172,13 +185,13 @@ crates/voxel_core/    TOUT le cœur voxel, PUR (zéro dépendance Bevy, testable
   save.rs             dossier du monde, format binaire des chunks
 ```
 
-Règle de séparation stricte : logique voxel → `voxel_core` (69 tests
+Règle de séparation stricte : logique voxel → `voxel_core` (74 tests
 headless, ~0 s), le binaire ne fait que brancher dans l'ECS.
 
 ## Vérifications avant de conclure une étape
 
 ```bash
-cargo test --workspace                    # 76 tests (69 cœur + 7 binaire), headless
+cargo test --workspace                    # 81 tests (74 cœur + 7 binaire), headless
 cargo test -- --ignored claude            # génération réelle par claude (~6 s)
 cargo clippy --workspace --all-targets    # zéro warning exigé
 cargo run                                 # smoke test à l'occasion
@@ -314,14 +327,15 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   (`texgen`). Validé sous Windows. Correctif au passage : au rechargement, le
   matériau reçoit le texture array sous un nouveau handle (sinon une
   couche ajoutée restait invisible, ramenée à la dernière).
-- Worldgen en donnée (#27, `4bc3951`) et blocs à trous (#22) : en attente
-  de validation Windows.
+- Worldgen en donnée (#27, `4bc3951`), blocs à trous (#22, `6eb1e50`) et
+  blocs qui évoluent seuls (#34) : en attente de validation Windows.
 
 ## Prochaines étapes
 
 Ordre décidé avec Warshow (2026-10-08) : **`docs/jalons.md`, « Suite :
-ordre des tickets ouverts »**. #45, #46, #17, #18 + #44, #27, #22 faits ; suivant : **#34 blocs
-qui changent seuls au tick**, puis #28 (eau, avec le semi-transparent). Ce qui a été reporté (#18, #27) est listé
+ordre des tickets ouverts »**. #45, #46, #17, #18 + #44, #27, #22, #34 faits ; suivant : **#28 eau et
+lave** — avec le semi-transparent (`Blend`, reporté de #22) et le hook
+« voisin modifié » (#48). Ce qui a été reporté (#18, #27) est listé
 dans `docs/jalons.md`, « Plus tard ».
 Principe (design doc §2) : le moteur fournit des mécanismes, `core.ron`
 n'est qu'un jeu d'exemple. Mipmaps si les textures scintillent au loin.
