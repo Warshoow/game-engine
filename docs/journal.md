@@ -758,3 +758,42 @@ matériau.
 
 **Limite connue.** Une seule entrée par génération : un bloc qui bascule
 entre deux états (comme la lampe) demanderait deux entrées.
+
+## 2026-10-08 (suite) — Biomes, minerais, arbres (#27)
+
+**Le worldgen nommait des blocs en Rust** (`core:grass`, `core:stone`) et
+gardait ses réglages dans `main.rs` : contraire au principe §2. Il devient
+un fichier de données, `worldgen.ron` ; le moteur fournit les étapes
+(relief → surface du biome → minerais → features), le contenu choisit les
+blocs et les nombres. `HeightmapGenerator` n'est pas gonflé : il garde le
+relief et les grottes, le nouveau `Worldgen` s'en sert.
+
+**World-owned (§3.10).** Seuls les chunks modifiés sont sauvés ; les autres
+se régénèrent. Si les réglages du jeu changeaient sous un monde existant,
+les zones visitées changeraient d'aspect. Les réglages sont donc copiés
+dans la save à la création, comme la seed. Prix : pour voir une
+modification, un monde neuf.
+
+**Biomes.** Un bruit 2D lent (« climat ») découpé en plages. Le relief est
+le même partout : un relief par biome demande de mélanger les hauteurs
+aux frontières, reporté.
+
+**Minerais.** Un bruit 3D par minerai, seuillé, entre deux profondeurs
+sous la surface. Calcul voxel par voxel : rien ne dépend du voisin.
+
+**Arbres qui débordent sur le chunk voisin.** Le vrai problème du ticket.
+Chaque chunk examine aussi les colonnes d'une marge autour de lui (le
+rayon du plus grand feuillage) ; un hash de la colonne décide s'il y pousse
+une feature ; le chunk n'écrit que les voxels qui tombent chez lui. Aucun
+état partagé, aucune dépendance à l'ordre de chargement. Le test le
+prouve : un chunk 32³ est identique, voxel par voxel, aux huit 16³ qui le
+couvrent.
+
+**Une forme générale plutôt que « arbre ».** Une feature est une colonne
+d'un bloc, avec en option une boule au sommet : arbre, cactus, rocher sont
+trois lignes de données. Les structures en modèle de voxels attendront un
+besoin.
+
+**Spawn 8 m au-dessus du sol** : un arbre peut pousser à l'origine ; le
+joueur tombe dessus au lieu de naître dans le tronc.
+

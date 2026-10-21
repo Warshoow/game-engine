@@ -1,0 +1,43 @@
+// Génération du monde (#27) : relief, biomes, minerais, features. Tout est
+// en mètres. Copié dans la save à la création du monde ; ensuite c'est la
+// copie de la save qui compte (un chunk jamais modifié se régénère à
+// l'identique). Pour voir une modification : un monde neuf (effacer
+// `saves/world/`).
+(
+    air: "core:air",
+    stone: "core:stone",
+
+    // Relief : altitude moyenne, écart autour, largeur des collines.
+    ground_level: 16.0,
+    amplitude: 6.0,
+    hill_size: 24.0,
+
+    // Biomes : un bruit de climat (~0 à 1) découpé en plages. Largeur
+    // d'une zone en mètres. `surface` : le voxel du dessus ; `under` :
+    // jusqu'à `depth` mètres ; puis la pierre.
+    climate_size: 160.0,
+    biomes: [
+        (name: "desert", climate: (0.0, 0.42), surface: "core:sand", under: "core:sand", depth: 3.0),
+        (name: "plaine", climate: (0.42, 0.58), surface: "core:grass", under: "core:dirt", depth: 2.0),
+        (name: "foret", climate: (0.58, 1.0), surface: "core:grass", under: "core:dirt", depth: 2.0),
+    ],
+
+    // Minerais : remplacent la pierre entre deux profondeurs sous la
+    // surface. `size` : taille d'un amas ; `threshold` : plus haut = plus rare.
+    ores: [
+        (block: "core:coal_ore", depth: (2.0, 48.0), size: 3.0, threshold: 0.78),
+        (block: "core:iron_ore", depth: (8.0, 96.0), size: 2.5, threshold: 0.82),
+    ],
+
+    // Features : une colonne de `block`, haute de `height` (min, max), avec
+    // en option une boule `top` au sommet. `density` : par m².
+    features: [
+        (block: "core:log", height: (4.0, 6.0), top: Some((block: "core:leaves", radius: 2.0)),
+            density: 0.03, biomes: ["foret"]),
+        (block: "core:log", height: (4.0, 6.0), top: Some((block: "core:leaves", radius: 2.0)),
+            density: 0.003, biomes: ["plaine"]),
+        (block: "core:cactus", height: (1.0, 3.0), density: 0.004, biomes: ["desert"]),
+        (block: "core:stone", height: (0.0, 0.0), top: Some((block: "core:stone", radius: 1.0)),
+            density: 0.002, biomes: ["plaine"]),
+    ],
+)

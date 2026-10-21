@@ -152,6 +152,15 @@ un motif, une couleur, un bruit et une graine (`generated_textures`), le
 moteur calcule les pixels. *Fait et validé en jeu (Windows) le
 2026-10-08.*
 
+## Complément — Biomes, minerais, arbres (#27)
+
+Le worldgen devient de la donnée : `assets/content/worldgen.ron` (relief,
+biomes par plage de climat, minerais par profondeur, features = colonne +
+boule optionnelle). World-owned : copié dans la save à la création, la
+copie de la save prime (§3.10). Nouveaux blocs (bûche, feuilles, planches,
+cactus, charbon, fer) aux textures calculées (#44). *Fait le 2026-10-08,
+en attente de validation Windows.*
+
 ## Suite : ordre des tickets ouverts
 
 Décidé avec Warshow le 2026-10-08. Principe : d'abord ce qui débloque le
@@ -191,6 +200,19 @@ quand une mesure la réclame.
 priorité).
 
 ## Plus tard (non ordonné)
+
+Reportés en cours de route (à reprendre quand un besoin concret arrive) :
+
+- **Génération IA (#18)** : générer plusieurs entrées liées en une fois
+  (un bloc à deux états comme la lampe) ; un générateur par clé API du
+  joueur (BYOK, une implémentation de plus du trait `Generator`) ; des
+  items avec une apparence propre (un item n'a aujourd'hui que la couleur
+  d'un bloc).
+- **Worldgen (#27)** : relief propre à chaque biome (mélange des hauteurs
+  aux frontières) ; un deuxième bruit de climat (température × humidité) ;
+  biomes souterrains ; structures en modèle de voxels (ruines, villages) —
+  aujourd'hui une feature = colonne + boule ; minerais qui donnent un item
+  plutôt qu'eux-mêmes.
 
 - **Script Lua** (`mlua`, étage 3 de §3.6) — quand un bloc concret ne
   s'exprime pas en règles. Lève « script runtime complet ».

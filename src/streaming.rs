@@ -225,7 +225,7 @@ mod tests {
             .init_resource::<StorageChanged>()
             .insert_resource(GameWorld {
                 world: VoxelWorld::new(registry, CHUNK_SIZE, 1.0),
-                generator,
+                generator: generator.into(),
                 air,
                 material: Handle::default(),
             })

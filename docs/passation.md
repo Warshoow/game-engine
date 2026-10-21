@@ -17,10 +17,13 @@ plus les **textures** (jalon 4), la **sauvegarde sur disque** (jalon 5,
 items au sol compris), les **recettes sans station** et les **fenêtres de
 jeu** avec le menu de fabrication (#45, #46).
 Plus le **rechargement du contenu en jeu** (touche R, #17) et les **blocs
-générés par IA en jeu** (touche I, #18 + #44), validés sous Windows.
+générés par IA en jeu** (touche I, #18 + #44), validés sous Windows. Et le
+**worldgen en donnée** (#27 : biomes, minerais, arbres), en attente de
+validation Windows.
 
-1. Chunk généré depuis la seed (heightmap fBm maison, pierre sous 1 m de
-   sol, **grottes** par bruit 3D, déterministe), **en continu autour du
+1. Chunk généré depuis la seed (heightmap fBm maison, **grottes** par
+   bruit 3D, **biomes, minerais, arbres** décrits dans
+   `assets/content/worldgen.ron`, déterministe), **en continu autour du
    joueur** sur plusieurs couches (cylindre 96 m × ±48 m, borné à −128 /
    384 m ; budget 4 chunks/frame, hystérésis).
 2. Mesher blocky **greedy** avec **raccord inter-chunks** (le naïf reste
@@ -85,6 +88,11 @@ WSL le rendu est logiciel et rame — normal.
   Ne rien en mettre en cache qui ne se rafraîchisse pas : `reload_content`
   re-meshe tous les chunks, remplace le texture array, marque les
   `ItemVisual` et l'inventaire modifiés. Les IDs, eux, ne bougent jamais.
+- **Le worldgen est world-owned** (`worldgen.ron` dans la save, prime sur
+  celui du jeu). Une feature ne doit dépendre que de sa colonne et le
+  parcours des candidats se fait dans l'ordre du monde : c'est ce qui rend
+  un arbre identique des deux côtés d'un bord de chunk (test
+  `small_chunks_match_one_big_chunk`).
 - **Un contenu généré n'entre qu'après `generate::accept`** (#18) :
   namespace `gen:`, références et textures vérifiées sur une copie du
   registre. Ne jamais enregistrer une réponse de générateur sans passer
@@ -149,7 +157,7 @@ crates/voxel_core/    TOUT le cœur voxel, PUR (zéro dépendance Bevy, testable
   registry.rs         registre append-only §3.1 (IDs = index d'insertion)
   chunk.rs            chunk paletté §3.2 (dense u16 + palette locale)
   world.rs            VoxelWorld : registre + chunks + conversions voxel↔mètres
-  worldgen.rs         trait WorldGenerator + HeightmapGenerator (value noise/fBm maison)
+  worldgen.rs         trait WorldGenerator, HeightmapGenerator (relief, grottes), Worldgen (biomes, minerais, features en donnée)
   mesher.rs           greedy meshing (naïf conservé en oracle) → MeshData (tampons purs)
   physics.rs          AABB vs grille, région balayée (anti-tunneling)
   raycast.rs          DDA Amanatides & Woo (visée voxel + face d'entrée)
@@ -160,13 +168,13 @@ crates/voxel_core/    TOUT le cœur voxel, PUR (zéro dépendance Bevy, testable
   save.rs             dossier du monde, format binaire des chunks
 ```
 
-Règle de séparation stricte : logique voxel → `voxel_core` (64 tests
+Règle de séparation stricte : logique voxel → `voxel_core` (67 tests
 headless, ~0 s), le binaire ne fait que brancher dans l'ECS.
 
 ## Vérifications avant de conclure une étape
 
 ```bash
-cargo test --workspace                    # 71 tests (64 cœur + 7 binaire), headless
+cargo test --workspace                    # 74 tests (67 cœur + 7 binaire), headless
 cargo test -- --ignored claude            # génération réelle par claude (~6 s)
 cargo clippy --workspace --all-targets    # zéro warning exigé
 cargo run                                 # smoke test à l'occasion
@@ -306,9 +314,9 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
 ## Prochaines étapes
 
 Ordre décidé avec Warshow (2026-10-08) : **`docs/jalons.md`, « Suite :
-ordre des tickets ouverts »**. #45, #46, #17, #18 + #44 faits ; suivant : **#27 biomes, arbres,
-minerais**. Pistes ouvertes par #18 : générer plusieurs entrées liées (un
-bloc à deux états), un générateur BYOK (clé API), des items avec apparence.
+ordre des tickets ouverts »**. #45, #46, #17, #18 + #44, #27 faits ; suivant : **#22 blocs
+transparents** (feuilles, verre), puis #34, #28. Ce qui a été reporté (#18, #27) est listé
+dans `docs/jalons.md`, « Plus tard ».
 Principe (design doc §2) : le moteur fournit des mécanismes, `core.ron`
 n'est qu'un jeu d'exemple. Mipmaps si les textures scintillent au loin.
 

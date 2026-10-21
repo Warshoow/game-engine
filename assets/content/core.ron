@@ -42,4 +42,33 @@
             (on: Used, when: [EmptyHand], then: [Craft]),
         ])),
         recipes: [(inputs: ["core:dirt", "core:dirt", "core:stone", "core:stone"])]),
+
+    // Worldgen (#27) : posés par `worldgen.ron`. Textures calculées par le
+    // moteur (`generated_textures`, #44) : motif, couleur, bruit, graine.
+    (identifier: "core:log", kind: Block((solid: true, color: (0.40, 0.28, 0.15),
+        texture: Some((side: "log_side", top: Some("log_top"))),
+        generated_textures: [
+            (name: "log_side", pattern: Cracks, color: (0.40, 0.28, 0.15), noise: 0.25, seed: 1),
+            (name: "log_top", pattern: Frame, color: (0.62, 0.48, 0.30), noise: 0.15, seed: 2),
+        ]))),
+    // Opaques en attendant les blocs transparents (#22).
+    (identifier: "core:leaves", kind: Block((solid: true, color: (0.22, 0.45, 0.16),
+        texture: Some((side: "leaves")),
+        generated_textures: [(name: "leaves", pattern: Spots, color: (0.22, 0.45, 0.16), noise: 0.35, seed: 3)],
+        drops: Some([])))),
+    (identifier: "core:planks", kind: Block((solid: true, color: (0.62, 0.45, 0.25),
+        texture: Some((side: "planks")))),
+        recipes: [(inputs: ["core:log"], count: 4)]),
+    (identifier: "core:cactus", kind: Block((solid: true, color: (0.30, 0.55, 0.25),
+        texture: Some((side: "cactus_side", top: Some("cactus_top"))),
+        generated_textures: [
+            (name: "cactus_side", pattern: Planks, color: (0.30, 0.55, 0.25), noise: 0.2, seed: 4),
+            (name: "cactus_top", pattern: Frame, color: (0.38, 0.62, 0.30), noise: 0.15, seed: 5),
+        ]))),
+    (identifier: "core:coal_ore", kind: Block((solid: true, color: (0.30, 0.30, 0.32),
+        texture: Some((side: "coal_ore")),
+        generated_textures: [(name: "coal_ore", pattern: Spots, color: (0.35, 0.35, 0.37), noise: 0.3, seed: 6)]))),
+    (identifier: "core:iron_ore", kind: Block((solid: true, color: (0.62, 0.50, 0.42),
+        texture: Some((side: "iron_ore")),
+        generated_textures: [(name: "iron_ore", pattern: Spots, color: (0.62, 0.50, 0.42), noise: 0.3, seed: 7)]))),
 ]

@@ -1,6 +1,6 @@
 # Moteur Voxel — Design du Socle
 
-> **Statut :** v0.1 — v0 figé pour le prototypage ; 2026-10-07 : recettes (§3.1), cycle de vie des block-entities (§3.3), forme du comportement (§3.6) ; 2026-10-08 : apparence (§3.1), persistance (§3.10), principe « mécanismes, pas règles de jeu » (§2), textures calculées (§3.1), génération en jeu (§3.6).
+> **Statut :** v0.1 — v0 figé pour le prototypage ; 2026-10-07 : recettes (§3.1), cycle de vie des block-entities (§3.3), forme du comportement (§3.6) ; 2026-10-08 : apparence (§3.1), persistance (§3.10), principe « mécanismes, pas règles de jeu » (§2), textures calculées (§3.1), génération en jeu (§3.6), réglages du worldgen dans la save (§3.10).
 > **Nature :** ceci est un `intent/` — la source de vérité du socle. On lit **avant** d'écrire. Toute décision qui contredit ce doc doit d'abord **modifier ce doc** (avec sa justification), pas le contourner en douce dans le code.
 > **Portée :** ce document décrit un **socle**, pas un jeu. Aucun système de gameplay (survie, magie, armes, quêtes…) n'est spécifié ici. Le socle est le substrat sur lequel ces systèmes se branchent sans toucher au core.
 
@@ -196,6 +196,7 @@ Contenu logique d'une save :
 3. **Block-entities** (canal creux — §3.3).
 4. **Entités** (état ECS persistant).
 5. **Métadonnées de monde** : seed, `voxels_per_meter`, taille de monde, version de format.
+6. **Réglages du worldgen** (ajout 2026-10-08, #27) : relief, biomes, minerais, features, en donnée (`assets/content/worldgen.ron`). Copiés dans la save à la création du monde, puis la copie de la save prime : un chunk jamais modifié n'est pas sauvé mais régénéré, et il doit se régénérer à l'identique — comme la seed. Changer le worldgen du jeu ne touche que les mondes neufs.
 
 **Coût de changement :** Day-1 pour la structure. Le moteur (region-files vs `redb`/`sled`) est un choix ultérieur.
 
@@ -224,7 +225,7 @@ On ne les fige **pas**. On fige seulement la *forme* indiquée, et on laisse le 
 |---|---|---|
 | **Internals UI** | l'UI lit le registre (§3.11) | thème, widgets, layout |
 | **API de script/mod** | hooks événementiels + API capability-scoped ; propriétés → règles → script (§3.6) ; vocabulaire append-only | la surface exacte (se découvre à l'usage) |
-| **Worldgen** | pipeline *pluggable* | richesse : noise → biome → features peut rester bête au début |
+| **Worldgen** | pipeline *pluggable* ; réglages en donnée, world-owned (§3.10) | richesse : noise → biome → features peut rester bête au début |
 | **Backend de persistance** | structure logique de la save (§3.10) | moteur : region-files vs `redb`/`sled` |
 | **Multijoueur** | déterminisme préserve la porte (§3.9) | **tout** — c'est de la v2 |
 

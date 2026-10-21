@@ -9,7 +9,8 @@ is. Bevy provides the ECS loop, rendering and the window.
 
 - **Deterministic procedural terrain.** Hand-written fBm heightmap (value noise,
   SplitMix64 hash of `(seed, coordinates)`): same seed, same world, on any
-  machine, with no state.
+  machine, with no state. Biomes, ores and trees described as data
+  (`assets/content/worldgen.ron`).
 - **Palette chunks.** A dense array of `u16` indices plus a local palette mapping
   to an append-only content registry. The world owns its content; blocks are
   *data*, never code.
@@ -92,6 +93,13 @@ by the engine instead of read from a PNG: declare it in `generated_textures:
 [(name: "…", pattern: Cracks, color: (r, g, b), noise: 0.2, seed: 17)]` and
 cite its name in `texture` (patterns: `Plain`, `Cracks`, `Planks`, `Spots`,
 `Frame`; same seed, same pixels).
+
+**World generation** is data too: `assets/content/worldgen.ron` sets the
+relief, the biomes (surface and under blocks per climate range), the ores
+(depth range, size, rarity) and the features (a column of a block with an
+optional ball on top: trees, cacti, boulders). It is copied into the save
+when a world is created and the save's copy wins afterwards, so to see a
+change, start a new world (delete `saves/world/`).
 
 **Generated blocks (I).** Type a description, Enter. The game runs
 `claude -p` with no tools (Claude Code must be in the `PATH`), then checks the

@@ -110,8 +110,10 @@ pub struct PlayerCamera;
 pub struct CursorCaptured(pub bool);
 
 pub fn spawn_player(mut commands: Commands, game: Res<GameWorld>) {
-    // Spawn posé sur le terrain, interrogé en mètres — jamais en blocs.
-    let feet = Vec3::new(0.5, game.generator.height_m(0.5, 0.5) + 1.0, 0.5);
+    // Spawn au-dessus du terrain, interrogé en mètres — jamais en blocs.
+    // 8 m plus haut : un arbre peut pousser là (#27), le joueur tombe sur
+    // le sol ou sur son feuillage au lieu de naître dans le tronc.
+    let feet = Vec3::new(0.5, game.generator.terrain.height_m(0.5, 0.5) + 8.0, 0.5);
     commands
         .spawn((
             Player::at(feet),

@@ -31,7 +31,7 @@ use voxel_core::mesher::{mesh_chunk_in_world, MeshData, NO_TEXTURE};
 use voxel_core::registry::{ContentId, Registry};
 use voxel_core::save::{Save, WorldMeta, FORMAT_VERSION};
 use voxel_core::world::VoxelWorld;
-use voxel_core::worldgen::HeightmapGenerator;
+use voxel_core::worldgen::Worldgen;
 
 /// Le monde côté app : le `VoxelWorld` (qui possède registre + chunks, §3.1)
 /// et le générateur. Ressource ECS : physique, pose/casse et remeshing y
@@ -39,7 +39,7 @@ use voxel_core::worldgen::HeightmapGenerator;
 #[derive(Resource)]
 pub struct GameWorld {
     pub world: VoxelWorld,
-    pub generator: HeightmapGenerator,
+    pub generator: Worldgen,
     /// IDs résolus une fois au setup — le gameplay manipule des `ContentId`,
     /// jamais des identifiers en dur dans les systèmes.
     pub air: ContentId,
@@ -184,26 +184,20 @@ fn setup_world(
     let registry = content::load(base).unwrap_or_else(|e| panic!("contenu invalide : {e}"));
     let array = images.add(texture_array(&registry));
     save.write_world(&meta, &registry).unwrap_or_else(|e| refuse(e));
-    // Le worldgen a besoin de quelques matériaux : résolus par identifier,
-    // une fois ici. Le reste du contenu, aucun système ne le nomme.
-    let id = |identifier: &str| {
-        registry
-            .lookup(identifier)
-            .unwrap_or_else(|| panic!("{identifier} absent du contenu"))
+    // Worldgen en donnée (#27), world-owned (§3.10) : celui de la save s'il
+    // y est, sinon celui du jeu, copié dans la save. Aucun bloc nommé ici.
+    let worldgen_text = match save.read_worldgen().unwrap_or_else(|e| refuse(e)) {
+        Some(text) => text,
+        None => {
+            let path = assets_dir().join("content/worldgen.ron");
+            let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{} : {e}", path.display()));
+            save.write_worldgen(&text).unwrap_or_else(|e| refuse(e));
+            text
+        }
     };
-    let (air, grass, stone) = (id("core:air"), id("core:grass"), id("core:stone"));
-
-    // Gameplay en mètres (§2) : le relief est défini en mètres, la
-    // résolution voxel ne fait que convertir.
-    let generator = HeightmapGenerator {
-        seed: meta.seed,
-        air,
-        ground: grass,
-        stone,
-        ground_level_m: 16.0,
-        amplitude_m: 6.0,
-        feature_size_m: 24.0,
-    };
+    let generator = Worldgen::from_ron(&worldgen_text, meta.seed, &registry)
+        .unwrap_or_else(|e| panic!("worldgen invalide : {e}"));
+    let air = generator.terrain.air;
 
     // --- Le monde démarre VIDE : c'est le streaming (Update) qui génère et
     //     meshe les chunks autour du joueur, dès la première frame. La

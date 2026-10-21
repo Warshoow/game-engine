@@ -203,7 +203,8 @@ mod tests {
             generator: HeightmapGenerator {
                 seed: 0, air, ground: stone, stone,
                 ground_level_m: 4.0, amplitude_m: 0.0, feature_size_m: 1.0,
-            },
+            }
+            .into(),
             air,
             material: Handle::default(),
         });

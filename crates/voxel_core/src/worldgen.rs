@@ -12,7 +12,9 @@
 //!   exprimées en mètres. `voxels_per_meter` ne fait que convertir à la fin.
 
 use crate::chunk::{Chunk, ChunkPos};
-use crate::registry::ContentId;
+use serde::{Deserialize, Serialize};
+
+use crate::registry::{parse, ContentId, Registry};
 
 /// La forme figée du pipeline : un générateur produit un chunk depuis sa
 /// position, de façon pure (pas d'état mutable → parallélisable, déterministe).
@@ -100,6 +102,284 @@ impl WorldGenerator for HeightmapGenerator {
                 }
             }
         }
+        chunk
+    }
+}
+
+// --- Worldgen en donnée (#27) --------------------------------------------
+//
+// Les réglages viennent de `assets/content/worldgen.ron` (puis de la save,
+// §3.10) : relief, biomes, minerais, features. Le moteur fournit les étapes
+// (relief → surface du biome → minerais → features), le contenu choisit les
+// blocs et les nombres — aucun bloc nommé en Rust (§2).
+//
+// Les structures sont génériques sur `Id` : `String` dans le fichier
+// (identifiers), `ContentId` une fois résolues contre le registre.
+
+/// Un biome : la surface et le dessous d'une zone de climat.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Biome<Id> {
+    pub name: String,
+    /// Plage de climat [min, max) — bruit 2D dans ~[0, 1].
+    pub climate: (f32, f32),
+    /// Le voxel du dessus.
+    pub surface: Id,
+    /// Sous la surface, jusqu'à `depth` mètres.
+    pub under: Id,
+    pub depth: f32,
+}
+
+/// Un minerai : remplace la pierre là où son bruit 3D dépasse `threshold`.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Ore<Id> {
+    pub block: Id,
+    /// Profondeur sous la surface, en mètres [min, max).
+    pub depth: (f32, f32),
+    /// Taille d'un amas, en mètres.
+    pub size: f32,
+    /// Plus haut = plus rare (0,7 – 0,85 utile).
+    pub threshold: f32,
+}
+
+/// Une feature posée sur la surface : une colonne, surmontée en option
+/// d'une boule. Arbre = tronc + feuillage, cactus = colonne seule, rocher
+/// = hauteur 0 + boule.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Feature<Id> {
+    pub block: Id,
+    /// Hauteur de la colonne en mètres, tirée dans [min, max].
+    pub height: (f32, f32),
+    #[serde(default)]
+    pub top: Option<Top<Id>>,
+    /// Probabilité par m² de surface.
+    pub density: f32,
+    /// Biomes où elle pousse (par nom) ; vide : partout.
+    #[serde(default)]
+    pub biomes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Top<Id> {
+    pub block: Id,
+    /// Rayon de la boule, en mètres.
+    pub radius: f32,
+}
+
+/// Le fichier `worldgen.ron`.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct Settings {
+    air: String,
+    stone: String,
+    /// Relief, en mètres (voir [`HeightmapGenerator`]).
+    ground_level: f32,
+    amplitude: f32,
+    hill_size: f32,
+    /// Largeur caractéristique d'une zone de biome, en mètres.
+    climate_size: f32,
+    biomes: Vec<Biome<String>>,
+    #[serde(default)]
+    ores: Vec<Ore<String>>,
+    #[serde(default)]
+    features: Vec<Feature<String>>,
+}
+
+/// Le générateur du jeu : relief et grottes de [`HeightmapGenerator`],
+/// puis biomes, minerais et features lus en donnée.
+#[derive(Debug, Clone)]
+pub struct Worldgen {
+    pub terrain: HeightmapGenerator,
+    climate_size_m: f32,
+    biomes: Vec<Biome<ContentId>>,
+    ores: Vec<Ore<ContentId>>,
+    features: Vec<Feature<ContentId>>,
+}
+
+/// Un seul biome (le sol de [`HeightmapGenerator`]), ni minerai ni
+/// feature : le relief seul (sert aux tests).
+impl From<HeightmapGenerator> for Worldgen {
+    fn from(terrain: HeightmapGenerator) -> Self {
+        let g = terrain.ground;
+        let biome = Biome { name: String::new(), climate: (0.0, 1.0), surface: g, under: g, depth: SOIL_DEPTH_M };
+        Self { terrain, climate_size_m: 1.0, biomes: vec![biome], ores: Vec::new(), features: Vec::new() }
+    }
+}
+
+impl Worldgen {
+    /// Lit `worldgen.ron` et résout ses identifiers contre le registre.
+    pub fn from_ron(text: &str, seed: u64, registry: &Registry) -> Result<Self, String> {
+        let s: Settings = parse(text).map_err(|e| e.to_string())?;
+        if s.biomes.is_empty() {
+            return Err("worldgen : au moins un biome".into());
+        }
+        let id = |name: &String| registry.lookup(name).ok_or_else(|| format!("worldgen cite {name}, absent du registre"));
+        let biomes = s
+            .biomes
+            .into_iter()
+            .map(|b| Ok(Biome { surface: id(&b.surface)?, under: id(&b.under)?, name: b.name, climate: b.climate, depth: b.depth }))
+            .collect::<Result<Vec<_>, String>>()?;
+        let ores = s
+            .ores
+            .into_iter()
+            .map(|o| Ok(Ore { block: id(&o.block)?, depth: o.depth, size: o.size, threshold: o.threshold }))
+            .collect::<Result<Vec<_>, String>>()?;
+        let features = s
+            .features
+            .into_iter()
+            .map(|f| {
+                if let Some(name) = f.biomes.iter().find(|n| !biomes.iter().any(|b| &b.name == *n)) {
+                    return Err(format!("worldgen : biome {name} inconnu"));
+                }
+                let top = match f.top {
+                    Some(t) => Some(Top { block: id(&t.block)?, radius: t.radius }),
+                    None => None,
+                };
+                Ok(Feature { block: id(&f.block)?, height: f.height, top, density: f.density, biomes: f.biomes })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let (air, stone) = (id(&s.air)?, id(&s.stone)?);
+        let terrain = HeightmapGenerator {
+            seed,
+            air,
+            ground: stone,
+            stone,
+            ground_level_m: s.ground_level,
+            amplitude_m: s.amplitude,
+            feature_size_m: s.hill_size,
+        };
+        Ok(Self { terrain, climate_size_m: s.climate_size, biomes, ores, features })
+    }
+
+    /// Le biome de la colonne (x, z), en mètres. Hors de toute plage : le
+    /// dernier.
+    pub fn biome_m(&self, x_m: f32, z_m: f32) -> &Biome<ContentId> {
+        let last = self.biomes.last().expect("au moins un biome");
+        let seed = hash64(self.terrain.seed ^ 0xC11_4A7E);
+        let c = fbm2(seed, x_m / self.climate_size_m, z_m / self.climate_size_m, 2);
+        self.biomes.iter().find(|b| b.climate.0 <= c && c < b.climate.1).unwrap_or(last)
+    }
+
+    /// Le minerai à ce point (mètres), `depth_m` sous la surface.
+    fn ore_m(&self, x_m: f32, y_m: f32, z_m: f32, depth_m: f32) -> Option<ContentId> {
+        self.ores.iter().enumerate().find_map(|(i, o)| {
+            let inside = o.depth.0 <= depth_m && depth_m < o.depth.1;
+            let seed = hash64(self.terrain.seed ^ 0x0BE_0000 ^ i as u64);
+            (inside && value_noise3(seed, x_m / o.size, y_m / o.size, z_m / o.size) > o.threshold).then_some(o.block)
+        })
+    }
+
+    /// Pose les features dont un voxel tombe dans ce chunk. Chaque chunk
+    /// examine aussi les colonnes d'une marge autour de lui : un arbre
+    /// planté chez le voisin peut déborder ici. Le tirage ne dépend que de
+    /// la colonne et l'ordre de parcours est celui du monde : tous les
+    /// chunks voient les mêmes arbres, quel que soit l'ordre de chargement.
+    fn place_features(&self, chunk: &mut Chunk, pos: ChunkPos, vpm: f32) {
+        if self.features.is_empty() {
+            return;
+        }
+        let size = chunk.size() as i64;
+        let (ox, oy, oz) = (pos.x as i64 * size, pos.y as i64 * size, pos.z as i64 * size);
+        let reach_m = self.features.iter().map(|f| f.height.1 + f.top.as_ref().map_or(0.0, |t| t.radius)).fold(0.0, f32::max);
+        let (lowest, highest) = (
+            self.terrain.ground_level_m - self.terrain.amplitude_m - reach_m,
+            self.terrain.ground_level_m + self.terrain.amplitude_m + reach_m,
+        );
+        if (oy + size) as f32 / vpm < lowest || oy as f32 / vpm > highest {
+            return; // trop haut ou trop bas pour qu'une feature y arrive
+        }
+        let margin = self
+            .features
+            .iter()
+            .map(|f| f.top.as_ref().map_or(0.0, |t| t.radius))
+            .fold(0.0, f32::max);
+        let margin = (margin * vpm).ceil() as i64;
+        let tops: Vec<ContentId> = self.features.iter().filter_map(|f| f.top.as_ref().map(|t| t.block)).collect();
+        let air = self.terrain.air;
+        // Écrit (x, y, z) monde s'il est dans ce chunk et que la place est
+        // libre (air ; le feuillage cède aussi la place à un tronc).
+        let mut put = |x: i64, y: i64, z: i64, block: ContentId, over_tops: bool| {
+            let (lx, ly, lz) = (x - ox, y - oy, z - oz);
+            if [lx, ly, lz].iter().all(|&c| (0..size).contains(&c)) {
+                let (lx, ly, lz) = (lx as u32, ly as u32, lz as u32);
+                let here = chunk.get(lx, ly, lz);
+                if here == air || (over_tops && tops.contains(&here)) {
+                    chunk.set(lx, ly, lz, block);
+                }
+            }
+        };
+        let seed = hash64(self.terrain.seed ^ 0xFEA7_0000);
+        let rand = |vx: i64, vz: i64, n: u64| {
+            let h = hash64(seed ^ (vx as u64).wrapping_mul(0x8DA6_B343) ^ (vz as u64).wrapping_mul(0xD816_3841_5C58_35CB) ^ n);
+            (h >> 40) as f32 / (1u64 << 24) as f32
+        };
+        for vz in oz - margin..oz + size + margin {
+            for vx in ox - margin..ox + size + margin {
+                let (wx, wz) = (vx as f32 / vpm, vz as f32 / vpm);
+                let biome = self.biome_m(wx, wz);
+                let chosen = self.features.iter().enumerate().find(|(i, f)| {
+                    (f.biomes.is_empty() || f.biomes.contains(&biome.name))
+                        && rand(vx, vz, *i as u64) < f.density / (vpm * vpm)
+                });
+                let Some((i, feature)) = chosen else { continue };
+                // Le voxel solide le plus haut : son centre est sous la surface.
+                let h = self.terrain.height_m(wx, wz);
+                let ground = (h * vpm - 0.5).ceil() as i64 - 1;
+                if self.terrain.is_cave_m(wx, (ground as f32 + 0.5) / vpm, wz) {
+                    continue; // pas d'arbre au-dessus d'un trou
+                }
+                let t = rand(vx, vz, 1000 + i as u64);
+                let height = ((feature.height.0 + (feature.height.1 - feature.height.0) * t) * vpm).round() as i64;
+                for k in 1..=height {
+                    put(vx, ground + k, vz, feature.block, true);
+                }
+                if let Some(top) = &feature.top {
+                    let r = top.radius * vpm;
+                    let ri = r.ceil() as i64;
+                    let cy = ground + height;
+                    for dy in -ri..=ri {
+                        for dz in -ri..=ri {
+                            for dx in -ri..=ri {
+                                if ((dx * dx + dy * dy + dz * dz) as f32) <= r * r + 0.5 {
+                                    put(vx + dx, cy + dy, vz + dz, top.block, false);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl WorldGenerator for Worldgen {
+    fn generate_chunk(&self, pos: ChunkPos, chunk_size: u32, voxels_per_meter: f32) -> Chunk {
+        let mut chunk = Chunk::filled(chunk_size, self.terrain.air);
+        let size = chunk_size as i64;
+        let vpm = voxels_per_meter;
+        for z in 0..chunk_size {
+            for x in 0..chunk_size {
+                let wx = (pos.x as i64 * size + x as i64) as f32 / vpm;
+                let wz = (pos.z as i64 * size + z as i64) as f32 / vpm;
+                let h = self.terrain.height_m(wx, wz);
+                let biome = self.biome_m(wx, wz);
+                for y in 0..chunk_size {
+                    let wy = ((pos.y as i64 * size + y as i64) as f32 + 0.5) / vpm;
+                    if wy >= h || self.terrain.is_cave_m(wx, wy, wz) {
+                        continue;
+                    }
+                    // Profondeur sous la surface du centre du voxel.
+                    let depth = h - wy;
+                    let material = if depth < 1.0 / vpm {
+                        biome.surface
+                    } else if depth < biome.depth {
+                        biome.under
+                    } else {
+                        self.ore_m(wx, wy, wz, depth).unwrap_or(self.terrain.stone)
+                    };
+                    chunk.set(x, y, z, material);
+                }
+            }
+        }
+        self.place_features(&mut chunk, pos, vpm);
         chunk
     }
 }
@@ -325,5 +605,57 @@ mod tests {
                 assert_eq!(chunk.get(x, y, z), expected, "{pos:?} ({x},{y},{z}), h={h}");
             }
         }
+    }
+
+    fn shipped() -> (Worldgen, Registry) {
+        let registry = Registry::from_ron(include_str!("../../../assets/content/core.ron")).unwrap();
+        let worldgen = Worldgen::from_ron(include_str!("../../../assets/content/worldgen.ron"), 42, &registry).unwrap();
+        (worldgen, registry)
+    }
+
+    #[test]
+    fn small_chunks_match_one_big_chunk() {
+        // Un chunk 32³ et les huit 16³ qui le couvrent doivent être
+        // identiques voxel par voxel : arbres qui débordent, minerais et
+        // biomes ne dépendent pas du découpage en chunks.
+        let (worldgen, _) = shipped();
+        for (bx, bz) in [(0, 0), (5, -3), (-7, 11)] {
+            let big = worldgen.generate_chunk(ChunkPos { x: bx, y: 0, z: bz }, 32, 1.0);
+            for (dx, dy, dz) in (0..2).flat_map(|x| (0..2).flat_map(move |y| (0..2).map(move |z| (x, y, z)))) {
+                let pos = ChunkPos { x: bx * 2 + dx, y: dy, z: bz * 2 + dz };
+                let small = worldgen.generate_chunk(pos, 16, 1.0);
+                for (x, y, z) in (0..16u32).flat_map(|x| (0..16u32).flat_map(move |y| (0..16u32).map(move |z| (x, y, z)))) {
+                    let (gx, gy, gz) = (dx as u32 * 16 + x, dy as u32 * 16 + y, dz as u32 * 16 + z);
+                    assert_eq!(small.get(x, y, z), big.get(gx, gy, gz), "{pos:?} ({x},{y},{z})");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn shipped_worldgen_has_its_biomes_ores_and_trees() {
+        let (worldgen, registry) = shipped();
+        let mut seen = std::collections::HashSet::new();
+        // Une bande de 32 × 4 chunks : assez large pour croiser les biomes.
+        for x in -16..16 {
+            for z in -2..2 {
+                for y in -2..2 {
+                    let chunk = worldgen.generate_chunk(ChunkPos { x, y, z }, 16, 1.0);
+                    for (a, b, c) in (0..16u32).flat_map(|a| (0..16u32).flat_map(move |b| (0..16u32).map(move |c| (a, b, c)))) {
+                        seen.insert(chunk.get(a, b, c));
+                    }
+                }
+            }
+        }
+        for name in ["core:sand", "core:grass", "core:dirt", "core:coal_ore", "core:iron_ore", "core:log", "core:leaves", "core:cactus"] {
+            assert!(seen.contains(&registry.lookup(name).unwrap()), "{name} jamais généré");
+        }
+    }
+
+    #[test]
+    fn unknown_identifier_in_worldgen_is_refused() {
+        let (_, registry) = shipped();
+        let text = include_str!("../../../assets/content/worldgen.ron").replace("core:coal_ore", "core:gold_ore");
+        assert!(Worldgen::from_ron(&text, 42, &registry).unwrap_err().contains("core:gold_ore"));
     }
 }
