@@ -87,9 +87,21 @@ fires 60 s after the block appears (exact, saved, catches up while you are
 away: the wheat), `on: Tick` fires at random, about once a minute (background
 changes: dirt turning back into grass). Conditions `Chance(0.2)` and
 `Above("…")` (the block on top). The worldgen refuses blocks with `After`.
+`on: NeighborChanged` fires when the block or one of its six neighbours
+changes, with the condition `Touching("…")`: that is how lava turns to stone
+next to water.
 
 **Blocks with holes**: `alpha: Mask` lets you see through the transparent
-pixels of a block's textures (leaves, glass).
+pixels of a block's textures (leaves, glass). `alpha: Blend(0.6)` makes a
+block semi-transparent with that opacity (water).
+
+**Liquids**: a block with `liquid: Some((spread: 7.0, delay: 0.25,
+renewable: true, drag: 0.5))` flows: `spread` metres on flat ground from a
+source, one step every `delay` seconds, two neighbouring sources make a third
+if `renewable`, and `drag` slows the player inside (hold jump to swim up).
+Water and lava in `core.ron` are just two settings. A liquid only flows into
+air and is never broken; G gives you one to place. `sea: Some((level: 14.0,
+block: "core:water"))` in `worldgen.ron` fills the lows (new worlds only).
 
 **Textures**: `texture: Some((side: "stone"))` names a PNG in
 `assets/textures/` (without `.png`); `top` and `bottom` are optional
@@ -131,8 +143,8 @@ Never reorder or remove entries: their position is their ID.
 
 The world is saved in `saves/world/` (next to `Cargo.toml`, or next to the
 `.exe`): placed and broken blocks, workbench contents, player position and
-inventory, items lying on the ground, the world clock and pending block
-timers. Delete the folder to start a new world.
+inventory, items lying on the ground, the world clock, pending block
+timers and flowing liquids. Delete the folder to start a new world.
 
 ## Layout
 
@@ -152,13 +164,14 @@ assets/               content (core.ron), textures (PNG), shaders (voxel.wgsl)
 crates/voxel_core/    the WHOLE voxel core: pure, no Bevy dependency
   registry.rs         append-only content registry
   chunk.rs            palette chunk
-  world.rs            VoxelWorld (registry + chunks + voxel↔metre conversions, clock, timers)
+  world.rs            VoxelWorld (registry + chunks + voxel↔metre conversions, clock, timers, liquid levels, scheduled updates)
   worldgen.rs         procedural generation (trait + fBm heightmap)
   mesher.rs           greedy meshing → plain buffers
   physics.rs          AABB collision against the grid
   raycast.rs          DDA (voxel picking)
   rules.rs            block rules (pure evaluation)
   ticks.rs            random ticks: which voxels get the `Tick` hook
+  liquids.rs          how a liquid flows (each cell recomputes from its neighbours)
   crafting.rs         recipe lookup (station or inventory)
   texgen.rs           textures computed from a pattern, a colour and a seed
   generate.rs         what is sent to the generator, validation of its answer

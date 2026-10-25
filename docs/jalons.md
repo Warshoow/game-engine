@@ -181,6 +181,20 @@ libre qui redevient de l'herbe. Options écartées ou reportées : #48
 (réagir à un voisin modifié → avec #28). *Fait le 2026-10-22, en attente
 de validation Windows.*
 
+## Complément — Liquides (#28)
+
+Choix de Warshow (2026-10-25), après comparaison des options (détail et
+options écartées : #49). Un mécanisme, réglé en donnée : `liquid` =
+distance à plat en mètres, temps d'un pas en secondes, `renewable`,
+`drag`. Modèle source + écoulement ; le niveau d'une case qui coule vit
+dans une table creuse (absent = source : un océan immobile ne coûte rien) ;
+réexamens programmés par `set_voxel`, plafonnés par tick. Le même mécanisme
+porte le hook `NeighborChanged` (+ condition `Touching`). Semi-transparent
+`alpha: Blend(opacité)` dans un second mesh par chunk. Contenu : eau, lave
+(→ pierre au contact de l'eau, en règle), mer au niveau 14 m dans
+`worldgen.ron`, nage. *Fait le 2026-10-25, en attente de validation
+Windows.*
+
 ## Suite : ordre des tickets ouverts
 
 Décidé avec Warshow le 2026-10-08. Principe : d'abord ce qui débloque le
@@ -234,6 +248,12 @@ Reportés en cours de route (à reprendre quand un besoin concret arrive) :
   biomes souterrains ; structures en modèle de voxels (ruines, villages) —
   aujourd'hui une feature = colonne + boule ; minerais qui donnent un item
   plutôt qu'eux-mêmes.
+- **Liquides (#28, détail dans #49)** : direction préférée vers un trou ;
+  liquide qui emporte graines et fleurs (avec leurs drops) ; faces entre
+  deux niveaux d'un même liquide (petit jour visible sur une pente) ;
+  seau ; dégâts de la lave (pas de système de vie) ; fond de mer propre
+  au biome (aujourd'hui sa surface : de l'herbe sous l'eau) ; volume
+  conservé en option par liquide.
 
 - **Script Lua** (`mlua`, étage 3 de §3.6) — quand un bloc concret ne
   s'exprime pas en règles. Lève « script runtime complet ».

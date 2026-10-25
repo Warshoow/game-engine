@@ -19,9 +19,9 @@ jeu** avec le menu de fabrication (#45, #46).
 Plus le **rechargement du contenu en jeu** (touche R, #17) et les **blocs
 générés par IA en jeu** (touche I, #18 + #44), validés sous Windows. Et le
 **worldgen en donnée** (#27 : biomes, minerais, arbres), les **blocs à
-trous** (#22 : feuilles, verre) et les **blocs qui évoluent seuls** (#34 :
-minuteurs `After` + tick aléatoire `Tick`, le blé), en attente de
-validation Windows.
+trous** (#22 : feuilles, verre), les **blocs qui évoluent seuls** (#34 :
+minuteurs `After` + tick aléatoire `Tick`, le blé) et les **liquides** (#28 :
+eau, lave, mer, nage, semi-transparent), en attente de validation Windows.
 
 1. Chunk généré depuis la seed (heightmap fBm maison, **grottes** par
    bruit 3D, **biomes, minerais, arbres** décrits dans
@@ -67,10 +67,23 @@ WSL le rendu est logiciel et rame — normal.
   Deux obligations en découlent, déjà codées mais faciles à casser :
   un chunk qui apparaît → re-mesh de ses voisins affichés ; un voxel
   édité en bordure → re-mesh du chunk voisin. Oublier l'une = trous.
-- **Une face est cachée par un voisin opaque, ou par un voisin identique
-  s'il est à trous** (`alpha: Mask`, #22 ; `mesher::hides`). Le greedy et
-  l'oracle naïf partagent cette règle : la changer dans l'un seul casse
-  les tests d'équivalence. `solid` reste « meshé et collidable ».
+- **Une face est cachée par un voisin solide opaque, ou par un voisin
+  identique** (`mesher::hides`, #22, #28). Le greedy et l'oracle naïf
+  partagent cette règle : la changer dans l'un seul casse les tests
+  d'équivalence. `solid` = collidable ; meshé = solide ou liquide. Deux
+  meshes par chunk (`mesh_chunk_in_world` rend `[reste, Blend]`), deux
+  entités (`ChunkMesh`, `BlendMesh`). La clé de fusion du greedy est
+  (index de palette, hauteur) : une surface de liquide abaissée ne fusionne
+  pas avec une pleine.
+- **Liquides** (#28) : le voxel reste l'ID du liquide, son niveau est dans
+  `VoxelWorld::levels` (absent = source, `Some(0)` = chute, sinon distance
+  à plat en voxels). `set_voxel` efface le niveau : écrire le niveau
+  **après** (`set_liquid_level`). `set_voxel` programme aussi le réexamen
+  du voxel et de ses six voisins (`take_due_updates`, plafond
+  `MAX_UPDATES_PER_TICK`) ; c'est ce qui fait couler l'eau et déclenche
+  `NeighborChanged`. Un liquide n'entre que dans l'air du worldgen
+  (`GameWorld::air`). Ne rien faire tourner « pour tous les liquides » :
+  le coût au repos doit rester nul.
 - **La solidité hors chunk est une fermeture injectée** dans le mesher :
   `mesh_chunk` = chunk isolé (air dehors, pour les tests purs),
   `mesh_chunk_in_world` = raccordé au monde. Ne pas re-hardcoder.
@@ -143,8 +156,8 @@ WSL le rendu est logiciel et rame — normal.
   code, c'est voulu).
 - **Comportement = règles en donnée** (`BlockData::rules`, évaluées par
   `voxel_core::rules::actions`, appliquées par `interact.rs`). Hooks
-  `Used`/`Placed`/`Broken`/`Tick`/`After`, conditions
-  `Holding`/`EmptyHand`/`HoldingAny`/`Chance`/`Above`, effets
+  `Used`/`Placed`/`Broken`/`Tick`/`After`/`NeighborChanged`, conditions
+  `Holding`/`EmptyHand`/`HoldingAny`/`Chance`/`Above`/`Touching`, effets
   `ReplaceSelf`/`Drop`/`StoreHeld`/`Craft`.
   Vocabulaire **append-only** (§3.6) : ajouter des variantes, ne jamais en
   renommer ni supprimer. Un `ReplaceSelf` ne redéclenche aucun hook.
@@ -176,26 +189,27 @@ assets/content/       core.ron (le contenu) ; assets/textures/ (PNG) ; assets/sh
 crates/voxel_core/    TOUT le cœur voxel, PUR (zéro dépendance Bevy, testable headless)
   registry.rs         registre append-only §3.1 (IDs = index d'insertion)
   chunk.rs            chunk paletté §3.2 (dense u16 + palette locale)
-  world.rs            VoxelWorld : registre + chunks + conversions voxel↔mètres, horloge, minuteurs
+  world.rs            VoxelWorld : registre + chunks + conversions voxel↔mètres, horloge, minuteurs, niveaux des liquides, réexamens
   worldgen.rs         trait WorldGenerator, HeightmapGenerator (relief, grottes), Worldgen (biomes, minerais, features en donnée)
   mesher.rs           greedy meshing (naïf conservé en oracle) → MeshData (tampons purs)
   physics.rs          AABB vs grille, région balayée (anti-tunneling)
   raycast.rs          DDA Amanatides & Woo (visée voxel + face d'entrée)
   rules.rs            règles hook → condition → effet (évaluation pure)
   ticks.rs            tick aléatoire : quels voxels reçoivent le hook Tick
+  liquids.rs          écoulement : chaque case se recalcule d'après ses voisins
   crafting.rs         recherche de recette (station ou inventaire)
   texgen.rs           textures calculées (motif + couleur + bruit + graine), déterministes
   generate.rs         prompt envoyé au générateur, validation de sa réponse (accept)
   save.rs             dossier du monde, format binaire des chunks
 ```
 
-Règle de séparation stricte : logique voxel → `voxel_core` (74 tests
+Règle de séparation stricte : logique voxel → `voxel_core` (85 tests
 headless, ~0 s), le binaire ne fait que brancher dans l'ECS.
 
 ## Vérifications avant de conclure une étape
 
 ```bash
-cargo test --workspace                    # 81 tests (74 cœur + 7 binaire), headless
+cargo test --workspace                    # 92 tests (85 cœur + 7 binaire), headless
 cargo test -- --ignored claude            # génération réelle par claude (~6 s)
 cargo clippy --workspace --all-targets    # zéro warning exigé
 cargo run                                 # smoke test à l'occasion
@@ -346,19 +360,29 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
 - Tickets créés : #47 (mesh opaque séparé si le profilage le montre), #48
   (options écartées ou reportées de #34 : voisin modifié → avec #28,
   rattrapage du tick aléatoire, avance à heure fixe).
-- **Non poussé** au 2026-10-25 : 6 commits depuis `origin/master`. #22,
-  #27 et #34 se ferment au push (`Closes`).
+- Poussé par Warshow le 2026-10-25 ; #22, #27 et #34 fermés.
+
+## Fait dans la session du 2026-10-25
+
+- #28 liquides : simulation et rendu (`d43064c`), nage (`fbb4e18`),
+  eau, lave, mer (`79c5b79`), G donne les liquides (`d7b223c`). Design doc
+  amendé d'abord (§3.1, §3.2, §3.6, §3.10). Options écartées : #49.
+- Essai sous WSL : la save existante se relit (eau et lave fusionnées au
+  registre) ; un monde neuf a sa mer ; 45 s sans erreur. Rien de visuel
+  vérifié.
+- **Non poussé** : ces 4 commits. #28 se ferme au push (`Closes`).
 
 ## Prochaines étapes
 
 Ordre décidé avec Warshow (2026-10-08) : **`docs/jalons.md`, « Suite :
 ordre des tickets ouverts »**. #45, #46, #17, #18 + #44, #27, #22, #34 faits.
-**D'abord : valider #27, #22 et #34 sur le build Windows** (arbres et
+**D'abord : valider sur le build Windows** #27, #22 et #34 (arbres et
 feuilles percées, verre, blé : casser de l'herbe → graine, la poser,
-2 min). Ensuite : **#28 eau et
-lave** — avec le semi-transparent (`Blend`, reporté de #22) et le hook
-« voisin modifié » (#48). Ce qui a été reporté (#18, #27) est listé
-dans `docs/jalons.md`, « Plus tard ».
+2 min) et #28 (monde neuf pour la mer ; G donne eau et lave ; poser,
+regarder couler, retirer la source, lave contre eau → pierre, nager et
+remonter sur la berge). Ensuite, d'après `docs/jalons.md` : #23 éclairage
++ #7, puis #30 jour/nuit. Ce qui a été reporté (#18, #27, #28) est listé
+dans `docs/jalons.md`, « Plus tard », et dans #49.
 Principe (design doc §2) : le moteur fournit des mécanismes, `core.ron`
 n'est qu'un jeu d'exemple. Mipmaps si les textures scintillent au loin.
 

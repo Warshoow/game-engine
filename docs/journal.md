@@ -863,3 +863,57 @@ et règle `Time<Fixed>` : les échéances sauvées en dépendent.
 contenu qui lit le monde autour de son bloc ; le contexte d'une règle se
 construit pour le voxel de la règle (le bloc posé, pas le bloc visé).
 
+
+## 2026-10-25 — Liquides (#28)
+
+Warshow : « on rend aussi les liquides dispo en données, comme cela on
+pourra créer toute sorte de liquide avec différentes propriétés ». Avant
+de coder, comparaison des options (détail dans #49) ; retenu ce qui suit.
+
+**Source + écoulement, corrigé.** Le modèle de Minecraft (une source
+infinie, le liquide perd un niveau par case) reste le bon compromis : le
+volume conservé (Dwarf Fortress) ne se stabilise jamais et coûte en
+permanence. Ce qu'on ne reprend pas : la distance en blocs (ici `spread`
+en mètres, convertie à la résolution du monde), la vitesse unique
+(`delay` par liquide), le pic de lag d'un lac qui se vide (plafond de
+réexamens par tick, le surplus attend le tick suivant).
+
+**Où vit le niveau.** Pas d'ID par niveau (le nombre d'IDs dépendrait de
+la distance et de la résolution, changer `spread` décalerait les IDs d'une
+save, les règles verraient `water#3`). Une table creuse position → niveau,
+absente = source : un océan immobile n'y a aucune ligne. Même forme que
+les block-entities et les minuteurs : une map pour tout le monde, filtrée
+par chunk à la save.
+
+**Chaque case se recalcule d'après ses voisins** (`liquids::update`), au
+lieu qu'un liquide pousse dans les cases d'à côté. Conséquences : le
+résultat ne dépend pas de l'ordre de traitement (testé : un réexamen par
+tick donne le même état final), et le reflux n'est pas un cas à part. Une
+case qui coule et a perdu sa source se fait d'abord nourrir par sa voisine
+plus loin de la source, monte de niveau en niveau, puis disparaît : le
+reflux prend `spread` pas, comme chez Minecraft.
+
+**Un seul déclencheur : `set_voxel`.** Tout changement de voxel programme
+le réexamen du voxel et de ses six voisins (une file triée par échéance,
+comme les minuteurs). Un liquide qui arrive ou part les programme après
+son `delay`, le reste au tick suivant. Un liquide réexaminé qui ne change
+pas « réveille » l'air d'à côté et du dessous : c'est ce qui fait couler
+une mare murée quand on casse le mur. Le même réexamen déclenche le hook
+`NeighborChanged` : lave + eau → pierre est une règle de `core.ron`.
+Les réexamens en attente et les niveaux sont sauvés avec le chunk (testé :
+sauvé à mi-chemin, l'écoulement finit pareil).
+
+**Rendu.** `alpha: Blend(opacité)` va dans un second mesh par chunk, sur
+une entité à part : Bevy trie les objets semi-transparents par entité. Un
+liquide est meshé sans être solide ; sous autre chose que lui-même, sa
+surface est abaissée selon son niveau, et la hauteur entre dans la clé de
+fusion du greedy. Un liquide ne cache que lui-même : la pierre sous l'eau
+garde sa face.
+
+**Joueur.** `drag` freine la marche et la gravité ; saut tenu = nager vers
+le haut ; tête hors du liquide, c'est un vrai saut (sinon impossible de
+remonter sur une berge d'un bloc).
+
+**Worldgen.** `sea` optionnel : l'air sous un niveau devient le liquide
+(des sources, immobiles tant que rien ne les touche). Pas d'arbre dont le
+pied est sous la mer : le tronc dépassait de l'eau sans pied.
