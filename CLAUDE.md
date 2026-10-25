@@ -35,6 +35,18 @@ Les **non-goals** de §7 restent non-goals tant que non arbitrés : éclairage r
 
 **Règle d'or :** le socle se prouve en portant du concret, pas en ajoutant une couche d'abstraction. Si une abstraction ne sert pas le jalon en cours, elle attend.
 
+## Explorer avant de coder un mécanisme
+
+Tout nouveau mécanisme (eau, minuteurs, lumière…) passe par une phase **exploratoire**, présentée à Warshow avant la première ligne de code :
+
+1. Lire le ticket, le design doc et le code touché.
+2. Voir large : la solution de référence (souvent Minecraft) avec ses défauts connus, puis 2 à 4 vraies alternatives, y compris des idées propres à ce moteur (mètres, données, déterminisme). Comparer chacune sur les mêmes critères : coût en perf (au repos et en pointe), coût en mémoire, effet sur la save, ce qu'elle fige.
+3. Recommander une option. Dire ce qui en devient donnée de l'entrée : tout ce qui varie d'un contenu à l'autre se règle dans le registre, le moteur ne code que le mécanisme.
+4. Warshow tranche. S'il délègue (« je te fais confiance »), chercher encore une fois large avant de partir sur la reco, et signaler toute meilleure idée trouvée.
+5. Amender le design doc, ouvrir un ticket qui garde les options écartées ou reportées et leurs coûts (exemples : #48, #49), puis coder.
+
+Fini quand : options comparées sur les mêmes critères, reco tranchée, ticket des options écartées créé. Exemples : #34 (minuteurs + tick aléatoire), #28 (liquides).
+
 ## Stack & conventions
 
 - **Rust + Bevy 0.19** (ECS, plugin-first). L'API de Bevy bouge : vérifie contre la version du `Cargo.toml`, ne te fie pas à ta mémoire.

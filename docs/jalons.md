@@ -159,7 +159,7 @@ biomes par plage de climat, minerais par profondeur, features = colonne +
 boule optionnelle). World-owned : copié dans la save à la création, la
 copie de la save prime (§3.10). Nouveaux blocs (bûche, feuilles, planches,
 cactus, charbon, fer) aux textures calculées (#44). *Fait le 2026-10-08,
-en attente de validation Windows.*
+validé sous Windows le 2026-10-25.*
 
 ## Complément — Blocs à trous (#22)
 
@@ -167,7 +167,7 @@ en attente de validation Windows.*
 percées, verre (2 sable, sans station). Textures calculées : `holes`, part
 de pixels transparents, les traits du motif restent. Le semi-transparent
 (`Blend`, ordre de dessin) part avec l'eau (#28), seul contenu qui en a
-besoin. *Fait le 2026-10-21, en attente de validation Windows.*
+besoin. *Fait le 2026-10-21, validé sous Windows le 2026-10-25.*
 
 ## Complément — Blocs qui évoluent seuls (#34)
 
@@ -178,8 +178,8 @@ fixe par chunk, rien de sauvé (évolution lente de fond). Conditions
 `Chance` (hasard dérivé de la seed) et `Above`. Exemples : le blé (graine
 de l'herbe cassée → pousse → blé, une minute par stade), la terre à l'air
 libre qui redevient de l'herbe. Options écartées ou reportées : #48
-(réagir à un voisin modifié → avec #28). *Fait le 2026-10-22, en attente
-de validation Windows.*
+(réagir à un voisin modifié → avec #28). *Fait le 2026-10-22, validé
+sous Windows le 2026-10-25.*
 
 ## Complément — Liquides (#28)
 
@@ -192,8 +192,8 @@ réexamens programmés par `set_voxel`, plafonnés par tick. Le même mécanisme
 porte le hook `NeighborChanged` (+ condition `Touching`). Semi-transparent
 `alpha: Blend(opacité)` dans un second mesh par chunk. Contenu : eau, lave
 (→ pierre au contact de l'eau, en règle), mer au niveau 14 m dans
-`worldgen.ron`, nage. *Fait le 2026-10-25, en attente de validation
-Windows.*
+`worldgen.ron`, nage. *Fait le 2026-10-25, validé sous Windows (sauf la mer)
+le 2026-10-25.*
 
 ## Suite : ordre des tickets ouverts
 

@@ -21,7 +21,8 @@ générés par IA en jeu** (touche I, #18 + #44), validés sous Windows. Et le
 **worldgen en donnée** (#27 : biomes, minerais, arbres), les **blocs à
 trous** (#22 : feuilles, verre), les **blocs qui évoluent seuls** (#34 :
 minuteurs `After` + tick aléatoire `Tick`, le blé) et les **liquides** (#28 :
-eau, lave, mer, nage, semi-transparent), en attente de validation Windows.
+eau, lave, mer, nage, semi-transparent), validés sous Windows le
+2026-10-25 (sauf la mer d'un monde neuf, pas encore essayée).
 
 1. Chunk généré depuis la seed (heightmap fBm maison, **grottes** par
    bruit 3D, **biomes, minerais, arbres** décrits dans
@@ -268,11 +269,10 @@ retourne le code de `tail`). Vérifier `EXIT=$?` explicitement.
   demande** (Warshow pousse).
 - **Pas de questionnaire** : proposer une reco tranchée avec ses raisons,
   Warshow corrige (il a écarté le craft par proximité, préféré l'établi).
-- **Ne pas copier Minecraft par défaut** (2026-10-22) : signaler les défauts
-  connus de la solution « à la Minecraft » et proposer mieux ; la garder si
-  elle est vraiment bonne. Sur un choix de mécanisme, Warshow aime voir
-  l'éventail des options (coûts perf/mémoire compris) avant de trancher, et
-  faire noter les options écartées dans un ticket (ex. #48).
+- **Explorer avant de coder un mécanisme** : la méthode est dans
+  `CLAUDE.md` (« Explorer avant de coder un mécanisme ») — solution de
+  référence et ses défauts, alternatives comparées sur les mêmes coûts,
+  reco, ticket des options écartées (#48, #49).
 - **Pédagogie** : projet d'apprentissage — expliquer le *pourquoi* des
   concepts (meshing, layout mémoire, déterminisme…) dans les réponses ET
   dans `docs/journal.md`, tenu à jour à chaque étape.
@@ -351,7 +351,7 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   matériau reçoit le texture array sous un nouveau handle (sinon une
   couche ajoutée restait invisible, ramenée à la dernière).
 - Worldgen en donnée (#27, `4bc3951`), blocs à trous (#22, `6eb1e50`) et
-  blocs qui évoluent seuls (#34) : en attente de validation Windows.
+  blocs qui évoluent seuls (#34) : validés sous Windows le 2026-10-25.
 
 ## Fait dans la session du 2026-10-21 → 22
 
@@ -367,21 +367,23 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
 - #28 liquides : simulation et rendu (`d43064c`), nage (`fbb4e18`),
   eau, lave, mer (`79c5b79`), G donne les liquides (`d7b223c`). Design doc
   amendé d'abord (§3.1, §3.2, §3.6, §3.10). Options écartées : #49.
-- Essai sous WSL : la save existante se relit (eau et lave fusionnées au
-  registre) ; un monde neuf a sa mer ; 45 s sans erreur. Rien de visuel
-  vérifié.
-- **Non poussé** : ces 4 commits. #28 se ferme au push (`Closes`).
+- Validé sous Windows par Warshow : écoulement, reflux, lave → pierre au
+  contact de l'eau, nage, blocs à trous, blé. Un défaut trouvé et corrigé
+  (`c823006`) : les côtés des liquides n'étaient pas dessinés entre deux
+  niveaux. Pas encore essayé : la mer d'un monde neuf.
+- Méthode « explorer avant de coder un mécanisme » ajoutée à `CLAUDE.md`.
+- **Non poussé** : `c823006` et le commit de docs qui suit.
 
 ## Prochaines étapes
 
 Ordre décidé avec Warshow (2026-10-08) : **`docs/jalons.md`, « Suite :
-ordre des tickets ouverts »**. #45, #46, #17, #18 + #44, #27, #22, #34 faits.
-**D'abord : valider sur le build Windows** #27, #22 et #34 (arbres et
-feuilles percées, verre, blé : casser de l'herbe → graine, la poser,
-2 min) et #28 (monde neuf pour la mer ; G donne eau et lave ; poser,
-regarder couler, retirer la source, lave contre eau → pierre, nager et
-remonter sur la berge). Ensuite, d'après `docs/jalons.md` : #23 éclairage
-+ #7, puis #30 jour/nuit. Ce qui a été reporté (#18, #27, #28) est listé
+ordre des tickets ouverts »**. #45, #46, #17, #18 + #44, #27, #22, #34, #28
+faits et validés sous Windows (reste à voir : la mer, dans un monde neuf).
+Ensuite, choisi avec Warshow le 2026-10-25 : **#7 coins assombris**
+(ambient occlusion par sommet dans le mesher ; mesurer combien de faces le
+greedy ne fusionne plus), puis **#23 éclairage réel** (lève un non-goal
+§7 : phase exploratoire complète d'abord, voir `CLAUDE.md`), puis #30
+jour/nuit. Ce qui a été reporté (#18, #27, #28) est listé
 dans `docs/jalons.md`, « Plus tard », et dans #49.
 Principe (design doc §2) : le moteur fournit des mécanismes, `core.ron`
 n'est qu'un jeu d'exemple. Mipmaps si les textures scintillent au loin.
