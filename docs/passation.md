@@ -381,7 +381,7 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   (`c823006`) : les côtés des liquides n'étaient pas dessinés entre deux
   niveaux. Pas encore essayé : la mer d'un monde neuf.
 - Méthode « explorer avant de coder un mécanisme » ajoutée à `CLAUDE.md`.
-- **Non poussé** : `c823006` et le commit de docs qui suit.
+- Poussé par Warshow jusqu'à `55e8d02` ; #28 et #7 fermés.
 - #7 ombrage des coins (`30d7f35`). Design doc amendé d'abord (§3.8).
   Coût mesuré (`mesh_stats`, 50 chunks denses) : 88 655 → 160 375 quads,
   greedy 3,2 → 4,3 ms par chunk. Options écartées : #50. Effets de rendu
@@ -398,7 +398,8 @@ particulier. Mais le PC de test n'a pas de GPU (rendu logiciel) et le jeu
 y était déjà peu fluide avant #7 : **#41 profilage à faire sur le PC avec
 RTX 4060** (méthode, scénarios et solutions possibles dans le ticket).
 Ensuite, choisi avec Warshow le 2026-10-25 : **#23 éclairage réel** (lève
-un non-goal §7 : phase exploratoire complète d'abord, voir `CLAUDE.md`),
+un non-goal §7 : phase exploratoire complète d'abord, voir `CLAUDE.md` ;
+points à trancher préparés en commentaire du ticket),
 puis #51 effets de rendu et #30 jour/nuit. Ce qui a été reporté (#18, #27, #28) est listé
 dans `docs/jalons.md`, « Plus tard », et dans #49.
 Principe (design doc §2) : le moteur fournit des mécanismes, `core.ron`
