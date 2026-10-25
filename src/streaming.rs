@@ -144,7 +144,7 @@ pub fn stream_chunks(
                 }
             }
             // La bordure des voisins déjà affichés doit se recoudre contre
-            // ce nouveau chunk (culling inter-chunks).
+            // ce nouveau chunk (culling inter-chunks, ombre des coins).
             for n in neighbors(pos) {
                 if displayed.contains(&n) {
                     dirty.0.insert(n);
@@ -172,17 +172,13 @@ pub fn stream_chunks(
     }
 }
 
-/// Les 6 chunks adjacents (les diagonales ne partagent pas de face).
-fn neighbors(pos: ChunkPos) -> [ChunkPos; 6] {
-    let ChunkPos { x, y, z } = pos;
-    [
-        ChunkPos { x: x + 1, y, z },
-        ChunkPos { x: x - 1, y, z },
-        ChunkPos { x, y: y + 1, z },
-        ChunkPos { x, y: y - 1, z },
-        ChunkPos { x, y, z: z + 1 },
-        ChunkPos { x, y, z: z - 1 },
-    ]
+/// Les 26 chunks autour : ceux d'une face (culling inter-chunks), mais aussi
+/// d'une arête ou d'un coin, dont l'ombre des coins de faces dépend.
+fn neighbors(pos: ChunkPos) -> impl Iterator<Item = ChunkPos> {
+    (-1..=1)
+        .flat_map(|x| (-1..=1).flat_map(move |y| (-1..=1).map(move |z| [x, y, z])))
+        .filter(|&d| d != [0, 0, 0])
+        .map(move |[x, y, z]| ChunkPos { x: pos.x + x, y: pos.y + y, z: pos.z + z })
 }
 
 #[cfg(test)]

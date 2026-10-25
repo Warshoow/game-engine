@@ -26,6 +26,7 @@
 
 use bevy::prelude::*;
 
+use voxel_core::chunk::ChunkPos;
 use voxel_core::crafting;
 use voxel_core::registry::ContentId;
 use voxel_core::rules::{self, Action, Context, Hook};
@@ -217,24 +218,22 @@ impl Edit<'_, '_, '_> {
             self.drop(voxel, item);
         }
         self.storage.0.insert(voxel);
-        self.dirty.0.insert(pos);
-        // Culling inter-chunks : un voxel en bordure change aussi les faces
-        // du chunk voisin (sa face culled peut devoir (ré)apparaître).
+        // Un voxel en bordure change aussi les chunks voisins : leurs faces
+        // contre lui (culling inter-chunks) et l'ombre de leurs coins, y
+        // compris en diagonale (arête ou coin du chunk).
         let size = self.game.world.chunk_size();
         let (_, local) = self.game.world.split(voxel);
-        for (axis, &l) in local.iter().enumerate() {
-            let offset: i32 = match l {
-                0 => -1,
-                l if l == size - 1 => 1,
-                _ => continue,
-            };
-            let mut npos = pos;
-            match axis {
-                0 => npos.x += offset,
-                1 => npos.y += offset,
-                _ => npos.z += offset,
+        let offsets = local.map(|l| match l {
+            0 => [0, -1],
+            l if l == size - 1 => [0, 1],
+            _ => [0, 0],
+        });
+        for dx in offsets[0] {
+            for dy in offsets[1] {
+                for dz in offsets[2] {
+                    self.dirty.0.insert(ChunkPos { x: pos.x + dx, y: pos.y + dy, z: pos.z + dz });
+                }
             }
-            self.dirty.0.insert(npos);
         }
         true
     }

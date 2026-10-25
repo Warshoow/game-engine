@@ -15,6 +15,15 @@
 //! hauteurs différentes ne fusionnent pas : la hauteur fait partie de la
 //! clé de fusion.
 //!
+//! **Ombrage des coins** (#7) : chaque sommet d'une face est assombri selon
+//! les blocs qui l'entourent devant la face ([`corner_ao`]) ; un coin de
+//! grotte ou le pied d'un mur se lit sans vrai éclairage. L'ombre multiplie
+//! la couleur du sommet : aucun attribut en plus. Deux faces ne fusionnent
+//! que si leurs quatre coins ont la même ombre : comme l'ombre d'un coin ne
+//! dépend que de sa position, des faces voisines de même ombre ont une
+//! ombre constante le long de la fusion, et le rectangle fusionné la rend
+//! exactement.
+//!
 //! **Étape 1 (culling naïf)** : un chunk plein de pierre n'a pas besoin de
 //! 32³ cubes — seules les faces **au contact de l'air** existent
 //! visuellement. On émet une face uniquement si le voisin dans cette
@@ -52,6 +61,13 @@ use crate::world::VoxelWorld;
 
 /// Hauteur d'une face pleine dans la clé de fusion (sur 255).
 const FULL: u8 = u8::MAX;
+
+/// Lumière d'un sommet selon son ombre, de 0 (coin fermé) à 3 (rien
+/// autour).
+const AO_LIGHT: [f32; 4] = [0.45, 0.65, 0.82, 1.0];
+
+/// Ombres d'une face sans ombrage : les quatre coins à 3.
+const NO_SHADE: u8 = u8::MAX;
 
 /// Couche d'un bloc sans texture.
 pub const NO_TEXTURE: u32 = u32::MAX;
@@ -155,10 +171,20 @@ fn mesh_chunk_with(
         }
     };
 
-    // (index de palette, haut, bas) de `p` si sa face vers `q` se voit ;
-    // haut et bas sur 255, `FULL` et 0 pour une face entière. `p` est
-    // toujours dans le chunk, `q` peut en sortir.
-    let visible_face = |p: [i32; 3], q: [i32; 3]| -> Option<(u16, u8, u8)> {
+    // Fait de l'ombre aux coins des faces voisines.
+    let occludes = |q: [i32; 3]| {
+        if inside(q) {
+            resolved[chunk.get_local(q[0] as u32, q[1] as u32, q[2] as u32) as usize].casts_shadow()
+        } else {
+            outside(q).is_some_and(|id| resolve(registry, id).casts_shadow())
+        }
+    };
+
+    // (index de palette, haut, bas, ombres) de `p` si sa face vers `q` se
+    // voit ; haut et bas sur 255, `FULL` et 0 pour une face entière ; ombres
+    // des quatre coins ([`face_ao`]). `p` est toujours dans le chunk, `q`
+    // peut en sortir.
+    let visible_face = |p: [i32; 3], q: [i32; 3], axes: [usize; 3]| -> Option<(u16, u8, u8, u8)> {
         let idx = chunk.get_local(p[0] as u32, p[1] as u32, p[2] as u32);
         let block = &resolved[idx as usize];
         if !block.drawn || block.blend != blend {
@@ -177,19 +203,24 @@ fn mesh_chunk_with(
         // lac).
         if block.liquid && q[1] == p[1] && neighbor.is_some_and(|o| o.id == block.id) {
             let theirs = height_at(q, block.id);
-            return (theirs < height).then_some((idx, height, theirs));
+            return (theirs < height).then_some((idx, height, theirs, NO_SHADE));
         }
         let hidden = neighbor.is_some_and(|other| hides(other, block));
         // Surface abaissée : un bloc posé dessus ne la touche pas.
         let lowered_top = height < FULL && q[1] > p[1];
-        (lowered_top || !hidden).then_some((idx, height, 0))
+        if hidden && !lowered_top {
+            return None;
+        }
+        // Les liquides et le semi-transparent ne reçoivent pas d'ombre.
+        let ao = if block.liquid || blend { NO_SHADE } else { face_ao(occludes, q, axes) };
+        Some((idx, height, 0, ao))
     };
 
     let mut mesh = MeshData::default();
     // Masque 2D réutilisé pour chaque tranche : None = pas de face visible,
     // Some(clé) = face visible, la clé de fusion étant (index de palette,
-    // haut, bas).
-    let mut mask: Vec<Option<(u16, u8, u8)>> = vec![None; n * n];
+    // haut, bas, ombres).
+    let mut mask: Vec<Option<(u16, u8, u8, u8)>> = vec![None; n * n];
 
     // `d` est l'axe de la normale ; `u`/`v` les deux axes du plan de la
     // tranche. (d, u, v) reste une permutation cyclique de (x, y, z) pour
@@ -213,7 +244,7 @@ fn mesh_chunk_with(
                         p[v] = iv;
                         let mut q = p;
                         q[d] += step;
-                        let cell = visible_face(p, q);
+                        let cell = visible_face(p, q, [d, u, v]);
                         any |= cell.is_some();
                         mask[(iu + iv * size) as usize] = cell;
                     }
@@ -256,7 +287,7 @@ fn mesh_chunk_with(
                             origin: [iu as i32, iv as i32],
                             extent: [w as i32, h as i32],
                         };
-                        emit_rect(&mut mesh, &quad, normal, &resolved[key.0 as usize], [key.1, key.2], voxel_size_m);
+                        emit_rect(&mut mesh, &quad, normal, &resolved[key.0 as usize], [key.1, key.2], key.3, voxel_size_m);
                     }
                 }
             }
@@ -279,8 +310,9 @@ struct SliceQuad {
     extent: [i32; 2],
 }
 
-/// `[haut, bas]` : la part de voxel couverte (sur 255), voir `visible_face`.
-fn emit_rect(mesh: &mut MeshData, quad: &SliceQuad, normal: [f32; 3], block: &Resolved, [top_h, bottom_h]: [u8; 2], scale: f32) {
+/// `[haut, bas]` : la part de voxel couverte (sur 255) ; `ao` : les ombres
+/// des coins ; voir `visible_face`.
+fn emit_rect(mesh: &mut MeshData, quad: &SliceQuad, normal: [f32; 3], block: &Resolved, [top_h, bottom_h]: [u8; 2], ao: u8, scale: f32) {
     let [d, u, v] = quad.axes;
     // La face d'un voxel `layer` côté +d est dans le plan `layer + 1` ;
     // côté -d, dans le plan `layer`.
@@ -304,7 +336,9 @@ fn emit_rect(mesh: &mut MeshData, quad: &SliceQuad, normal: [f32; 3], block: &Re
         [[0, 0], [0, h], [w, h], [w, 0]]
     };
     let base = mesh.positions.len() as u32;
-    for [cu, cv] in corners {
+    let mut shades = [0; 4];
+    for (i, [cu, cv]) in corners.into_iter().enumerate() {
+        shades[i] = corner_shade(ao, cu > 0, cv > 0);
         let mut p = [0i32; 3];
         p[d] = plane;
         p[u] = quad.origin[0] + cu;
@@ -317,16 +351,54 @@ fn emit_rect(mesh: &mut MeshData, quad: &SliceQuad, normal: [f32; 3], block: &Re
             y += lift;
         }
         let pos = [p[0] as f32 * scale, y * scale, p[2] as f32 * scale];
-        push_vertex(mesh, pos, normal, block);
+        push_vertex(mesh, pos, normal, block, AO_LIGHT[shades[i] as usize]);
     }
-    // Deux triangles CCW sur les coins [0,1,2] et [0,2,3].
-    mesh.indices
-        .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    push_quad_indices(mesh, base, shades);
+}
+
+/// Ombre d'un coin de face, de 0 (le plus sombre) à 3 (rien autour) :
+/// devant la face, les deux voisins de côté et celui du coin. Deux côtés
+/// pleins ferment le coin, quel que soit le troisième.
+fn corner_ao(side_u: bool, side_v: bool, corner: bool) -> u8 {
+    if side_u && side_v { 0 } else { 3 - u8::from(side_u) - u8::from(side_v) - u8::from(corner) }
+}
+
+/// Les ombres des quatre coins de la face dont la cellule devant est `q`,
+/// de normale le long de `d`, dans le plan (u, v). Deux bits par coin, le
+/// coin (cu, cv) au rang `cu + 2 cv` (cu, cv : côté bas ou haut de l'axe).
+fn face_ao(occludes: impl Fn([i32; 3]) -> bool, q: [i32; 3], [_, u, v]: [usize; 3]) -> u8 {
+    let mut packed = 0;
+    for (cu, cv) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+        let (su, sv) = (if cu == 1 { 1 } else { -1 }, if cv == 1 { 1 } else { -1 });
+        let mut side_u = q;
+        side_u[u] += su;
+        let mut side_v = q;
+        side_v[v] += sv;
+        let mut corner = side_u;
+        corner[v] += sv;
+        packed |= corner_ao(occludes(side_u), occludes(side_v), occludes(corner)) << (2 * (cu + 2 * cv));
+    }
+    packed
+}
+
+/// L'ombre du coin (`high_u`, `high_v`) dans les ombres empaquetées.
+fn corner_shade(ao: u8, high_u: bool, high_v: bool) -> u8 {
+    (ao >> (2 * (u8::from(high_u) + 2 * u8::from(high_v)))) & 3
+}
+
+/// Deux triangles CCW sur les 4 coins du quad. Le GPU interpole la couleur
+/// dans chaque triangle : on coupe le long de la diagonale la plus claire,
+/// pour qu'un coin sombre isolé reste dans un seul triangle au lieu de
+/// tirer une traînée jusqu'au coin opposé.
+fn push_quad_indices(mesh: &mut MeshData, base: u32, shades: [u8; 4]) {
+    let [a, b, c, d] = shades;
+    let tris = if b + d > a + c { [1, 2, 3, 1, 3, 0] } else { [0, 1, 2, 0, 2, 3] };
+    mesh.indices.extend(tris.map(|i| base + i));
 }
 
 /// Un sommet : position, normale, couleur, et sa texture (couche +
 /// coordonnées en mètres, prises dans le plan de la face).
-fn push_vertex(mesh: &mut MeshData, pos: [f32; 3], normal: [f32; 3], block: &Resolved) {
+fn push_vertex(mesh: &mut MeshData, pos: [f32; 3], normal: [f32; 3], block: &Resolved, light: f32) {
     let [x, y, z] = pos;
     // Sur les côtés, v descend avec y : l'image est à l'endroit (le haut du
     // PNG en haut du bloc).
@@ -341,7 +413,8 @@ fn push_vertex(mesh: &mut MeshData, pos: [f32; 3], normal: [f32; 3], block: &Res
     };
     mesh.positions.push(pos);
     mesh.normals.push(normal);
-    mesh.colors.push(block.color);
+    let [r, g, b, a] = block.color;
+    mesh.colors.push([r * light, g * light, b * light, a]);
     mesh.uvs.push(uv);
     mesh.layers.push(layer);
 }
@@ -360,6 +433,13 @@ struct Resolved {
     color: [f32; 4],
     /// Couche du côté, du dessus, du dessous.
     layers: [u32; 3],
+}
+
+impl Resolved {
+    /// Assombrit les coins des faces voisines : il cache tout derrière lui.
+    fn casts_shadow(&self) -> bool {
+        self.solid && self.opaque
+    }
 }
 
 fn resolve_palette(chunk: &Chunk, registry: &Registry) -> Vec<Resolved> {
@@ -412,7 +492,7 @@ fn resolve(registry: &Registry, id: ContentId) -> Resolved {
 /// (la face commune ne se verrait pas). Un liquide, même opaque, ne cache
 /// rien d'autre : sa surface est abaissée.
 fn hides(neighbor: &Resolved, block: &Resolved) -> bool {
-    neighbor.id == block.id || (neighbor.solid && neighbor.opaque)
+    neighbor.id == block.id || neighbor.casts_shadow()
 }
 
 // ---------------------------------------------------------------------------
@@ -453,12 +533,13 @@ struct Face {
 pub fn mesh_chunk_naive(chunk: &Chunk, registry: &Registry, voxel_size_m: f32) -> MeshData {
     let size = chunk.size();
     let resolved = resolve_palette(chunk, registry);
-    let hidden_by = |x: i32, y: i32, z: i32, block: &Resolved| -> bool {
+    let at = |[x, y, z]: [i32; 3]| -> Option<&Resolved> {
         if x < 0 || y < 0 || z < 0 || x >= size as i32 || y >= size as i32 || z >= size as i32 {
-            return false; // hors chunk = air
+            return None; // hors chunk = air
         }
-        hides(&resolved[chunk.get_local(x as u32, y as u32, z as u32) as usize], block)
+        Some(&resolved[chunk.get_local(x as u32, y as u32, z as u32) as usize])
     };
+    let occludes = |q: [i32; 3]| at(q).is_some_and(Resolved::casts_shadow);
 
     let mut mesh = MeshData::default();
     for z in 0..size {
@@ -472,8 +553,10 @@ pub fn mesh_chunk_naive(chunk: &Chunk, registry: &Registry, voxel_size_m: f32) -
                     let nx = x as i32 + face.neighbor[0];
                     let ny = y as i32 + face.neighbor[1];
                     let nz = z as i32 + face.neighbor[2];
-                    if !hidden_by(nx, ny, nz, block) {
-                        emit_quad(&mut mesh, [x, y, z], face, block, voxel_size_m);
+                    if !at([nx, ny, nz]).is_some_and(|other| hides(other, block)) {
+                        let d = face.normal.iter().position(|&c| c != 0.0).unwrap();
+                        let ao = face_ao(occludes, [nx, ny, nz], [d, (d + 1) % 3, (d + 2) % 3]);
+                        emit_quad(&mut mesh, [x, y, z], face, block, ao, voxel_size_m);
                     }
                 }
             }
@@ -482,19 +565,19 @@ pub fn mesh_chunk_naive(chunk: &Chunk, registry: &Registry, voxel_size_m: f32) -
     mesh
 }
 
-fn emit_quad(mesh: &mut MeshData, voxel: [u32; 3], face: &Face, block: &Resolved, scale: f32) {
+fn emit_quad(mesh: &mut MeshData, voxel: [u32; 3], face: &Face, block: &Resolved, ao: u8, scale: f32) {
     let base = mesh.positions.len() as u32;
-    for corner in &face.corners {
+    let d = face.normal.iter().position(|&c| c != 0.0).unwrap();
+    let shades = face.corners.map(|c| corner_shade(ao, c[(d + 1) % 3] == 1, c[(d + 2) % 3] == 1));
+    for (corner, shade) in face.corners.iter().zip(shades) {
         let pos = [
             (voxel[0] + corner[0]) as f32 * scale,
             (voxel[1] + corner[1]) as f32 * scale,
             (voxel[2] + corner[2]) as f32 * scale,
         ];
-        push_vertex(mesh, pos, face.normal, block);
+        push_vertex(mesh, pos, face.normal, block, AO_LIGHT[shade as usize]);
     }
-    // Deux triangles CCW sur les coins [0,1,2] et [0,2,3].
-    mesh.indices
-        .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    push_quad_indices(mesh, base, shades);
 }
 
 #[cfg(test)]
@@ -683,6 +766,78 @@ mod tests {
         assert_eq!(area_by_normal(&greedy), area_by_normal(&naive));
         // Et le gain existe bel et bien.
         assert!(greedy.face_count() < naive.face_count());
+
+        assert_same_shading(&greedy, &naive);
+    }
+
+    /// Même ombre : chaque sommet du greedy a la couleur d'un sommet du naïf
+    /// au même point, de même normale.
+    fn assert_same_shading(greedy: &MeshData, naive: &MeshData) {
+        let vertex = |m: &MeshData, i: usize| (m.positions[i].map(|c| c as i32), m.normals[i].map(|c| c as i32), m.colors[i].map(f32::to_bits));
+        let naive_vertices: std::collections::HashSet<_> = (0..naive.positions.len()).map(|i| vertex(naive, i)).collect();
+        for i in 0..greedy.positions.len() {
+            assert!(naive_vertices.contains(&vertex(greedy, i)), "sommet {:?} absent du naïf", vertex(greedy, i));
+        }
+    }
+
+    /// Lumière du sommet en `pos` de normale `normal` (part de la couleur
+    /// du bloc, 0.5 pour la pierre de test).
+    fn light_at(mesh: &MeshData, pos: [f32; 3], normal: [f32; 3]) -> f32 {
+        let i = (0..mesh.positions.len()).find(|&i| mesh.positions[i] == pos && mesh.normals[i] == normal).unwrap();
+        mesh.colors[i][0] / 0.5
+    }
+
+    #[test]
+    fn corners_against_walls_are_darker() {
+        // Un sol de pierre et deux murs le long de x = 0 et z = 0 : le pied
+        // d'un mur est assombri, le coin entre les deux murs l'est le plus,
+        // le milieu du sol pas du tout.
+        let (reg, air, stone) = test_registry();
+        let mut chunk = Chunk::filled(8, air);
+        for (x, z) in (0..8).flat_map(|x| (0..8).map(move |z| (x, z))) {
+            chunk.set(x, 0, z, stone);
+            if x == 0 || z == 0 {
+                chunk.set(x, 1, z, stone);
+            }
+        }
+        let up = [0.0, 1.0, 0.0];
+        let naive = mesh_chunk_naive(&chunk, &reg, 1.0);
+        assert_eq!(light_at(&naive, [1.0, 1.0, 1.0], up), AO_LIGHT[0], "coin entre deux murs");
+        assert_eq!(light_at(&naive, [1.0, 1.0, 4.0], up), AO_LIGHT[1], "pied d'un mur");
+        assert_eq!(light_at(&naive, [4.0, 1.0, 4.0], up), AO_LIGHT[3], "milieu du sol");
+        // Le greedy rend la même ombre, en coupant le sol là où elle change.
+        let greedy = mesh_chunk(&chunk, &reg, 1.0);
+        assert_same_shading(&greedy, &naive);
+        assert_eq!(light_at(&greedy, [1.0, 1.0, 1.0], up), AO_LIGHT[0]);
+    }
+
+    #[test]
+    fn a_lone_dark_corner_stays_in_one_triangle() {
+        // Un bloc posé en diagonale d'un sol : le coin du sol qu'il touche
+        // est le seul sombre de son quad. Il ne doit être que dans un des
+        // deux triangles, sinon l'ombre file jusqu'au coin opposé.
+        let (reg, air, stone) = test_registry();
+        let mut chunk = Chunk::filled(8, air);
+        for (x, z) in (2..5).flat_map(|x| (2..5).map(move |z| (x, z))) {
+            chunk.set(x, 0, z, stone);
+        }
+        chunk.set(1, 1, 1, stone);
+        for mesh in [mesh_chunk(&chunk, &reg, 1.0), mesh_chunk_naive(&chunk, &reg, 1.0)] {
+            let mut lone = 0;
+            for quad in mesh.indices.chunks(6) {
+                let mut corners: Vec<u32> = quad.to_vec();
+                corners.sort();
+                corners.dedup();
+                let light = |i: u32| mesh.colors[i as usize][0];
+                let darkest = *corners.iter().min_by(|a, b| light(**a).total_cmp(&light(**b))).unwrap();
+                let others: Vec<u32> = corners.iter().copied().filter(|&c| c != darkest).collect();
+                if others.iter().all(|&c| light(c) == light(others[0]) && light(c) > light(darkest)) {
+                    lone += 1;
+                    assert_eq!(quad.iter().filter(|&&i| i == darkest).count(), 1, "coin sombre partagé par les deux triangles");
+                }
+            }
+            assert!(lone > 0, "aucun coin sombre isolé dans la scène");
+        }
     }
 
     #[test]
@@ -821,6 +976,9 @@ mod tests {
                 chunk.set(x, 1, z, stone);
             }
         }
+        // Un bloc posé dessus : des coins ombrés, donc des quads coupés
+        // selon l'autre diagonale.
+        chunk.set(1, 2, 1, stone);
         for mesh in [mesh_chunk(&chunk, &reg, 1.0), mesh_chunk_naive(&chunk, &reg, 1.0)] {
             for tri in mesh.indices.chunks(3) {
                 let [a, b, c] = [tri[0] as usize, tri[1] as usize, tri[2] as usize];

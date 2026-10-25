@@ -1,6 +1,6 @@
 # Moteur Voxel — Design du Socle
 
-> **Statut :** v0.1 — v0 figé pour le prototypage ; 2026-10-07 : recettes (§3.1), cycle de vie des block-entities (§3.3), forme du comportement (§3.6) ; 2026-10-08 : apparence (§3.1), persistance (§3.10), principe « mécanismes, pas règles de jeu » (§2), textures calculées (§3.1), génération en jeu (§3.6), réglages du worldgen dans la save (§3.10) ; 2026-10-21 : blocs à trous (§3.1) ; 2026-10-22 : blocs qui évoluent seuls (§3.6, §3.10) ; 2026-10-25 : liquides et semi-transparent (§3.1, §3.2, §3.6, §3.10).
+> **Statut :** v0.1 — v0 figé pour le prototypage ; 2026-10-07 : recettes (§3.1), cycle de vie des block-entities (§3.3), forme du comportement (§3.6) ; 2026-10-08 : apparence (§3.1), persistance (§3.10), principe « mécanismes, pas règles de jeu » (§2), textures calculées (§3.1), génération en jeu (§3.6), réglages du worldgen dans la save (§3.10) ; 2026-10-21 : blocs à trous (§3.1) ; 2026-10-22 : blocs qui évoluent seuls (§3.6, §3.10) ; 2026-10-25 : liquides et semi-transparent (§3.1, §3.2, §3.6, §3.10), ombrage des coins (§3.8).
 > **Nature :** ceci est un `intent/` — la source de vérité du socle. On lit **avant** d'écrire. Toute décision qui contredit ce doc doit d'abord **modifier ce doc** (avec sa justification), pas le contourner en douce dans le code.
 > **Portée :** ce document décrit un **socle**, pas un jeu. Aucun système de gameplay (survie, magie, armes, quêtes…) n'est spécifié ici. Le socle est le substrat sur lequel ces systèmes se branchent sans toucher au core.
 
@@ -186,6 +186,8 @@ Le hasard des règles (condition `Chance`) dérive de la seed, du numéro de tic
 - **Ce qui est figé ici**, c'est cet invariant (« la lumière n'est pas de l'identité »). **L'algorithme reste ouvert** (voir §5) : flood-fill propagé façon MC vs. calcul différé/shader.
 
 **Coût de changement :** Day-1 pour l'invariant (il protège la décision « material_id only »). L'algo est mou.
+
+**Ombrage des coins** (ajout 2026-10-25, #7). Le mesher assombrit chaque sommet d'une face selon les blocs qui l'entourent, devant la face (trois voisins : deux côtés et le coin). Calculé à chaque meshing, jamais stocké ni sauvé : il suit l'invariant ci-dessus. Un bloc fait de l'ombre s'il est solide et opaque, ce que le registre dit déjà ; les liquides et le semi-transparent n'en reçoivent pas. Le greedy ne fusionne que des faces au même ombrage. Écartés : l'ombrage calculé sur l'image par Bevy (coût à chaque image, dépend de l'angle de vue ; reste cumulable plus tard), et le calcul par pixel depuis une grille du chunk envoyée au GPU (un matériau par chunk). Détail : #50.
 
 ### 3.9 Simulation — tick fixe / frame variable
 

@@ -1,5 +1,6 @@
 //! Compare le coût du culling naïf et du greedy meshing sur les chunks
-//! réels du worldgen (mêmes paramètres que le binaire).
+//! réels du worldgen (mêmes paramètres que le binaire). Le greedy ne
+//! fusionne que des faces de même ombre (#7) : avant l'ombrage, 88 655 quads.
 //!
 //! Headless : `cargo run -p voxel_core --example mesh_stats`
 
@@ -34,6 +35,7 @@ fn main() {
     // Couche de surface (y = 0) et couche souterraine (y = -1, grottes).
     let (mut naive_total, mut greedy_total) = (0usize, 0usize);
     let mut gen_time = std::time::Duration::ZERO;
+    let mut mesh_time = std::time::Duration::ZERO;
     for cy in -1..=0 {
         for cx in -2..=2 {
             for cz in -2..=2 {
@@ -42,13 +44,16 @@ fn main() {
                 let chunk = generator.generate_chunk(pos, CHUNK_SIZE, 1.0);
                 gen_time += start.elapsed();
                 naive_total += mesh_chunk_naive(&chunk, &registry, 1.0).face_count();
+                let start = std::time::Instant::now();
                 greedy_total += mesh_chunk(&chunk, &registry, 1.0).face_count();
+                mesh_time += start.elapsed();
             }
         }
     }
 
     println!("50 chunks {CHUNK_SIZE}³ (seed 42, couches y = -1 et 0) :");
     println!("  génération   : {:.2} ms/chunk", gen_time.as_secs_f64() * 1000.0 / 50.0);
+    println!("  greedy       : {:.2} ms/chunk", mesh_time.as_secs_f64() * 1000.0 / 50.0);
     println!("  culling naïf : {naive_total} quads ({} triangles)", naive_total * 2);
     println!("  greedy       : {greedy_total} quads ({} triangles)", greedy_total * 2);
     println!(
