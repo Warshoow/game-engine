@@ -165,6 +165,14 @@ pub struct Top<Id> {
     pub radius: f32,
 }
 
+/// Mer (#28) : `block` remplit l'air sous l'altitude `level` (mètres), hors
+/// grottes. Des sources : immobiles tant que rien ne les touche.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Sea<Id> {
+    pub level: f32,
+    pub block: Id,
+}
+
 /// Le fichier `worldgen.ron`.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct Settings {
@@ -181,6 +189,8 @@ struct Settings {
     ores: Vec<Ore<String>>,
     #[serde(default)]
     features: Vec<Feature<String>>,
+    #[serde(default)]
+    sea: Option<Sea<String>>,
 }
 
 /// Le générateur du jeu : relief et grottes de [`HeightmapGenerator`],
@@ -192,6 +202,7 @@ pub struct Worldgen {
     biomes: Vec<Biome<ContentId>>,
     ores: Vec<Ore<ContentId>>,
     features: Vec<Feature<ContentId>>,
+    sea: Option<Sea<ContentId>>,
 }
 
 /// Un seul biome (le sol de [`HeightmapGenerator`]), ni minerai ni
@@ -200,7 +211,7 @@ impl From<HeightmapGenerator> for Worldgen {
     fn from(terrain: HeightmapGenerator) -> Self {
         let g = terrain.ground;
         let biome = Biome { name: String::new(), climate: (0.0, 1.0), surface: g, under: g, depth: SOIL_DEPTH_M };
-        Self { terrain, climate_size_m: 1.0, biomes: vec![biome], ores: Vec::new(), features: Vec::new() }
+        Self { terrain, climate_size_m: 1.0, biomes: vec![biome], ores: Vec::new(), features: Vec::new(), sea: None }
     }
 }
 
@@ -244,6 +255,10 @@ impl Worldgen {
                 Ok(Feature { block: id(&f.block)?, height: f.height, top, density: f.density, biomes: f.biomes })
             })
             .collect::<Result<Vec<_>, String>>()?;
+        let sea = match s.sea {
+            Some(sea) => Some(Sea { level: sea.level, block: id(&sea.block)? }),
+            None => None,
+        };
         let (air, stone) = (id(&s.air)?, id(&s.stone)?);
         let terrain = HeightmapGenerator {
             seed,
@@ -254,7 +269,7 @@ impl Worldgen {
             amplitude_m: s.amplitude,
             feature_size_m: s.hill_size,
         };
-        Ok(Self { terrain, climate_size_m: s.climate_size, biomes, ores, features })
+        Ok(Self { terrain, climate_size_m: s.climate_size, biomes, ores, features, sea })
     }
 
     /// Le biome de la colonne (x, z), en mètres. Hors de toute plage : le
@@ -330,6 +345,9 @@ impl Worldgen {
                 let Some((i, feature)) = chosen else { continue };
                 // Le voxel solide le plus haut : son centre est sous la surface.
                 let h = self.terrain.height_m(wx, wz);
+                if self.sea.as_ref().is_some_and(|sea| h < sea.level) {
+                    continue; // sous l'eau : le tronc dépasserait de la mer, sans pied
+                }
                 let ground = (h * vpm - 0.5).ceil() as i64 - 1;
                 if self.terrain.is_cave_m(wx, (ground as f32 + 0.5) / vpm, wz) {
                     continue; // pas d'arbre au-dessus d'un trou
@@ -371,7 +389,15 @@ impl WorldGenerator for Worldgen {
                 let biome = self.biome_m(wx, wz);
                 for y in 0..chunk_size {
                     let wy = ((pos.y as i64 * size + y as i64) as f32 + 0.5) / vpm;
-                    if wy >= h || self.terrain.is_cave_m(wx, wy, wz) {
+                    if wy >= h {
+                        if let Some(sea) = &self.sea
+                            && wy < sea.level
+                        {
+                            chunk.set(x, y, z, sea.block);
+                        }
+                        continue;
+                    }
+                    if self.terrain.is_cave_m(wx, wy, wz) {
                         continue;
                     }
                     // Profondeur sous la surface du centre du voxel.
@@ -665,6 +691,32 @@ mod tests {
         let (_, registry) = shipped();
         let text = include_str!("../../../assets/content/worldgen.ron").replace("core:coal_ore", "core:gold_ore");
         assert!(Worldgen::from_ron(&text, 42, &registry).unwrap_err().contains("core:gold_ore"));
+    }
+
+    #[test]
+    fn the_sea_fills_the_lows_and_grows_no_tree() {
+        let (_, registry) = shipped();
+        let text = include_str!("../../../assets/content/worldgen.ron");
+        let worldgen = Worldgen::from_ron(text, 42, &registry).unwrap();
+        let sea = worldgen.sea.clone().expect("le worldgen du jeu a une mer");
+        let (water, log) = (registry.lookup("core:water").unwrap(), registry.lookup("core:log").unwrap());
+        let mut wet = 0;
+        for (cx, cz) in (-3..3).flat_map(|x| (-3..3).map(move |z| (x, z))) {
+            let pos = ChunkPos { x: cx, y: 0, z: cz };
+            let chunk = worldgen.generate_chunk(pos, 32, 1.0);
+            for (x, z) in (0..32).flat_map(|x| (0..32).map(move |z| (x, z))) {
+                let (wx, wz) = ((cx * 32 + x as i32) as f32, (cz * 32 + z as i32) as f32);
+                let h = worldgen.terrain.height_m(wx, wz);
+                let column: Vec<_> = (0..32).map(|y| chunk.get(x, y, z)).collect();
+                if h + 1.0 < sea.level {
+                    wet += 1;
+                    assert_eq!(column[(sea.level - 0.5) as usize], water, "({wx}, {wz})");
+                    assert!(!column.contains(&log), "arbre dans la mer en ({wx}, {wz})");
+                }
+                assert_ne!(column[sea.level as usize + 1], water, "rien au-dessus du niveau");
+            }
+        }
+        assert!(wet > 0, "aucune colonne sous la mer : le test ne prouve rien");
     }
 
     #[test]

@@ -33,7 +33,9 @@ Format (les champs optionnels peuvent être omis) :
         ],
         drops: Some(["core:dirt"]),    // optionnel : ce que donne le bloc cassé ; absent = lui-même
         rules: [(on: Used, when: [EmptyHand], then: [Drop("core:stone")])],  // optionnel
-        alpha: Mask,                   // optionnel : bloc à trous (verre, feuillage), avec holes > 0
+        alpha: Mask,                   // optionnel : bloc à trous (verre, feuillage), avec holes > 0 ;
+                                       // ou Blend(0.6) : semi-transparent (eau), opacité dans [0, 1]
+        liquid: Some((spread: 7.0, delay: 0.25, renewable: true, drag: 0.5)),  // optionnel : le bloc coule
     )),
     recipes: [(inputs: ["core:stone", "core:dirt"], count: 1)],  // optionnel ; station: "core:workbench" possible
 )
@@ -44,10 +46,14 @@ Règles :
   holes (optionnel, [0, 1]) : part de pixels transparents, les traits du motif restent ;
   Frame avec holes: 1.0 ne garde que le cadre. Seulement sur un bloc alpha: Mask.
 - texture peut aussi citer une texture existante : {textures:?}.
+- Un liquide a solid: false. spread : distance d'écoulement à plat en mètres ; delay : secondes
+  par pas (lent = visqueux) ; renewable (optionnel) : deux sources voisines en font une ; drag
+  (optionnel, [0, 1)) : freinage du joueur dedans.
 - Hooks (on) : Used, Placed, Broken, After(60.0) (secondes après l'apparition du bloc, exact :
-  culture, feu), Tick (au hasard, une fois par minute en moyenne : évolution lente de fond).
+  culture, feu), Tick (au hasard, une fois par minute en moyenne : évolution lente de fond),
+  NeighborChanged (le bloc ou un voisin vient de changer).
   Conditions (when) : Holding("id"), EmptyHand, HoldingAny, Chance(0.3) (probabilité dans [0, 1]),
-  Above("id") (le bloc au-dessus).
+  Above("id") (le bloc au-dessus), Touching("id") (l'un des six voisins).
   Effets (then) : ReplaceSelf("id"), Drop("id"), StoreHeld, Craft.
 - Les identifiers cités (drops, règles, recettes) doivent exister : {existing:?}.
 - Donne une recette sans station, faite d'entrées courantes, pour que le joueur puisse le fabriquer.

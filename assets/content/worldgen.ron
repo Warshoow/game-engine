@@ -40,4 +40,8 @@
         (block: "core:stone", height: (0.0, 0.0), top: Some((block: "core:stone", radius: 1.0)),
             density: 0.002, biomes: ["plaine"]),
     ],
+
+    // Mer (#28) : `block` remplit l'air sous l'altitude `level` (mètres),
+    // hors grottes. Pas d'arbre dont le pied serait sous l'eau.
+    sea: Some((level: 14.0, block: "core:water")),
 )

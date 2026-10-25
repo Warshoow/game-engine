@@ -100,4 +100,21 @@
         texture: Some((side: "wheat")),
         generated_textures: [(name: "wheat", pattern: Planks, color: (0.85, 0.72, 0.30), noise: 0.3, seed: 11, holes: 0.4)],
         drops: Some(["core:wheat", "core:wheat_seeds", "core:wheat_seeds"])))),
+
+    // Liquides (#28) : `liquid` règle l'écoulement — distance à plat en
+    // mètres, temps d'un pas en secondes, deux sources voisines en font une
+    // troisième (`renewable`), freinage du joueur (`drag`). Posés depuis
+    // l'inventaire (touche G), on ne les casse pas.
+    // Eau : semi-transparente (`Blend`, opacité 0.6), rapide.
+    (identifier: "core:water", kind: Block((solid: false, color: (0.20, 0.40, 0.85), alpha: Blend(0.6),
+        texture: Some((side: "water")),
+        generated_textures: [(name: "water", pattern: Plain, color: (0.20, 0.40, 0.85), noise: 0.1, seed: 12)],
+        liquid: Some((spread: 7.0, delay: 0.25, renewable: true, drag: 0.5))))),
+    // Lave : opaque, lente, épaisse, ne se renouvelle pas. Au contact de
+    // l'eau, elle devient pierre — une règle, aucun code Rust.
+    (identifier: "core:lava", kind: Block((solid: false, color: (0.95, 0.40, 0.05),
+        texture: Some((side: "lava")),
+        generated_textures: [(name: "lava", pattern: Spots, color: (0.95, 0.40, 0.05), noise: 0.35, seed: 13)],
+        liquid: Some((spread: 3.0, delay: 1.5, drag: 0.8)),
+        rules: [(on: NeighborChanged, when: [Touching("core:water")], then: [ReplaceSelf("core:stone")])]))),
 ]
