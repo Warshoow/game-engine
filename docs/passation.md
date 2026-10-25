@@ -1,4 +1,4 @@
-# Passation de session — 2026-10-08
+# Passation de session — 2026-10-25
 
 > Document de reprise pour une session Claude fraîche. Lire ceci, puis
 > `CLAUDE.md` (racine) et `docs/brief/voxel-engine-design.md` (canonique)
@@ -18,7 +18,9 @@ items au sol compris), les **recettes sans station** et les **fenêtres de
 jeu** avec le menu de fabrication (#45, #46).
 Plus le **rechargement du contenu en jeu** (touche R, #17) et les **blocs
 générés par IA en jeu** (touche I, #18 + #44), validés sous Windows. Et le
-**worldgen en donnée** (#27 : biomes, minerais, arbres), en attente de
+**worldgen en donnée** (#27 : biomes, minerais, arbres), les **blocs à
+trous** (#22 : feuilles, verre) et les **blocs qui évoluent seuls** (#34 :
+minuteurs `After` + tick aléatoire `Tick`, le blé), en attente de
 validation Windows.
 
 1. Chunk généré depuis la seed (heightmap fBm maison, **grottes** par
@@ -141,8 +143,9 @@ WSL le rendu est logiciel et rame — normal.
   code, c'est voulu).
 - **Comportement = règles en donnée** (`BlockData::rules`, évaluées par
   `voxel_core::rules::actions`, appliquées par `interact.rs`). Hooks
-  `Used`/`Placed`/`Broken`, conditions `Holding`/`EmptyHand`/`HoldingAny`,
-  effets `ReplaceSelf`/`Drop`/`StoreHeld`/`Craft`.
+  `Used`/`Placed`/`Broken`/`Tick`/`After`, conditions
+  `Holding`/`EmptyHand`/`HoldingAny`/`Chance`/`Above`, effets
+  `ReplaceSelf`/`Drop`/`StoreHeld`/`Craft`.
   Vocabulaire **append-only** (§3.6) : ajouter des variantes, ne jamais en
   renommer ni supprimer. Un `ReplaceSelf` ne redéclenche aucun hook.
 - **Block-entities** (§3.3) : `VoxelWorld` garde une map position →
@@ -173,12 +176,13 @@ assets/content/       core.ron (le contenu) ; assets/textures/ (PNG) ; assets/sh
 crates/voxel_core/    TOUT le cœur voxel, PUR (zéro dépendance Bevy, testable headless)
   registry.rs         registre append-only §3.1 (IDs = index d'insertion)
   chunk.rs            chunk paletté §3.2 (dense u16 + palette locale)
-  world.rs            VoxelWorld : registre + chunks + conversions voxel↔mètres
+  world.rs            VoxelWorld : registre + chunks + conversions voxel↔mètres, horloge, minuteurs
   worldgen.rs         trait WorldGenerator, HeightmapGenerator (relief, grottes), Worldgen (biomes, minerais, features en donnée)
   mesher.rs           greedy meshing (naïf conservé en oracle) → MeshData (tampons purs)
   physics.rs          AABB vs grille, région balayée (anti-tunneling)
   raycast.rs          DDA Amanatides & Woo (visée voxel + face d'entrée)
   rules.rs            règles hook → condition → effet (évaluation pure)
+  ticks.rs            tick aléatoire : quels voxels reçoivent le hook Tick
   crafting.rs         recherche de recette (station ou inventaire)
   texgen.rs           textures calculées (motif + couleur + bruit + graine), déterministes
   generate.rs         prompt envoyé au générateur, validation de sa réponse (accept)
@@ -245,11 +249,16 @@ retourne le code de `tail`). Vérifier `EXIT=$?` explicitement.
 - **Français** pour le code commenté et les docs ; **commits en anglais**
   depuis le 2026-10-08 (règle dans `CLAUDE.md`).
 - **Jamais de trailer `Co-Authored-By`** dans les commits (demande explicite).
-- Commits soignés et descriptifs, un par étape logique, **seulement sur
-  demande explicite** (« commit », ou validation après « je commite quand tu
-  valides ») ; push seulement sur demande.
+- Commits soignés et descriptifs, un par étape logique, **sans demander**
+  une fois l'étape vérifiée (tests + clippy) ; **push seulement sur
+  demande** (Warshow pousse).
 - **Pas de questionnaire** : proposer une reco tranchée avec ses raisons,
   Warshow corrige (il a écarté le craft par proximité, préféré l'établi).
+- **Ne pas copier Minecraft par défaut** (2026-10-22) : signaler les défauts
+  connus de la solution « à la Minecraft » et proposer mieux ; la garder si
+  elle est vraiment bonne. Sur un choix de mécanisme, Warshow aime voir
+  l'éventail des options (coûts perf/mémoire compris) avant de trancher, et
+  faire noter les options écartées dans un ticket (ex. #48).
 - **Pédagogie** : projet d'apprentissage — expliquer le *pourquoi* des
   concepts (meshing, layout mémoire, déterminisme…) dans les réponses ET
   dans `docs/journal.md`, tenu à jour à chaque étape.
@@ -330,10 +339,23 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
 - Worldgen en donnée (#27, `4bc3951`), blocs à trous (#22, `6eb1e50`) et
   blocs qui évoluent seuls (#34) : en attente de validation Windows.
 
+## Fait dans la session du 2026-10-21 → 22
+
+- #27 worldgen en donnée (`4bc3951`), #22 blocs à trous (`6eb1e50`), #34
+  blocs qui évoluent seuls (`4c69645`). Détail dans `docs/journal.md`.
+- Tickets créés : #47 (mesh opaque séparé si le profilage le montre), #48
+  (options écartées ou reportées de #34 : voisin modifié → avec #28,
+  rattrapage du tick aléatoire, avance à heure fixe).
+- **Non poussé** au 2026-10-25 : 6 commits depuis `origin/master`. #22,
+  #27 et #34 se ferment au push (`Closes`).
+
 ## Prochaines étapes
 
 Ordre décidé avec Warshow (2026-10-08) : **`docs/jalons.md`, « Suite :
-ordre des tickets ouverts »**. #45, #46, #17, #18 + #44, #27, #22, #34 faits ; suivant : **#28 eau et
+ordre des tickets ouverts »**. #45, #46, #17, #18 + #44, #27, #22, #34 faits.
+**D'abord : valider #27, #22 et #34 sur le build Windows** (arbres et
+feuilles percées, verre, blé : casser de l'herbe → graine, la poser,
+2 min). Ensuite : **#28 eau et
 lave** — avec le semi-transparent (`Blend`, reporté de #22) et le hook
 « voisin modifié » (#48). Ce qui a été reporté (#18, #27) est listé
 dans `docs/jalons.md`, « Plus tard ».

@@ -82,7 +82,14 @@ file is shown on screen and the game keeps its current content. `drops` says
 what a block gives when broken (absent: itself; `Some([])`: nothing).
 `rules` gives a block behaviour as data: `(on: Used, when: [Holding("…")],
 then: [ReplaceSelf("…"), Drop("…")])` — see `crates/voxel_core/src/rules.rs`
-and the lamp in `core.ron`.
+and the lamp in `core.ron`. Blocks can change on their own: `on: After(60.0)`
+fires 60 s after the block appears (exact, saved, catches up while you are
+away: the wheat), `on: Tick` fires at random, about once a minute (background
+changes: dirt turning back into grass). Conditions `Chance(0.2)` and
+`Above("…")` (the block on top). The worldgen refuses blocks with `After`.
+
+**Blocks with holes**: `alpha: Mask` lets you see through the transparent
+pixels of a block's textures (leaves, glass).
 
 **Textures**: `texture: Some((side: "stone"))` names a PNG in
 `assets/textures/` (without `.png`); `top` and `bottom` are optional
@@ -92,7 +99,9 @@ drawn in its `color`, which items also use. A texture can also be computed
 by the engine instead of read from a PNG: declare it in `generated_textures:
 [(name: "…", pattern: Cracks, color: (r, g, b), noise: 0.2, seed: 17)]` and
 cite its name in `texture` (patterns: `Plain`, `Cracks`, `Planks`, `Spots`,
-`Frame`; same seed, same pixels).
+`Frame`; same seed, same pixels). `holes: 0.3` makes that share of pixels
+transparent, pattern lines are kept (`Frame` with `holes: 1.0` keeps only the
+frame: the glass).
 
 **World generation** is data too: `assets/content/worldgen.ron` sets the
 relief, the biomes (surface and under blocks per climate range), the ores
@@ -122,7 +131,8 @@ Never reorder or remove entries: their position is their ID.
 
 The world is saved in `saves/world/` (next to `Cargo.toml`, or next to the
 `.exe`): placed and broken blocks, workbench contents, player position and
-inventory, items lying on the ground. Delete the folder to start a new world.
+inventory, items lying on the ground, the world clock and pending block
+timers. Delete the folder to start a new world.
 
 ## Layout
 
@@ -130,7 +140,7 @@ inventory, items lying on the ground. Delete the folder to start a new world.
 src/                  Bevy binary: plugs the core into the ECS
   main.rs             setup (save/registry → world), texture array, mesh conversion, HUD
   player.rs           FPS controller (simulated in FixedUpdate)
-  interact.rs         place/break/use, applies block rules
+  interact.rs         place/break/use, applies block rules, block ticks and timers
   streaming.rs        loading/unloading chunks (read from the save, else generated)
   items.rs            items on the ground, items shown on a workbench
   inventory.rs        inventory, hotbar, crafting menu (C), G (debug)
@@ -142,12 +152,13 @@ assets/               content (core.ron), textures (PNG), shaders (voxel.wgsl)
 crates/voxel_core/    the WHOLE voxel core: pure, no Bevy dependency
   registry.rs         append-only content registry
   chunk.rs            palette chunk
-  world.rs            VoxelWorld (registry + chunks + voxel↔metre conversions)
+  world.rs            VoxelWorld (registry + chunks + voxel↔metre conversions, clock, timers)
   worldgen.rs         procedural generation (trait + fBm heightmap)
   mesher.rs           greedy meshing → plain buffers
   physics.rs          AABB collision against the grid
   raycast.rs          DDA (voxel picking)
   rules.rs            block rules (pure evaluation)
+  ticks.rs            random ticks: which voxels get the `Tick` hook
   crafting.rs         recipe lookup (station or inventory)
   texgen.rs           textures computed from a pattern, a colour and a seed
   generate.rs         what is sent to the generator, validation of its answer
