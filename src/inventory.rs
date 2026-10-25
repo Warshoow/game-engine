@@ -198,7 +198,7 @@ pub fn click_recipe(
     }
 }
 
-/// Debug — touche G : un exemplaire de chaque bloc solide du registre, pour
+/// Debug — touche G : un exemplaire de chaque bloc solide ou liquide du registre, pour
 /// essayer un contenu qui n'existe pas dans le monde généré. Découvert dans
 /// le registre, aucune liste en dur.
 pub fn give_all_blocks(
@@ -210,7 +210,7 @@ pub fn give_all_blocks(
         return;
     }
     for (id, entry) in game.world.registry.iter() {
-        if entry.block().is_some_and(|b| b.solid) {
+        if entry.block().is_some_and(|b| b.solid || b.liquid.is_some()) {
             inventory.add(id);
         }
     }
