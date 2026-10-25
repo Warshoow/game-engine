@@ -5,6 +5,14 @@
 //! on voit à travers les trous, donc la terre dessous garde sa face ; entre
 //! deux feuilles, la face commune n'apporterait que du travail au GPU.
 //!
+//! **Liquides et semi-transparent** (#28) : un chunk donne deux meshes. Le
+//! premier porte l'opaque et les blocs à trous ; le second les blocs
+//! `alpha: Blend` (l'eau), que le moteur de rendu dessine après le reste. Un
+//! liquide est meshé sans être solide ; quand rien du même liquide n'est
+//! au-dessus de lui, sa surface est abaissée selon son niveau
+//! ([`crate::liquids::height`]). Deux faces de hauteurs différentes ne
+//! fusionnent pas : la hauteur fait partie de la clé de fusion.
+//!
 //! **Étape 1 (culling naïf)** : un chunk plein de pierre n'a pas besoin de
 //! 32³ cubes — seules les faces **au contact de l'air** existent
 //! visuellement. On émet une face uniquement si le voisin dans cette
@@ -36,8 +44,12 @@
 //! placée par l'ECS, pas par le mesher).
 
 use crate::chunk::{Chunk, ChunkPos};
+use crate::liquids;
 use crate::registry::{Alpha, ContentId, Registry};
 use crate::world::VoxelWorld;
+
+/// Hauteur d'une face pleine dans la clé de fusion (sur 255).
+const FULL: u8 = u8::MAX;
 
 /// Couche d'un bloc sans texture.
 pub const NO_TEXTURE: u32 = u32::MAX;
@@ -80,7 +92,7 @@ impl MeshData {
 /// bordure est émise. C'est la variante « chunk isolé » (tests, outillage) —
 /// en jeu, préférer [`mesh_chunk_in_world`] qui raccorde les chunks entre eux.
 pub fn mesh_chunk(chunk: &Chunk, registry: &Registry, voxel_size_m: f32) -> MeshData {
-    mesh_chunk_with(chunk, registry, voxel_size_m, |_| None)
+    mesh_chunk_with(chunk, registry, voxel_size_m, false, |_| None, |_| None)
 }
 
 /// Meshe le chunk `pos` en interrogeant le **monde** pour les voxels hors
@@ -89,8 +101,9 @@ pub fn mesh_chunk(chunk: &Chunk, registry: &Registry, voxel_size_m: f32) -> Mesh
 /// compte comme de l'air : ses faces de bordure sont émises, et il faudra
 /// re-mesher ce chunk quand le voisin apparaîtra (streaming).
 ///
-/// `None` si le chunk n'est pas chargé.
-pub fn mesh_chunk_in_world(world: &VoxelWorld, pos: ChunkPos, voxel_size_m: f32) -> Option<MeshData> {
+/// Rend `[le reste, le semi-transparent]` ; `None` si le chunk n'est pas
+/// chargé.
+pub fn mesh_chunk_in_world(world: &VoxelWorld, pos: ChunkPos, voxel_size_m: f32) -> Option<[MeshData; 2]> {
     let chunk = world.chunk(pos)?;
     let size = world.chunk_size() as i64;
     let base = [
@@ -98,45 +111,71 @@ pub fn mesh_chunk_in_world(world: &VoxelWorld, pos: ChunkPos, voxel_size_m: f32)
         pos.y as i64 * size,
         pos.z as i64 * size,
     ];
-    Some(mesh_chunk_with(chunk, &world.registry, voxel_size_m, |p| {
-        world.voxel([
-            base[0] + p[0] as i64,
-            base[1] + p[1] as i64,
-            base[2] + p[2] as i64,
-        ])
-    }))
+    let at = |p: [i32; 3]| [base[0] + p[0] as i64, base[1] + p[1] as i64, base[2] + p[2] as i64];
+    let reg = &world.registry;
+    let vpm = world.voxels_per_meter();
+    let mesh = |blend| {
+        mesh_chunk_with(chunk, reg, voxel_size_m, blend, |p| world.voxel(at(p)), |p| {
+            world.liquid(world.voxel(at(p))?).map(|l| liquids::height(world.liquid_level(at(p)), liquids::reach(&l, vpm)))
+        })
+    };
+    Some([mesh(false), mesh(true)])
 }
 
 /// Cœur du greedy : `outside` donne le contenu des coordonnées (locales au
 /// chunk) hors bornes, `None` = rien (air) — c'est là que se joue le raccord.
+/// `blend` : la passe semi-transparente, sinon le reste. `surface` : la
+/// hauteur d'un liquide sous de l'air (part de voxel), `None` pour un bloc
+/// plein.
 fn mesh_chunk_with(
     chunk: &Chunk,
     registry: &Registry,
     voxel_size_m: f32,
+    blend: bool,
     outside: impl Fn([i32; 3]) -> Option<ContentId>,
+    surface: impl Fn([i32; 3]) -> Option<f32>,
 ) -> MeshData {
     let size = chunk.size() as i32;
     let n = chunk.size() as usize;
     let resolved = resolve_palette(chunk, registry);
+    let inside = |q: [i32; 3]| q.iter().all(|&c| (0..size).contains(&c));
+    let id_at = |q: [i32; 3]| {
+        if inside(q) { Some(resolved[chunk.get_local(q[0] as u32, q[1] as u32, q[2] as u32) as usize].id) } else { outside(q) }
+    };
 
-    // Index de palette de `p` si sa face vers `q` se voit. `p` est toujours
-    // dans le chunk, `q` peut en sortir.
-    let visible_face = |p: [i32; 3], q: [i32; 3]| -> Option<u16> {
+    // (index de palette, hauteur) de `p` si sa face vers `q` se voit. `p`
+    // est toujours dans le chunk, `q` peut en sortir.
+    let visible_face = |p: [i32; 3], q: [i32; 3]| -> Option<(u16, u8)> {
         let idx = chunk.get_local(p[0] as u32, p[1] as u32, p[2] as u32);
-        let hidden = if q.iter().any(|&c| c < 0 || c >= size) {
-            outside(q).is_some_and(|id| hides(&resolve(registry, id), &resolved[idx as usize]))
-        } else {
-            let other = chunk.get_local(q[0] as u32, q[1] as u32, q[2] as u32);
-            hides(&resolved[other as usize], &resolved[idx as usize])
+        let block = &resolved[idx as usize];
+        if !block.drawn || block.blend != blend {
+            return None;
+        }
+        // Un liquide sous autre chose que lui-même a sa surface abaissée.
+        let height = match block.liquid {
+            true if id_at([p[0], p[1] + 1, p[2]]) != Some(block.id) => {
+                surface(p).map_or(FULL, |h| (h * f32::from(FULL)).round() as u8)
+            }
+            _ => FULL,
         };
-        (resolved[idx as usize].solid && !hidden).then_some(idx)
+        let beyond;
+        let neighbor = if inside(q) {
+            Some(&resolved[chunk.get_local(q[0] as u32, q[1] as u32, q[2] as u32) as usize])
+        } else {
+            beyond = outside(q).map(|id| resolve(registry, id));
+            beyond.as_ref()
+        };
+        let hidden = neighbor.is_some_and(|other| hides(other, block));
+        // Surface abaissée : un bloc posé dessus ne la touche pas.
+        let lowered_top = height < FULL && q[1] > p[1];
+        (lowered_top || !hidden).then_some((idx, height))
     };
 
     let mut mesh = MeshData::default();
     // Masque 2D réutilisé pour chaque tranche : None = pas de face visible,
-    // Some(idx) = face visible portant l'index de palette `idx` (la clé de
-    // fusion).
-    let mut mask: Vec<Option<u16>> = vec![None; n * n];
+    // Some(clé) = face visible, la clé de fusion étant (index de palette,
+    // hauteur).
+    let mut mask: Vec<Option<(u16, u8)>> = vec![None; n * n];
 
     // `d` est l'axe de la normale ; `u`/`v` les deux axes du plan de la
     // tranche. (d, u, v) reste une permutation cyclique de (x, y, z) pour
@@ -203,7 +242,7 @@ fn mesh_chunk_with(
                             origin: [iu as i32, iv as i32],
                             extent: [w as i32, h as i32],
                         };
-                        emit_rect(&mut mesh, &quad, normal, &resolved[key as usize], voxel_size_m);
+                        emit_rect(&mut mesh, &quad, normal, &resolved[key.0 as usize], key.1, voxel_size_m);
                     }
                 }
             }
@@ -226,12 +265,19 @@ struct SliceQuad {
     extent: [i32; 2],
 }
 
-fn emit_rect(mesh: &mut MeshData, quad: &SliceQuad, normal: [f32; 3], block: &Resolved, scale: f32) {
+fn emit_rect(mesh: &mut MeshData, quad: &SliceQuad, normal: [f32; 3], block: &Resolved, height: u8, scale: f32) {
     let [d, u, v] = quad.axes;
     // La face d'un voxel `layer` côté +d est dans le plan `layer + 1` ;
     // côté -d, dans le plan `layer`.
     let plane = quad.layer + i32::from(quad.positive);
     let [w, h] = quad.extent;
+    // Surface abaissée (liquide) : le haut du rectangle descend d'autant.
+    let drop = f32::from(FULL - height) / f32::from(FULL);
+    let top = match (d, u, v) {
+        (1, _, _) => if quad.positive { plane } else { i32::MAX },
+        (_, 1, _) => quad.origin[0] + w,
+        _ => quad.origin[1] + h,
+    };
     // Ordre des coins pour un enroulement CCW vu de l'extérieur : comme
     // û × v̂ = d̂ (permutation cyclique), parcourir u puis v est CCW pour la
     // face +d ; pour -d on parcourt v puis u (miroir).
@@ -246,7 +292,8 @@ fn emit_rect(mesh: &mut MeshData, quad: &SliceQuad, normal: [f32; 3], block: &Re
         p[d] = plane;
         p[u] = quad.origin[0] + cu;
         p[v] = quad.origin[1] + cv;
-        let pos = [p[0] as f32 * scale, p[1] as f32 * scale, p[2] as f32 * scale];
+        let y = p[1] as f32 - if p[1] == top { drop } else { 0.0 };
+        let pos = [p[0] as f32 * scale, y * scale, p[2] as f32 * scale];
         push_vertex(mesh, pos, normal, block);
     }
     // Deux triangles CCW sur les coins [0,1,2] et [0,2,3].
@@ -280,6 +327,11 @@ fn push_vertex(mesh: &mut MeshData, pos: [f32; 3], normal: [f32; 3], block: &Res
 struct Resolved {
     id: ContentId,
     solid: bool,
+    /// A des faces : solide ou liquide.
+    drawn: bool,
+    liquid: bool,
+    /// Dessiné dans la passe semi-transparente.
+    blend: bool,
     /// Cache entièrement ce qu'il y a derrière lui.
     opaque: bool,
     color: [f32; 4],
@@ -295,7 +347,16 @@ fn resolve(registry: &Registry, id: ContentId) -> Resolved {
     let Some(b) = registry.get(id).and_then(|e| e.block()) else {
         // ID inconnu du registre : on le rend visible et criard plutôt
         // qu'invisible — un bug de contenu doit se voir.
-        return Resolved { id, solid: true, opaque: true, color: [1.0, 0.0, 1.0, 1.0], layers: [NO_TEXTURE; 3] };
+        return Resolved {
+            id,
+            solid: true,
+            drawn: true,
+            liquid: false,
+            blend: false,
+            opaque: true,
+            color: [1.0, 0.0, 1.0, 1.0],
+            layers: [NO_TEXTURE; 3],
+        };
     };
     // Texture absente ou non chargée : couleur seule.
     let layer = |name: &String| registry.texture_layer(name).unwrap_or(NO_TEXTURE);
@@ -306,14 +367,29 @@ fn resolve(registry: &Registry, id: ContentId) -> Resolved {
             [side, t.top.as_ref().map_or(side, layer), t.bottom.as_ref().map_or(side, layer)]
         }
     };
-    // Texturé : sommets blancs, la couleur vient de l'image.
-    let color = if layers[0] == NO_TEXTURE { [b.color[0], b.color[1], b.color[2], 1.0] } else { [1.0; 4] };
-    Resolved { id, solid: b.solid, opaque: b.alpha == Alpha::Opaque, color, layers }
+    // Texturé : sommets blancs, la couleur vient de l'image. L'opacité
+    // d'un bloc `Blend` passe par l'alpha des sommets.
+    let opacity = if let Alpha::Blend(o) = b.alpha { o } else { 1.0 };
+    let color = if layers[0] == NO_TEXTURE { [b.color[0], b.color[1], b.color[2], opacity] } else { [1.0, 1.0, 1.0, opacity] };
+    let liquid = b.liquid.is_some();
+    Resolved {
+        id,
+        solid: b.solid,
+        drawn: b.solid || liquid,
+        liquid,
+        blend: matches!(b.alpha, Alpha::Blend(_)),
+        opaque: b.alpha == Alpha::Opaque,
+        color,
+        layers,
+    }
 }
 
-/// `neighbor` cache-t-il la face de `block` qui le touche ?
+/// `neighbor` cache-t-il la face de `block` (dessiné) qui le touche ? Un
+/// bloc opaque et solide cache tout ; sinon seul un bloc identique cache
+/// (la face commune ne se verrait pas). Un liquide, même opaque, ne cache
+/// rien d'autre : sa surface est abaissée.
 fn hides(neighbor: &Resolved, block: &Resolved) -> bool {
-    neighbor.solid && (neighbor.opaque || neighbor.id == block.id)
+    neighbor.id == block.id || (neighbor.solid && neighbor.opaque)
 }
 
 // ---------------------------------------------------------------------------
@@ -598,13 +674,45 @@ mod tests {
         world.insert_chunk(a, Chunk::filled(8, stone));
 
         // Seul : 6 faces, comme mesh_chunk.
-        assert_eq!(mesh_chunk_in_world(&world, a, 1.0).unwrap().face_count(), 6);
+        assert_eq!(mesh_chunk_in_world(&world, a, 1.0).unwrap()[0].face_count(), 6);
 
         world.insert_chunk(b, Chunk::filled(8, stone));
         for pos in [a, b] {
-            let mesh = mesh_chunk_in_world(&world, pos, 1.0).unwrap();
+            let [mesh, _] = mesh_chunk_in_world(&world, pos, 1.0).unwrap();
             assert_eq!(mesh.face_count(), 5, "face de bordure non culled en {pos:?}");
         }
+    }
+
+    #[test]
+    fn water_goes_to_the_blend_mesh_with_a_lowered_surface() {
+        let reg = Registry::from_ron(
+            r#"[
+                (identifier: "t:air", kind: Block((solid: false, color: (0.0, 0.0, 0.0)))),
+                (identifier: "t:stone", kind: Block((solid: true, color: (0.5, 0.5, 0.5)))),
+                (identifier: "t:water", kind: Block((solid: false, color: (0.2, 0.3, 0.9), alpha: Blend(0.6),
+                    liquid: Some((spread: 3.0, delay: 0.25))))),
+            ]"#,
+        )
+        .unwrap();
+        let id = |s| reg.lookup(s).unwrap();
+        let mut chunk = Chunk::filled(4, id("t:air"));
+        for (x, z) in (0..4).flat_map(|x| (0..4).map(move |z| (x, z))) {
+            chunk.set(x, 0, z, id("t:stone"));
+        }
+        chunk.set(1, 1, 1, id("t:water"));
+        chunk.set(2, 1, 1, id("t:water"));
+        let mut world = VoxelWorld::new(reg, 4, 1.0);
+        world.insert_chunk(ChunkPos { x: 0, y: 0, z: 0 }, chunk);
+
+        let [solid, blend] = mesh_chunk_in_world(&world, ChunkPos { x: 0, y: 0, z: 0 }, 1.0).unwrap();
+        // L'eau ne cache pas la pierre : le sol reste une seule dalle.
+        assert_eq!(solid.face_count(), 6);
+        // Deux sources côte à côte : dessus fusionné, 2 bouts, 2 côtés
+        // fusionnés ; le dessous est caché par la pierre.
+        assert_eq!(blend.face_count(), 5);
+        let top = blend.positions.iter().map(|p| p[1]).fold(f32::MIN, f32::max);
+        assert!((top - (1.0 + liquids::SURFACE)).abs() < 0.01, "surface à {top}");
+        assert!(blend.colors.iter().all(|c| (c[3] - 0.6).abs() < 1e-6));
     }
 
     #[test]

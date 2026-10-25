@@ -207,6 +207,7 @@ mod tests {
             .into(),
             air,
             material: Handle::default(),
+            blend_material: Handle::default(),
         });
         world.init_resource::<Inventory>();
         world.spawn(Player::at(player_feet));

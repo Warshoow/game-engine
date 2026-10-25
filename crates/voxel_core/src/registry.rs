@@ -72,17 +72,44 @@ pub struct BlockData {
     /// Ce que font les pixels transparents de ses textures (#22).
     #[serde(default)]
     pub alpha: Alpha,
+    /// Le bloc coule (#28, §3.6) : voir [`crate::liquids`]. Un liquide n'est
+    /// jamais solide.
+    #[serde(default)]
+    pub liquid: Option<Liquid>,
+}
+
+/// Réglages d'un liquide (#28). Tout en mètres et en secondes (§2).
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
+pub struct Liquid {
+    /// Distance d'écoulement à plat depuis une source, en mètres.
+    pub spread: f32,
+    /// Temps d'un pas d'écoulement, en secondes : la viscosité.
+    pub delay: f32,
+    /// Deux sources voisines posées sur du solide en créent une troisième.
+    #[serde(default)]
+    pub renewable: bool,
+    /// Freinage de ce qui le traverse, dans [0, 1) : 0 = rien, près de 1 =
+    /// presque figé.
+    #[serde(default = "default_drag")]
+    pub drag: f32,
+}
+
+fn default_drag() -> f32 {
+    0.5
 }
 
 /// Rendu des pixels transparents d'un bloc. Append-only (§3.6) : une save
 /// le cite par son nom.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize, Serialize)]
 pub enum Alpha {
     /// Le bloc cache ce qu'il y a derrière.
     #[default]
     Opaque,
     /// Pixel plein ou vide (feuilles, verre) : derrière se voit par les trous.
     Mask,
+    /// Semi-transparent (eau, #28), avec cette opacité dans [0, 1] : dessiné
+    /// à part, après le reste.
+    Blend(f32),
 }
 
 /// Les textures d'un bloc, par nom (un PNG de `assets/textures/`).
@@ -156,6 +183,7 @@ impl ContentEntry {
                 texture: None,
                 generated_textures: Vec::new(),
                 alpha: Alpha::Opaque,
+                liquid: None,
             }),
             recipes: Vec::new(),
         }
@@ -192,7 +220,7 @@ impl Registry {
         for entry in entries {
             registry.register(entry).map_err(LoadError::Registry)?;
         }
-        registry.check_references()?;
+        registry.validate()?;
         Ok(registry)
     }
 
@@ -212,7 +240,7 @@ impl Registry {
             registry.register(entry).map_err(LoadError::Registry)?;
         }
         registry.textures = snapshot.textures;
-        registry.check_references()?;
+        registry.validate()?;
         Ok(registry)
     }
 
@@ -229,15 +257,18 @@ impl Registry {
                 }
             }
         }
-        self.check_references()
+        self.validate()
     }
 
-    /// Une référence vers une entrée inexistante est refusée au chargement,
-    /// pas découverte à la première casse.
-    pub(crate) fn check_references(&self) -> Result<(), LoadError> {
+    /// Une référence vers une entrée inexistante, ou un réglage hors de ses
+    /// bornes, est refusé au chargement, pas découvert en jeu.
+    pub(crate) fn validate(&self) -> Result<(), LoadError> {
         let registry = self;
         for (_, entry) in registry.iter() {
             let block = entry.block();
+            if let Some(reason) = block.and_then(invalid_value) {
+                return Err(LoadError::Invalid { id: entry.identifier.clone(), reason });
+            }
             let drops = block.into_iter().flat_map(|b| b.drops.iter().flatten());
             let rules = block.into_iter().flat_map(|b| b.rules.iter().flat_map(Rule::references));
             let recipes = entry
@@ -396,6 +427,8 @@ pub enum LoadError {
     UnknownReference { from: String, to: String },
     /// PNG absent, illisible ou de mauvaise taille.
     Texture { name: String, reason: String },
+    /// Un réglage hors de ses bornes.
+    Invalid { id: String, reason: String },
 }
 
 impl fmt::Display for LoadError {
@@ -409,7 +442,27 @@ impl fmt::Display for LoadError {
                 write!(f, "{from} cite {to}, absent du registre")
             }
             Self::Texture { name, reason } => write!(f, "texture {name} : {reason}"),
+            Self::Invalid { id, reason } => write!(f, "{id} : {reason}"),
         }
+    }
+}
+
+/// Ce qui cloche dans les réglages d'un bloc, s'il y a quelque chose.
+fn invalid_value(b: &BlockData) -> Option<String> {
+    if let Alpha::Blend(o) = b.alpha
+        && !(0.0..=1.0).contains(&o)
+    {
+        return Some(format!("opacité {o} hors de [0, 1]"));
+    }
+    let l = b.liquid?;
+    if b.solid {
+        Some("un liquide n'est pas solide".into())
+    } else if l.spread.is_nan() || l.spread <= 0.0 || !(0.0..).contains(&l.delay) {
+        Some(format!("liquide : spread {} doit être > 0 et delay {} >= 0", l.spread, l.delay))
+    } else if !(0.0..1.0).contains(&l.drag) {
+        Some(format!("liquide : drag {} hors de [0, 1)", l.drag))
+    } else {
+        None
     }
 }
 
@@ -619,5 +672,20 @@ mod tests {
         let reg = Registry::new();
         assert_eq!(reg.lookup("core:nope"), None);
         assert_eq!(reg.get(ContentId(42)), None);
+    }
+
+    #[test]
+    fn liquid_and_blend_settings_out_of_bounds_are_refused() {
+        let load = |block: &str| Registry::from_ron(&format!(r#"[(identifier: "t:x", kind: Block(({block})))]"#));
+        assert!(load("solid: false, color: (0.0, 0.0, 1.0), alpha: Blend(0.6), liquid: Some((spread: 7.0, delay: 0.25))").is_ok());
+        for bad in [
+            "solid: true, color: (0.0, 0.0, 1.0), liquid: Some((spread: 7.0, delay: 0.25))",
+            "solid: false, color: (0.0, 0.0, 1.0), liquid: Some((spread: 0.0, delay: 0.25))",
+            "solid: false, color: (0.0, 0.0, 1.0), liquid: Some((spread: 7.0, delay: -1.0))",
+            "solid: false, color: (0.0, 0.0, 1.0), liquid: Some((spread: 7.0, delay: 0.25, drag: 1.0))",
+            "solid: false, color: (0.0, 0.0, 1.0), alpha: Blend(1.5)",
+        ] {
+            assert!(matches!(load(bad), Err(LoadError::Invalid { .. })), "{bad}");
+        }
     }
 }

@@ -85,8 +85,11 @@ pub fn apply_content(
     // ajoute une couche, son indice sortait de l'ancien array et le GPU le
     // ramenait à la dernière couche). L'ancienne image est libérée avec
     // son handle.
-    if let Some(mut material) = materials.get_mut(&game.material) {
-        material.extension.array = images.add(array);
+    let array = images.add(array);
+    for handle in [&game.material, &game.blend_material] {
+        if let Some(mut material) = materials.get_mut(handle) {
+            material.extension.array = array.clone();
+        }
     }
     // Couleurs et noms : cubes d'items, barre, menu de fabrication.
     visuals.iter_mut().for_each(|mut v| v.set_changed());

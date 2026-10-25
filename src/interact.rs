@@ -15,6 +15,10 @@
 //! inventaire. Un bloc qui apparaît, quelle qu'en soit la cause, lance ses
 //! minuteurs ([`Edit::set`]).
 //!
+//! Liquides et voisinage (#28) : [`tick_blocks`] traite aussi les réexamens
+//! échus — l'écoulement (`voxel_core::liquids`) puis le hook
+//! `NeighborChanged`.
+//!
 //! Après une écriture, le chunk touché est noté à re-mesher intégralement
 //! ([`DirtyChunks`]). C'est brut (on reconstruit 32³ voxels pour un
 //! changement d'un seul) mais largement assez rapide — et c'est le *même*
@@ -28,7 +32,8 @@ use voxel_core::rules::{self, Action, Context, Hook};
 use voxel_core::ticks;
 use voxel_core::physics::Aabb;
 use voxel_core::raycast::{raycast, RayHit};
-use voxel_core::world::{VoxelWorld, TICKS_PER_SECOND};
+use voxel_core::liquids;
+use voxel_core::world::{neighbors, VoxelWorld, MAX_UPDATES_PER_TICK, TICKS_PER_SECOND};
 
 use crate::player::{CursorCaptured, Player, PLAYER_HEIGHT_M, PLAYER_WIDTH_M, PlayerCamera};
 use crate::inventory::Inventory;
@@ -178,6 +183,7 @@ fn context(game: &GameWorld, holding: Option<ContentId>, tick: u64, voxel: [i64;
         holding,
         seed: rules::event_seed(game.generator.terrain.seed, tick, voxel),
         above: game.world.voxel([voxel[0], voxel[1] + 1, voxel[2]]),
+        neighbors: neighbors(voxel).map(|n| game.world.voxel(n)),
     }
 }
 
@@ -297,8 +303,9 @@ fn voxel_overlaps_player(
 }
 
 /// Blocs qui évoluent seuls (#34), au tick fixe : tick aléatoire (`Tick`)
-/// dans les chunks affichés, puis minuteurs échus (`After`) partout où le
-/// chunk est en mémoire.
+/// dans les chunks affichés, puis minuteurs échus (`After`) et réexamens
+/// échus (liquides, `NeighborChanged`, #28) partout où le chunk est en
+/// mémoire.
 pub fn tick_blocks(
     mut commands: Commands,
     mut game: ResMut<GameWorld>,
@@ -346,6 +353,22 @@ pub fn tick_blocks(
         edit.from = timer.due;
         edit.late = timer.late.saturating_add(u8::from(timer.due < now));
         edit.apply(voxel, &actions);
+    }
+    // Réexamens échus (#28) : le liquide suit ses voisins, puis le bloc
+    // réagit à son voisinage s'il a une règle `NeighborChanged`.
+    (edit.from, edit.late) = (now, 0);
+    let air = edit.game.air;
+    for voxel in edit.game.world.take_due_updates(MAX_UPDATES_PER_TICK) {
+        if let Some((id, level)) = liquids::update(&mut edit.game.world, air, voxel) {
+            edit.set(voxel, id);
+            edit.game.world.set_liquid_level(voxel, level);
+        }
+        let Some(block) = edit.game.world.voxel(voxel) else { continue };
+        if rules::has_rule(&edit.game.world.registry, block, Hook::NeighborChanged) {
+            let ctx = context(edit.game, None, now, voxel);
+            let actions = rules::actions(&edit.game.world.registry, block, Hook::NeighborChanged, ctx);
+            edit.apply(voxel, &actions);
+        }
     }
     dirty.0.extend(changed.0.into_iter().filter(|p| displayed.contains(p)));
 }

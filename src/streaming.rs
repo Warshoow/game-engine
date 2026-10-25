@@ -130,8 +130,8 @@ pub fn stream_chunks(
             // écrasé par un chunk régénéré au prochain édit.
             let saved = save.as_ref().map_or(Ok(None), |s| s.0.read_chunk(pos));
             match saved.unwrap_or_else(|err| panic!("{err}")) {
-                Some((chunk, entities, timers)) => {
-                    game.world.insert_saved_chunk(pos, chunk, entities, timers);
+                Some((chunk, state)) => {
+                    game.world.insert_saved_chunk(pos, chunk, state);
                     storage.0.extend(game.world.block_entity_positions(pos));
                 }
                 None => {
@@ -228,6 +228,7 @@ mod tests {
                 generator: generator.into(),
                 air,
                 material: Handle::default(),
+                blend_material: Handle::default(),
             })
             .add_systems(Update, (stream_chunks, remesh_dirty).chain());
         if let Some(save) = save {

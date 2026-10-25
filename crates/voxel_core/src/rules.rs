@@ -35,6 +35,9 @@ pub enum Hook {
     /// Ces secondes après l'apparition du bloc (#34) : minuteur, voir
     /// [`crate::world::VoxelWorld::start_timers`]. Culture, feu…
     After(f32),
+    /// Le bloc ou l'un de ses six voisins vient de changer (#28), au tick
+    /// suivant. Lave au contact de l'eau…
+    NeighborChanged,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -50,6 +53,8 @@ pub enum Condition {
     Chance(f32),
     /// Le bloc juste au-dessus est cette entrée (#34).
     Above(String),
+    /// L'un des six voisins est cette entrée (#28).
+    Touching(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -80,7 +85,7 @@ impl Rule {
     /// Les identifiers que cite la règle (validés au chargement du registre).
     pub fn references(&self) -> impl Iterator<Item = &String> {
         let conditions = self.when.iter().filter_map(|c| match c {
-            Condition::Holding(id) | Condition::Above(id) => Some(id),
+            Condition::Holding(id) | Condition::Above(id) | Condition::Touching(id) => Some(id),
             Condition::EmptyHand | Condition::HoldingAny | Condition::Chance(_) => None,
         });
         let effects = self.then.iter().filter_map(|e| match e {
@@ -109,6 +114,8 @@ pub struct Context {
     pub seed: u64,
     /// Le bloc au-dessus de celui de la règle (`None` : non chargé).
     pub above: Option<ContentId>,
+    /// Ses six voisins (`None` : non chargé).
+    pub neighbors: [Option<ContentId>; 6],
 }
 
 /// Graine d'un événement : la même seed de monde, le même tick et le même
@@ -161,6 +168,7 @@ fn fire(registry: &Registry, i: usize, r: &Rule, ctx: Context) -> Vec<Action> {
         Condition::HoldingAny => ctx.holding.is_some(),
         Condition::Chance(p) => roll < *p,
         Condition::Above(s) => ctx.above.is_some() && ctx.above == id(s),
+        Condition::Touching(s) => ctx.neighbors.iter().any(|n| n.is_some() && *n == id(s)),
     });
     if !holds {
         return Vec::new();
@@ -291,6 +299,24 @@ mod tests {
         assert_eq!(actions(&reg, id("t:dirt"), Hook::Tick, under(Some(id("t:air")))), vec![Action::SetSelf(id("t:grass"))]);
         assert!(actions(&reg, id("t:dirt"), Hook::Tick, under(Some(id("t:dirt")))).is_empty());
         assert!(actions(&reg, id("t:dirt"), Hook::Tick, under(None)).is_empty());
+    }
+
+    #[test]
+    fn touching_reads_all_six_neighbours() {
+        let reg = Registry::from_ron(
+            r#"[
+                (identifier: "t:water", kind: Block((solid: false, color: (0.0, 0.0, 1.0)))),
+                (identifier: "t:lava", kind: Block((solid: false, color: (1.0, 0.3, 0.0),
+                    rules: [(on: NeighborChanged, when: [Touching("t:water")], then: [ReplaceSelf("t:stone")])]))),
+                (identifier: "t:stone", kind: Block((solid: true, color: (0.5, 0.5, 0.5)))),
+            ]"#,
+        )
+        .unwrap();
+        let id = |s| reg.lookup(s).unwrap();
+        let mut ctx = Context { neighbors: [Some(id("t:stone")); 6], ..Context::default() };
+        assert!(actions(&reg, id("t:lava"), Hook::NeighborChanged, ctx).is_empty());
+        ctx.neighbors[5] = Some(id("t:water"));
+        assert_eq!(actions(&reg, id("t:lava"), Hook::NeighborChanged, ctx), vec![Action::SetSelf(id("t:stone"))]);
     }
 
     #[test]

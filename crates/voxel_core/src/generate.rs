@@ -90,7 +90,7 @@ pub fn accept(registry: &Registry, answer: &str) -> Result<ContentEntry, String>
     // chargement d'un fichier de contenu.
     let mut trial = registry.clone();
     trial.register(entry.clone()).map_err(|_| format!("{} existe déjà", entry.identifier))?;
-    trial.check_references().map_err(|e| e.to_string())?;
+    trial.validate().map_err(|e| e.to_string())?;
     Ok(entry)
 }
 

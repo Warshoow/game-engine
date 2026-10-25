@@ -46,6 +46,8 @@ pub struct GameWorld {
     /// Matériau partagé des chunks : les textures du registre, couleurs aux
     /// sommets pour les blocs sans texture.
     pub material: Handle<VoxelMaterial>,
+    /// Le même, semi-transparent : blocs `alpha: Blend` (eau, #28).
+    pub blend_material: Handle<VoxelMaterial>,
 }
 
 /// `StandardMaterial` (éclairage de Bevy) + les textures des blocs.
@@ -75,6 +77,12 @@ impl MaterialExtension for BlockTextures {
 /// vide passerait pour jamais chargé et serait re-meshé à chaque frame.
 #[derive(Component)]
 pub struct ChunkMesh(pub ChunkPos);
+
+/// L'entité qui porte le mesh semi-transparent d'un chunk (#28), créée avec
+/// celle de [`ChunkMesh`] au même endroit. Une entité à part : Bevy trie les
+/// objets semi-transparents par entité, du plus loin au plus proche.
+#[derive(Component)]
+pub struct BlendMesh(pub ChunkPos);
 
 /// Chunks à (re)mesher cette frame. La pose/casse et le streaming ne meshent
 /// pas eux-mêmes : ils notent ici, et [`remesh_dirty`] meshe une fois par
@@ -205,17 +213,19 @@ fn setup_world(
     //     physique se fige tant que le sol sous le joueur n'est pas chargé.
     let mut world = VoxelWorld::new(registry, meta.chunk_size, meta.voxels_per_meter);
     world.set_tick(save.read_clock().unwrap_or_else(|e| refuse(e)).unwrap_or(0));
-    let material = materials.add(ExtendedMaterial {
-        // La couleur vient des sommets et des textures. Mask : un pixel
-        // transparent est jeté (feuilles, verre, #22).
-        // shortcut: tout le chunk passe par le test d'alpha, opaque compris ;
-        // séparer un mesh opaque si le profilage (#41) le montre (#47).
-        base: StandardMaterial {
-            alpha_mode: AlphaMode::Mask(0.5),
-            ..StandardMaterial::from(Color::WHITE)
-        },
-        extension: BlockTextures { array },
-    });
+    // La couleur vient des sommets et des textures. Mask : un pixel
+    // transparent est jeté (feuilles, verre, #22). Blend : mélangé à ce
+    // qui est derrière (eau, #28).
+    // shortcut: tout le chunk passe par le test d'alpha, opaque compris ;
+    // séparer un mesh opaque si le profilage (#41) le montre (#47).
+    let mut chunk_material = |alpha_mode| {
+        materials.add(ExtendedMaterial {
+            base: StandardMaterial { alpha_mode, ..StandardMaterial::from(Color::WHITE) },
+            extension: BlockTextures { array: array.clone() },
+        })
+    };
+    let material = chunk_material(AlphaMode::Mask(0.5));
+    let blend_material = chunk_material(AlphaMode::Blend);
 
     commands.insert_resource(save::WorldSave(save));
     commands.insert_resource(GameWorld {
@@ -223,6 +233,7 @@ fn setup_world(
         generator,
         air,
         material,
+        blend_material,
     });
 
     // Crosshair + aide minimale (HUD debug — §7 : pas d'UI riche).
@@ -274,66 +285,67 @@ fn setup_world(
 }
 
 /// (Re)meshe les chunks notés dans [`DirtyChunks`] — l'unique chemin de
-/// meshing (génération, streaming, pose/casse). Met à jour l'asset existant,
-/// ajoute/retire le `Mesh3d` si le chunk passe de/à vide, ou spawn l'entité
-/// d'un chunk qui n'en a pas encore.
+/// meshing (génération, streaming, pose/casse). Chaque chunk a deux entités
+/// créées ensemble ([`ChunkMesh`], [`BlendMesh`]), chacune avec son mesh
+/// quand il n'est pas vide.
 pub fn remesh_dirty(
     mut commands: Commands,
     game: Res<GameWorld>,
     mut dirty: ResMut<DirtyChunks>,
     mut meshes: ResMut<Assets<Mesh>>,
     chunk_meshes: Query<(Entity, &ChunkMesh, Option<&Mesh3d>)>,
+    blend_meshes: Query<(Entity, &BlendMesh, Option<&Mesh3d>)>,
 ) {
     if dirty.0.is_empty() {
         return;
     }
     let existing: HashMap<ChunkPos, (Entity, Option<&Mesh3d>)> =
         chunk_meshes.iter().map(|(e, cm, m)| (cm.0, (e, m))).collect();
+    let blend: HashMap<ChunkPos, (Entity, Option<&Mesh3d>)> =
+        blend_meshes.iter().map(|(e, b, m)| (b.0, (e, m))).collect();
     let voxel_size_m = 1.0 / game.world.voxels_per_meter();
 
     for pos in dirty.0.drain() {
-        let Some(data) = mesh_chunk_in_world(&game.world, pos, voxel_size_m) else {
+        let Some([solid, transparent]) = mesh_chunk_in_world(&game.world, pos, voxel_size_m) else {
             continue; // pas de données : rien à mesher
         };
-        match (existing.get(&pos), data.is_empty()) {
-            (Some(&(_, Some(mesh3d))), false) => {
-                // Remplace le contenu de l'asset : l'entité et son handle ne
-                // bougent pas, le GPU reçoit les nouveaux tampons.
-                if let Err(err) = meshes.insert(mesh3d.id(), to_bevy_mesh(data)) {
-                    error!("re-mesh du chunk {pos:?} impossible : {err}");
-                }
-            }
-            (Some(&(entity, Some(mesh3d))), true) => {
-                meshes.remove(mesh3d.id());
-                commands
-                    .entity(entity)
-                    .remove::<(Mesh3d, MeshMaterial3d<VoxelMaterial>)>();
-            }
-            (Some(&(entity, None)), false) => {
-                commands.entity(entity).insert((
-                    Mesh3d(meshes.add(to_bevy_mesh(data))),
-                    MeshMaterial3d(game.material.clone()),
-                ));
-            }
-            (Some(&(_, None)), true) => {}
-            (None, empty) => {
-                let extent = game.world.chunk_size() as f32 * voxel_size_m;
-                let mut entity = commands.spawn((
-                    ChunkMesh(pos),
-                    Transform::from_xyz(
-                        pos.x as f32 * extent,
-                        pos.y as f32 * extent,
-                        pos.z as f32 * extent,
-                    ),
-                ));
-                if !empty {
-                    entity.insert((
-                        Mesh3d(meshes.add(to_bevy_mesh(data))),
-                        MeshMaterial3d(game.material.clone()),
-                    ));
-                }
+        let extent = game.world.chunk_size() as f32 * voxel_size_m;
+        let at = Transform::from_xyz(pos.x as f32 * extent, pos.y as f32 * extent, pos.z as f32 * extent);
+        let (entity, mesh) =
+            existing.get(&pos).copied().unwrap_or_else(|| (commands.spawn((ChunkMesh(pos), at)).id(), None));
+        let (blend_entity, blend_mesh) =
+            blend.get(&pos).copied().unwrap_or_else(|| (commands.spawn((BlendMesh(pos), at)).id(), None));
+        put_mesh(&mut commands, &mut meshes, (entity, mesh), solid, &game.material);
+        put_mesh(&mut commands, &mut meshes, (blend_entity, blend_mesh), transparent, &game.blend_material);
+    }
+}
+
+/// Donne le mesh `data` à l'entité : remplace le contenu de l'asset existant
+/// (l'entité et son handle ne bougent pas, le GPU reçoit les nouveaux
+/// tampons), l'ajoute, ou le retire si `data` est vide.
+fn put_mesh(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    (entity, current): (Entity, Option<&Mesh3d>),
+    data: MeshData,
+    material: &Handle<VoxelMaterial>,
+) {
+    match (current, data.is_empty()) {
+        (Some(mesh3d), false) => {
+            if let Err(err) = meshes.insert(mesh3d.id(), to_bevy_mesh(data)) {
+                error!("re-mesh impossible : {err}");
             }
         }
+        (Some(mesh3d), true) => {
+            meshes.remove(mesh3d.id());
+            commands.entity(entity).remove::<(Mesh3d, MeshMaterial3d<VoxelMaterial>)>();
+        }
+        (None, false) => {
+            commands
+                .entity(entity)
+                .insert((Mesh3d(meshes.add(to_bevy_mesh(data))), MeshMaterial3d(material.clone())));
+        }
+        (None, true) => {}
     }
 }
 

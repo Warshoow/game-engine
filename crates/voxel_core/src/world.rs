@@ -12,7 +12,8 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 
 use crate::chunk::{Chunk, ChunkPos};
-use crate::registry::{ContentId, Registry};
+use crate::liquids;
+use crate::registry::{ContentId, Liquid, Registry};
 use crate::rules;
 
 /// Ticks fixes par seconde (§3.9). Les échéances des minuteurs sont sauvées
@@ -23,6 +24,31 @@ pub const TICKS_PER_SECOND: u32 = 64;
 /// reprendre au rythme normal : une culture (2-3 stades) rattrape tout, un
 /// cycle ne tourne pas des milliers de fois au rechargement.
 pub const MAX_CATCH_UP: u8 = 16;
+
+/// Réexamens de voisinage traités au plus par tick (#28, §3.6) : borne les
+/// réactions en chaîne (un lac qui se vide). Le surplus attend le tick
+/// suivant.
+pub const MAX_UPDATES_PER_TICK: usize = 4096;
+
+/// Les six voisins d'un voxel : ±x, ±z, puis dessus et dessous.
+pub fn neighbors(v: [i64; 3]) -> [[i64; 3]; 6] {
+    let [x, y, z] = v;
+    [[x + 1, y, z], [x - 1, y, z], [x, y, z + 1], [x, y, z - 1], [x, y + 1, z], [x, y - 1, z]]
+}
+
+/// L'état creux d'un chunk, à côté de ses voxels : ce que la save garde
+/// avec lui (§3.10). Positions locales au chunk.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ChunkState {
+    /// Block-entities (§3.3).
+    pub entities: Vec<([u32; 3], Vec<ContentId>)>,
+    /// Minuteurs (#34).
+    pub timers: Vec<([u32; 3], Timer)>,
+    /// Niveau des liquides qui coulent (#28).
+    pub levels: Vec<([u32; 3], u8)>,
+    /// Réexamens programmés : position, échéance (#28).
+    pub updates: Vec<([u32; 3], u64)>,
+}
 
 /// Minuteur d'un bloc (#34) : sa règle `After` n° `rule` se déclenche au
 /// tick `due`.
@@ -61,6 +87,13 @@ pub struct VoxelWorld {
     /// (échéance, position), la plus proche en tête. Une entrée périmée (bloc
     /// changé entre-temps) est ignorée à la sortie, jamais cherchée.
     queue: BinaryHeap<Reverse<(u64, [i64; 3])>>,
+    /// Niveau des liquides qui coulent (#28, §3.2) : absent = source. Un lac
+    /// immobile n'y a aucune ligne.
+    levels: HashMap<[i64; 3], u8>,
+    /// Réexamens programmés (#28) : position → échéance la plus proche.
+    /// Vérité ; `updates` ne sert qu'à trouver les échus, comme `queue`.
+    pending: HashMap<[i64; 3], u64>,
+    updates: BinaryHeap<Reverse<(u64, [i64; 3])>>,
 }
 
 impl VoxelWorld {
@@ -75,25 +108,47 @@ impl VoxelWorld {
             tick: 0,
             timers: HashMap::new(),
             queue: BinaryHeap::new(),
+            levels: HashMap::new(),
+            pending: HashMap::new(),
+            updates: BinaryHeap::new(),
         }
     }
 
-    /// Insère un chunk lu dans la save, avec ses block-entities et ses
-    /// minuteurs (positions locales au chunk).
-    pub fn insert_saved_chunk(
-        &mut self,
-        pos: ChunkPos,
-        chunk: Chunk,
-        entities: Vec<([u32; 3], Vec<ContentId>)>,
-        timers: Vec<([u32; 3], Timer)>,
-    ) {
-        for (local, items) in entities {
+    /// Insère un chunk lu dans la save, avec son état creux.
+    pub fn insert_saved_chunk(&mut self, pos: ChunkPos, chunk: Chunk, state: ChunkState) {
+        for (local, items) in state.entities {
             self.block_entities.insert(self.to_world(pos, local), items);
         }
-        for (local, timer) in timers {
+        for (local, timer) in state.timers {
             self.push_timer(self.to_world(pos, local), timer);
         }
+        for (local, level) in state.levels {
+            self.levels.insert(self.to_world(pos, local), level);
+        }
+        for (local, due) in state.updates {
+            self.schedule_at(self.to_world(pos, local), due);
+        }
         self.insert_chunk(pos, chunk);
+    }
+
+    /// L'état creux du chunk `pos`, trié (fichier stable).
+    pub fn chunk_state(&self, pos: ChunkPos) -> ChunkState {
+        let mut entities = self.chunk_block_entities(pos);
+        entities.sort_by_key(|e| e.0);
+        ChunkState {
+            entities,
+            timers: self.chunk_timers(pos),
+            levels: self.in_chunk(&self.levels, pos),
+            updates: self.in_chunk(&self.pending, pos),
+        }
+    }
+
+    /// Les lignes de `map` dans le chunk `pos`, en positions locales, triées.
+    fn in_chunk<T: Copy + Ord>(&self, map: &HashMap<[i64; 3], T>, pos: ChunkPos) -> Vec<([u32; 3], T)> {
+        let mut out: Vec<_> =
+            map.iter().filter(|(v, _)| self.split(**v).0 == pos).map(|(&v, &x)| (self.split(v).1, x)).collect();
+        out.sort();
+        out
     }
 
     /// Les minuteurs du chunk `pos`, en positions locales.
@@ -165,6 +220,61 @@ impl VoxelWorld {
     fn push_timer(&mut self, v: [i64; 3], timer: Timer) {
         self.timers.entry(v).or_default().push(timer);
         self.queue.push(Reverse((timer.due, v)));
+    }
+
+    /// Programme un réexamen de `v` dans `ticks` ticks (#28). Déjà
+    /// programmé plus tôt : rien ne change.
+    pub fn schedule(&mut self, v: [i64; 3], ticks: u64) {
+        if self.voxel(v).is_some() {
+            self.schedule_at(v, self.tick + ticks);
+        }
+    }
+
+    fn schedule_at(&mut self, v: [i64; 3], due: u64) {
+        if self.pending.get(&v).is_none_or(|&d| due < d) {
+            self.pending.insert(v, due);
+            self.updates.push(Reverse((due, v)));
+        }
+    }
+
+    /// Retire et rend au plus `max` réexamens échus, par échéance puis
+    /// position (ordre stable : déterministe).
+    pub fn take_due_updates(&mut self, max: usize) -> Vec<[i64; 3]> {
+        let mut due = Vec::new();
+        while due.len() < max
+            && let Some(&Reverse((when, v))) = self.updates.peek()
+            && when <= self.tick
+        {
+            self.updates.pop();
+            // Entrée périmée : remplacée par une échéance plus proche, déjà
+            // traitée.
+            if self.pending.get(&v) == Some(&when) {
+                self.pending.remove(&v);
+                due.push(v);
+            }
+        }
+        due
+    }
+
+    /// Les réglages de liquide du bloc `id`, s'il en est un.
+    pub fn liquid(&self, id: ContentId) -> Option<Liquid> {
+        self.registry.get(id)?.block()?.liquid
+    }
+
+    /// Niveau du liquide qui coule en `v` (§3.2) : `None` pour une source
+    /// (ou ce qui n'est pas un liquide), `Some(0)` pour une chute, sinon la
+    /// distance parcourue à plat, en voxels.
+    pub fn liquid_level(&self, v: [i64; 3]) -> Option<u8> {
+        self.levels.get(&v).copied()
+    }
+
+    /// Fixe le niveau de `v`, après [`Self::set_voxel`] (qui l'efface).
+    pub fn set_liquid_level(&mut self, v: [i64; 3], level: Option<u8>) {
+        match level {
+            Some(l) => self.levels.insert(v, l),
+            None => self.levels.remove(&v),
+        };
+        self.edited.insert(self.split(v).0);
     }
 
     /// Les block-entities du chunk `pos`, en positions locales.
@@ -250,8 +360,17 @@ impl VoxelWorld {
     pub fn set_voxel(&mut self, v: [i64; 3], material: ContentId) -> Option<ChunkPos> {
         let (pos, l) = self.split(v);
         let chunk = self.chunks.get_mut(&pos)?;
+        let old = chunk.get(l[0], l[1], l[2]);
         chunk.set(l[0], l[1], l[2], material);
         self.block_entities.remove(&v);
+        self.levels.remove(&v);
+        // Le voxel et ses voisins sont à réexaminer (#28) : un liquide qui
+        // arrive ou part les touche après son pas, le reste au tick suivant.
+        let ticks = self.liquid(material).or(self.liquid(old)).map_or(1, |l| liquids::step_ticks(&l));
+        self.schedule(v, ticks);
+        for n in neighbors(v) {
+            self.schedule(n, ticks);
+        }
         // Les minuteurs de l'ancien bloc meurent avec lui ; ceux du nouveau,
         // c'est l'appelant qui les lance (`start_timers`), lui sait depuis
         // quand compter.
