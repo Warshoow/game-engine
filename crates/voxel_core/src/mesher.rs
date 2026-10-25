@@ -10,8 +10,10 @@
 //! `alpha: Blend` (l'eau), que le moteur de rendu dessine après le reste. Un
 //! liquide est meshé sans être solide ; quand rien du même liquide n'est
 //! au-dessus de lui, sa surface est abaissée selon son niveau
-//! ([`crate::liquids::height`]). Deux faces de hauteurs différentes ne
-//! fusionnent pas : la hauteur fait partie de la clé de fusion.
+//! ([`crate::liquids::height`]). Entre deux cases du même liquide, seule
+//! la différence de hauteur a une face (une pente d'eau). Deux faces de
+//! hauteurs différentes ne fusionnent pas : la hauteur fait partie de la
+//! clé de fusion.
 //!
 //! **Étape 1 (culling naïf)** : un chunk plein de pierre n'a pas besoin de
 //! 32³ cubes — seules les faces **au contact de l'air** existent
@@ -143,21 +145,26 @@ fn mesh_chunk_with(
         if inside(q) { Some(resolved[chunk.get_local(q[0] as u32, q[1] as u32, q[2] as u32) as usize].id) } else { outside(q) }
     };
 
-    // (index de palette, hauteur) de `p` si sa face vers `q` se voit. `p`
-    // est toujours dans le chunk, `q` peut en sortir.
-    let visible_face = |p: [i32; 3], q: [i32; 3]| -> Option<(u16, u8)> {
+    // Hauteur du liquide `id` en `p` (sur 255) : sous autre chose que
+    // lui-même, sa surface est abaissée.
+    let height_at = |p: [i32; 3], id: ContentId| {
+        if id_at([p[0], p[1] + 1, p[2]]) == Some(id) {
+            FULL
+        } else {
+            surface(p).map_or(FULL, |h| (h * f32::from(FULL)).round() as u8)
+        }
+    };
+
+    // (index de palette, haut, bas) de `p` si sa face vers `q` se voit ;
+    // haut et bas sur 255, `FULL` et 0 pour une face entière. `p` est
+    // toujours dans le chunk, `q` peut en sortir.
+    let visible_face = |p: [i32; 3], q: [i32; 3]| -> Option<(u16, u8, u8)> {
         let idx = chunk.get_local(p[0] as u32, p[1] as u32, p[2] as u32);
         let block = &resolved[idx as usize];
         if !block.drawn || block.blend != blend {
             return None;
         }
-        // Un liquide sous autre chose que lui-même a sa surface abaissée.
-        let height = match block.liquid {
-            true if id_at([p[0], p[1] + 1, p[2]]) != Some(block.id) => {
-                surface(p).map_or(FULL, |h| (h * f32::from(FULL)).round() as u8)
-            }
-            _ => FULL,
-        };
+        let height = if block.liquid { height_at(p, block.id) } else { FULL };
         let beyond;
         let neighbor = if inside(q) {
             Some(&resolved[chunk.get_local(q[0] as u32, q[1] as u32, q[2] as u32) as usize])
@@ -165,17 +172,24 @@ fn mesh_chunk_with(
             beyond = outside(q).map(|id| resolve(registry, id));
             beyond.as_ref()
         };
+        // Côté d'un liquide contre le même liquide plus bas : seule la
+        // différence de hauteur se voit (une pente d'eau, une chute dans un
+        // lac).
+        if block.liquid && q[1] == p[1] && neighbor.is_some_and(|o| o.id == block.id) {
+            let theirs = height_at(q, block.id);
+            return (theirs < height).then_some((idx, height, theirs));
+        }
         let hidden = neighbor.is_some_and(|other| hides(other, block));
         // Surface abaissée : un bloc posé dessus ne la touche pas.
         let lowered_top = height < FULL && q[1] > p[1];
-        (lowered_top || !hidden).then_some((idx, height))
+        (lowered_top || !hidden).then_some((idx, height, 0))
     };
 
     let mut mesh = MeshData::default();
     // Masque 2D réutilisé pour chaque tranche : None = pas de face visible,
     // Some(clé) = face visible, la clé de fusion étant (index de palette,
-    // hauteur).
-    let mut mask: Vec<Option<(u16, u8)>> = vec![None; n * n];
+    // haut, bas).
+    let mut mask: Vec<Option<(u16, u8, u8)>> = vec![None; n * n];
 
     // `d` est l'axe de la normale ; `u`/`v` les deux axes du plan de la
     // tranche. (d, u, v) reste une permutation cyclique de (x, y, z) pour
@@ -242,7 +256,7 @@ fn mesh_chunk_with(
                             origin: [iu as i32, iv as i32],
                             extent: [w as i32, h as i32],
                         };
-                        emit_rect(&mut mesh, &quad, normal, &resolved[key.0 as usize], key.1, voxel_size_m);
+                        emit_rect(&mut mesh, &quad, normal, &resolved[key.0 as usize], [key.1, key.2], voxel_size_m);
                     }
                 }
             }
@@ -265,18 +279,21 @@ struct SliceQuad {
     extent: [i32; 2],
 }
 
-fn emit_rect(mesh: &mut MeshData, quad: &SliceQuad, normal: [f32; 3], block: &Resolved, height: u8, scale: f32) {
+/// `[haut, bas]` : la part de voxel couverte (sur 255), voir `visible_face`.
+fn emit_rect(mesh: &mut MeshData, quad: &SliceQuad, normal: [f32; 3], block: &Resolved, [top_h, bottom_h]: [u8; 2], scale: f32) {
     let [d, u, v] = quad.axes;
     // La face d'un voxel `layer` côté +d est dans le plan `layer + 1` ;
     // côté -d, dans le plan `layer`.
     let plane = quad.layer + i32::from(quad.positive);
     let [w, h] = quad.extent;
-    // Surface abaissée (liquide) : le haut du rectangle descend d'autant.
-    let drop = f32::from(FULL - height) / f32::from(FULL);
-    let top = match (d, u, v) {
-        (1, _, _) => if quad.positive { plane } else { i32::MAX },
-        (_, 1, _) => quad.origin[0] + w,
-        _ => quad.origin[1] + h,
+    // Liquide : le haut du rectangle descend à sa surface, le bas d'un côté
+    // monte à la surface du voisin plus bas.
+    let drop = f32::from(FULL - top_h) / f32::from(FULL);
+    let lift = f32::from(bottom_h) / f32::from(FULL);
+    let (top, bottom) = match (d, u, v) {
+        (1, _, _) => (if quad.positive { plane } else { i32::MAX }, i32::MIN),
+        (_, 1, _) => (quad.origin[0] + w, quad.origin[0]),
+        _ => (quad.origin[1] + h, quad.origin[1]),
     };
     // Ordre des coins pour un enroulement CCW vu de l'extérieur : comme
     // û × v̂ = d̂ (permutation cyclique), parcourir u puis v est CCW pour la
@@ -292,7 +309,13 @@ fn emit_rect(mesh: &mut MeshData, quad: &SliceQuad, normal: [f32; 3], block: &Re
         p[d] = plane;
         p[u] = quad.origin[0] + cu;
         p[v] = quad.origin[1] + cv;
-        let y = p[1] as f32 - if p[1] == top { drop } else { 0.0 };
+        let mut y = p[1] as f32;
+        if p[1] == top {
+            y -= drop;
+        }
+        if p[1] == bottom {
+            y += lift;
+        }
         let pos = [p[0] as f32 * scale, y * scale, p[2] as f32 * scale];
         push_vertex(mesh, pos, normal, block);
     }
@@ -713,6 +736,18 @@ mod tests {
         let top = blend.positions.iter().map(|p| p[1]).fold(f32::MIN, f32::max);
         assert!((top - (1.0 + liquids::SURFACE)).abs() < 0.01, "surface à {top}");
         assert!(blend.colors.iter().all(|c| (c[3] - 0.6).abs() < 1e-6));
+
+        // L'eau coule à côté de la source, plus bas : le côté de la source
+        // se voit, de la surface de l'eau qui coule à la sienne.
+        world.set_liquid_level([2, 1, 1], Some(1));
+        let [_, blend] = mesh_chunk_in_world(&world, ChunkPos { x: 0, y: 0, z: 0 }, 1.0).unwrap();
+        let low = 1.0 + liquids::height(Some(1), 3);
+        let step: Vec<f32> = (0..blend.positions.len())
+            .filter(|&i| blend.normals[i] == [1.0, 0.0, 0.0] && (blend.positions[i][0] - 2.0).abs() < 1e-6)
+            .map(|i| blend.positions[i][1])
+            .collect();
+        assert_eq!(step.len(), 4, "une face entre la source et l'eau qui coule");
+        assert!(step.iter().all(|&y| (y - low).abs() < 0.01 || (y - (1.0 + liquids::SURFACE)).abs() < 0.01), "{step:?}");
     }
 
     #[test]

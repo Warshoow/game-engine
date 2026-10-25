@@ -249,9 +249,7 @@ Reportés en cours de route (à reprendre quand un besoin concret arrive) :
   aujourd'hui une feature = colonne + boule ; minerais qui donnent un item
   plutôt qu'eux-mêmes.
 - **Liquides (#28, détail dans #49)** : direction préférée vers un trou ;
-  liquide qui emporte graines et fleurs (avec leurs drops) ; faces entre
-  deux niveaux d'un même liquide (petit jour visible sur une pente) ;
-  seau ; dégâts de la lave (pas de système de vie) ; fond de mer propre
+  liquide qui emporte graines et fleurs (avec leurs drops) ; seau ; dégâts de la lave (pas de système de vie) ; fond de mer propre
   au biome (aujourd'hui sa surface : de l'herbe sous l'eau) ; volume
   conservé en option par liquide.
 

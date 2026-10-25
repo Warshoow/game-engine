@@ -917,3 +917,11 @@ remonter sur une berge d'un bloc).
 **Worldgen.** `sea` optionnel : l'air sous un niveau devient le liquide
 (des sources, immobiles tant que rien ne les touche). Pas d'arbre dont le
 pied est sous la mer : le tronc dépassait de l'eau sans pied.
+
+**Correctif après le test Windows (même jour).** Warshow : on ne voyait
+que les dessus des liquides. Le mesher cachait toute face entre deux cases
+du même liquide ; sur une pente, les dessus descendent en marches et rien
+ne ferme les marches, et au bord l'eau n'a que quelques centimètres. Une
+face de côté contre le même liquide est maintenant dessinée de la surface
+du voisin à la sienne, quand le voisin est plus bas ; haut et bas entrent
+dans la clé de fusion du greedy.
