@@ -30,6 +30,10 @@ const WALK_SPEED_M_S: f32 = 5.0;
 /// jeu — la quasi-totalité des jeux la gonflent.
 pub const GRAVITY_M_S2: f32 = 22.0;
 const JUMP_SPEED_M_S: f32 = 7.5;
+/// Dans un liquide (#28) : vitesse de remontée en nageant, et de chute
+/// maximale (on coule doucement).
+const SWIM_UP_M_S: f32 = 3.0;
+const SINK_M_S: f32 = 2.0;
 const MOUSE_SENSITIVITY: f32 = 0.002;
 
 pub struct PlayerPlugin;
@@ -170,12 +174,28 @@ pub fn physics_step(
         // Tournée par le yaw seul : regarder le sol ne ralentit pas la marche.
         let dir = (Quat::from_rotation_y(player.yaw) * wish).normalize_or_zero();
 
+        // Liquide aux pieds (#28) : freiné de son `drag`, la gravité aussi.
+        // Saut tenu : on nage vers le haut ; tête hors du liquide, on saute
+        // (c'est ce qui permet de remonter sur la berge).
+        let feet = player.feet;
+        let liquid_at = |height_m: f32| {
+            let v = game.world.voxel_at_m((feet + Vec3::Y * height_m).to_array());
+            game.world.voxel(v).and_then(|id| game.world.liquid(id))
+        };
+        let wet = liquid_at(0.1);
+        let slow = 1.0 - wet.map_or(0.0, |l| l.drag);
+
         // Vitesse horizontale directe (pas d'inertie — style Minecraft),
         // verticale intégrée (gravité + saut).
-        player.velocity.x = dir.x * WALK_SPEED_M_S;
-        player.velocity.z = dir.z * WALK_SPEED_M_S;
-        player.velocity.y -= GRAVITY_M_S2 * dt;
-        if player.grounded && keys_on(KeyCode::Space) {
+        player.velocity.x = dir.x * WALK_SPEED_M_S * slow;
+        player.velocity.z = dir.z * WALK_SPEED_M_S * slow;
+        player.velocity.y -= GRAVITY_M_S2 * slow * dt;
+        if wet.is_some() {
+            player.velocity.y = player.velocity.y.max(-SINK_M_S);
+        }
+        if wet.is_some() && keys_on(KeyCode::Space) {
+            player.velocity.y = if liquid_at(EYE_HEIGHT_M).is_some() { SWIM_UP_M_S } else { JUMP_SPEED_M_S };
+        } else if player.grounded && keys_on(KeyCode::Space) {
             player.velocity.y = JUMP_SPEED_M_S;
         }
 
