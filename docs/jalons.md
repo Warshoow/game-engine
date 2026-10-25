@@ -215,8 +215,10 @@ quand une mesure la réclame.
 5. **#22 → #34 → #28** — blocs transparents, puis blocs qui changent seuls
    au tick, puis eau et lave (dépend des deux premiers). #28 apporte aussi
    le semi-transparent (`Blend`) laissé de côté par #22.
-6. **#23 éclairage réel + #7 coins de grottes assombris, puis #30
-   jour/nuit** — le jour/nuit n'a de sens qu'avec un vrai éclairage.
+6. **#23 éclairage réel + #7 coins de grottes assombris, puis #51 effets
+   de rendu et #30 jour/nuit** — le jour/nuit n'a de sens qu'avec un vrai
+   éclairage. #7 fait le 2026-10-25 (ombrage par sommet, options écartées
+   dans #50).
 7. **#14 / #15 → #32 → #33** — formes non cubiques et modèles, puis mobs,
    puis vie et survie. #33 est un choix de jeu : du contenu que `core.ron`
    active, pas une règle du moteur.

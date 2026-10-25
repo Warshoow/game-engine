@@ -925,3 +925,43 @@ ne ferme les marches, et au bord l'eau n'a que quelques centimètres. Une
 face de côté contre le même liquide est maintenant dessinée de la surface
 du voisin à la sienne, quand le voisin est plus bas ; haut et bas entrent
 dans la clé de fusion du greedy.
+
+## 2026-10-25 — Coins assombris (#7)
+
+Warshow craignait un système trop simple, loin du rendu des packs de
+shaders Minecraft. Ces packs ajoutent des effets au rendu de l'image
+(ombres du soleil, brouillard, bloom, reflets) et gardent l'ombrage des
+coins de Minecraft de base : les deux se cumulent. Les effets ont leur
+ticket (#51), après l'éclairage réel.
+
+**Retenu : l'ombre par sommet, calculée au meshing.** Comparé à l'ombrage
+calculé sur l'image par Bevy (coût à chaque image, dépend de l'angle de
+vue) et à un calcul par pixel depuis une grille du chunk envoyée au GPU
+(un matériau par chunk). C'est la seule option qui ne coûte rien au repos,
+et un éclairage lissé par sommet (#23) lira les mêmes voisins. Détail :
+#50.
+
+**Le calcul.** Un sommet regarde, devant la face, ses deux voisins de côté
+et celui du coin : 0 à 3 de lumière, deux côtés pleins ferment le coin.
+L'ombre multiplie la couleur du sommet, pas d'attribut en plus. Fait de
+l'ombre ce qui est solide et opaque ; rien de nouveau dans le registre.
+
+**La fusion reste exacte.** Les ombres des quatre coins entrent dans la
+clé du greedy. Comme l'ombre d'un coin ne dépend que de sa position, deux
+faces voisines de même clé partagent leurs coins communs, donc l'ombre est
+constante le long de la fusion : le rectangle fusionné la rend sans
+l'étirer. L'oracle naïf calcule la même ombre ; le test vérifie chaque
+sommet du greedy contre lui, et un mutant qui fusionne malgré des ombres
+différentes casse deux tests.
+
+**La diagonale.** Le GPU interpole la couleur dans chaque triangle. Coupé
+au mauvais endroit, un coin sombre isolé tire une traînée jusqu'au coin
+opposé : on coupe le long de la diagonale la plus claire.
+
+**Le coût.** Sur `mesh_stats` (50 chunks denses) : 88 655 → 160 375 quads
+(la réduction face au naïf passe de ×4,7 à ×2,6), greedy de 3,2 à 4,3 ms
+par chunk. L'ombre d'une face dépend aussi des chunks en diagonale : un
+chunk qui arrive re-meshe ses 26 voisins affichés au lieu de 6. Si le
+streaming saccade sous Windows : une copie du chunk avec sa bordure
+accélérerait le meshing (#50), et #41 dirait où part le temps.
+

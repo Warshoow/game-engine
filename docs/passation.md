@@ -9,7 +9,7 @@
 
 **La tranche verticale (§7) est complète et dépassée** : les trois piliers
 d'apprentissage du cœur voxel sont construits — stockage (chunk paletté),
-meshing (greedy, ×12,8 vs naïf, fluidité validée en jeu par Warshow même
+meshing (greedy, ×2,6 vs naïf avec l'ombrage des coins sur `mesh_stats`, fluidité validée en jeu par Warshow même
 sous llvmpipe), et **streaming** (§3.4 : monde qui démarre vide, chunks
 générés/déchargés autour du joueur). Les **trois jalons de gameplay** de
 `docs/jalons.md` sont faits (items/inventaire, règles, craft sur l'établi),
@@ -22,7 +22,8 @@ générés par IA en jeu** (touche I, #18 + #44), validés sous Windows. Et le
 trous** (#22 : feuilles, verre), les **blocs qui évoluent seuls** (#34 :
 minuteurs `After` + tick aléatoire `Tick`, le blé) et les **liquides** (#28 :
 eau, lave, mer, nage, semi-transparent), validés sous Windows le
-2026-10-25 (sauf la mer d'un monde neuf, pas encore essayée).
+2026-10-25 (sauf la mer d'un monde neuf, pas encore essayée). Puis
+l'**ombrage des coins** (#7), pas encore vu sous Windows.
 
 1. Chunk généré depuis la seed (heightmap fBm maison, **grottes** par
    bruit 3D, **biomes, minerais, arbres** décrits dans
@@ -66,16 +67,24 @@ WSL le rendu est logiciel et rame — normal.
 
 - **Le mesh d'un chunk dépend de ses voisins** (culling inter-chunks).
   Deux obligations en découlent, déjà codées mais faciles à casser :
-  un chunk qui apparaît → re-mesh de ses voisins affichés ; un voxel
-  édité en bordure → re-mesh du chunk voisin. Oublier l'une = trous.
+  un chunk qui apparaît → re-mesh de ses 26 voisins affichés ; un voxel
+  édité en bordure → re-mesh des chunks voisins, diagonales comprises
+  (jusqu'à 7). Oublier l'une = trous ; oublier les diagonales = ombre
+  des coins fausse le long des arêtes de chunk (#7).
 - **Une face est cachée par un voisin solide opaque, ou par un voisin
   identique** (`mesher::hides`, #22, #28). Le greedy et l'oracle naïf
   partagent cette règle : la changer dans l'un seul casse les tests
   d'équivalence. `solid` = collidable ; meshé = solide ou liquide. Deux
   meshes par chunk (`mesh_chunk_in_world` rend `[reste, Blend]`), deux
   entités (`ChunkMesh`, `BlendMesh`). La clé de fusion du greedy est
-  (index de palette, hauteur) : une surface de liquide abaissée ne fusionne
-  pas avec une pleine.
+  (index de palette, haut, bas, ombres des 4 coins) : une surface de
+  liquide abaissée ne fusionne pas avec une pleine, ni deux faces
+  d'ombres différentes.
+- **Ombrage des coins** (#7) : calculé au meshing (`mesher::face_ao`),
+  jamais stocké ; fait de l'ombre ce qui est solide et opaque
+  (`Resolved::casts_shadow`, la même règle que `hides`). L'ombre d'un coin
+  ne dépend que de sa position : c'est ce qui rend la fusion exacte, et
+  l'oracle naïf la vérifie sommet par sommet.
 - **Liquides** (#28) : le voxel reste l'ID du liquide, son niveau est dans
   `VoxelWorld::levels` (absent = source, `Some(0)` = chute, sinon distance
   à plat en voxels). `set_voxel` efface le niveau : écrire le niveau
@@ -204,13 +213,13 @@ crates/voxel_core/    TOUT le cœur voxel, PUR (zéro dépendance Bevy, testable
   save.rs             dossier du monde, format binaire des chunks
 ```
 
-Règle de séparation stricte : logique voxel → `voxel_core` (85 tests
+Règle de séparation stricte : logique voxel → `voxel_core` (87 tests
 headless, ~0 s), le binaire ne fait que brancher dans l'ECS.
 
 ## Vérifications avant de conclure une étape
 
 ```bash
-cargo test --workspace                    # 92 tests (85 cœur + 7 binaire), headless
+cargo test --workspace                    # 94 tests (87 cœur + 7 binaire), headless
 cargo test -- --ignored claude            # génération réelle par claude (~6 s)
 cargo clippy --workspace --all-targets    # zéro warning exigé
 cargo run                                 # smoke test à l'occasion
@@ -373,17 +382,22 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   niveaux. Pas encore essayé : la mer d'un monde neuf.
 - Méthode « explorer avant de coder un mécanisme » ajoutée à `CLAUDE.md`.
 - **Non poussé** : `c823006` et le commit de docs qui suit.
+- #7 ombrage des coins (`30d7f35`). Design doc amendé d'abord (§3.8).
+  Coût mesuré (`mesh_stats`, 50 chunks denses) : 88 655 → 160 375 quads,
+  greedy 3,2 → 4,3 ms par chunk. Options écartées : #50. Effets de rendu
+  (ombres du soleil, brouillard, bloom, SSAO, reflets) : #51, après #23.
+  Build Windows déposé, pas encore vu par Warshow.
 
 ## Prochaines étapes
 
 Ordre décidé avec Warshow (2026-10-08) : **`docs/jalons.md`, « Suite :
 ordre des tickets ouverts »**. #45, #46, #17, #18 + #44, #27, #22, #34, #28
 faits et validés sous Windows (reste à voir : la mer, dans un monde neuf).
-Ensuite, choisi avec Warshow le 2026-10-25 : **#7 coins assombris**
-(ambient occlusion par sommet dans le mesher ; mesurer combien de faces le
-greedy ne fusionne plus), puis **#23 éclairage réel** (lève un non-goal
-§7 : phase exploratoire complète d'abord, voir `CLAUDE.md`), puis #30
-jour/nuit. Ce qui a été reporté (#18, #27, #28) est listé
+#7 coins assombris fait, à voir sous Windows (pied des murs, coins de
+grotte ; saccades au streaming : le re-mesh des 26 voisins coûte plus).
+Ensuite, choisi avec Warshow le 2026-10-25 : **#23 éclairage réel** (lève
+un non-goal §7 : phase exploratoire complète d'abord, voir `CLAUDE.md`),
+puis #51 effets de rendu et #30 jour/nuit. Ce qui a été reporté (#18, #27, #28) est listé
 dans `docs/jalons.md`, « Plus tard », et dans #49.
 Principe (design doc §2) : le moteur fournit des mécanismes, `core.ron`
 n'est qu'un jeu d'exemple. Mipmaps si les textures scintillent au loin.
