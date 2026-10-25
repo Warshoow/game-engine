@@ -386,15 +386,17 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   Coût mesuré (`mesh_stats`, 50 chunks denses) : 88 655 → 160 375 quads,
   greedy 3,2 → 4,3 ms par chunk. Options écartées : #50. Effets de rendu
   (ombres du soleil, brouillard, bloom, SSAO, reflets) : #51, après #23.
-  Build Windows déposé, pas encore vu par Warshow.
+  Vu sous Windows (PC sans GPU) : rien de particulier.
 
 ## Prochaines étapes
 
 Ordre décidé avec Warshow (2026-10-08) : **`docs/jalons.md`, « Suite :
 ordre des tickets ouverts »**. #45, #46, #17, #18 + #44, #27, #22, #34, #28
 faits et validés sous Windows (reste à voir : la mer, dans un monde neuf).
-#7 coins assombris fait, à voir sous Windows (pied des murs, coins de
-grotte ; saccades au streaming : le re-mesh des 26 voisins coûte plus).
+#7 coins assombris fait, vu sous Windows par Warshow : rien de
+particulier. Mais le PC de test n'a pas de GPU (rendu logiciel) et le jeu
+y était déjà peu fluide avant #7 : **#41 profilage à faire sur le PC avec
+RTX 4060** (méthode, scénarios et solutions possibles dans le ticket).
 Ensuite, choisi avec Warshow le 2026-10-25 : **#23 éclairage réel** (lève
 un non-goal §7 : phase exploratoire complète d'abord, voir `CLAUDE.md`),
 puis #51 effets de rendu et #30 jour/nuit. Ce qui a été reporté (#18, #27, #28) est listé
