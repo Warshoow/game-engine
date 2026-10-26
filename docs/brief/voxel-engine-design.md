@@ -189,6 +189,15 @@ Le hasard des règles (condition `Chance`) dérive de la seed, du numéro de tic
 
 **Ombrage des coins** (ajout 2026-10-25, #7). Le mesher assombrit chaque sommet d'une face selon les blocs qui l'entourent, devant la face (trois voisins : deux côtés et le coin). Calculé à chaque meshing, jamais stocké ni sauvé : il suit l'invariant ci-dessus. Un bloc fait de l'ombre s'il est solide et opaque, ce que le registre dit déjà ; les liquides et le semi-transparent n'en reçoivent pas. Le greedy ne fusionne que des faces au même ombrage. Écartés : l'ombrage calculé sur l'image par Bevy (coût à chaque image, dépend de l'angle de vue ; reste cumulable plus tard), et le calcul par pixel depuis une grille du chunk envoyée au GPU (un matériau par chunk). Détail : #50.
 
+**Lumière du ciel et des blocs** (ajout 2026-10-26, #23 ; lève le non-goal « éclairage réel » de §7). Propagation de case en case, à la Minecraft, sur deux lumières séparées par case : celle du ciel et celle des blocs.
+- **Ciel** : pleine sous un ciel ouvert, elle descend sans perte tant que rien ne l'arrête, et perd en s'étalant sur le côté ou vers le haut. Sa portée sur le côté est une constante du moteur en mètres (15 m). Un chunk sans données au-dessus de lui est sous le ciel ouvert : le streaming charge d'abord ce qui est au-dessus, sauf si le générateur garantit qu'il n'y a rien (au-dessus de son altitude maximale, et pas dans la save).
+- **Blocs** : un bloc qui déclare `emits_light` (portée en mètres) éclaire autour de lui, la lumière baisse jusqu'à zéro à cette distance.
+- **Ce qui arrête la lumière** : un bloc solide et opaque, comme pour l'ombrage des coins. Un bloc peut déclarer `light_loss` : la distance traversée en lui compte en plus (1,0 = un mètre d'eau coûte deux mètres de portée) ; c'est ce qui assombrit la mer avec la profondeur.
+- Les niveaux sont gardés en quarts de case (portée en mètres convertie à la résolution du monde, §3.5), un octet par lumière et par case, une seule valeur pour un chunk uniforme (air au soleil, roche pleine). **Jamais sauvés** : recalculés à l'arrivée d'un chunk et à chaque voxel modifié, dans la même frame (pas au tick suivant : une torche posée s'allume tout de suite). La lumière est une fonction des voxels, donc déterministe : une règle pourra la lire.
+- **Rendu** : le mesher lit la lumière des mêmes cases que l'ombrage des coins (moyenne des cases non opaques autour du coin) et la met dans chaque sommet, ciel et blocs séparés. Le shader multiplie l'éclairage du soleil et de l'ambiance par la lumière du ciel et ajoute celle des blocs, d'une teinte chaude unique. Le jour/nuit (#30) n'aura qu'à baisser la lumière du ciel dans le shader, sans re-mesher. Deux faces ne fusionnent que si leurs coins ont la même lumière.
+
+Écartés ou reportés : lumière lue par pixel (texture 3D par chunk), vraies lumières de Bevy (gardées pour le soleil, #51), ciel par hauteur seule, couleur par bloc, éclairage par lancer de rayons, lumière sauvée avec le chunk. Détail et coûts : #52.
+
 ### 3.9 Simulation — tick fixe / frame variable
 
 **Décision.** Logique de jeu en **tick fixe déterministe** (`FixedUpdate`, seedé) ; rendu en **frame variable**.
@@ -257,7 +266,7 @@ On ne les fige **pas**. On fige seulement la *forme* indiquée, et on laisse le 
 - *Wasm* : sandboxé, multi-langage, la réponse « écosystème de mods sérieux / untrusted ». Plus lourd.
 - **Reco : `mlua` en v1**, wasm comme chemin de graduation si un jour on ouvre les mods à du code tiers non-confiance.
 
-**Algorithme d'éclairage.** L'invariant est figé (§3.8), pas l'algo. **Reco : différer** — full-bright (ou skylight trivial) pour la tranche verticale, vrai éclairage ensuite.
+**Algorithme d'éclairage.** L'invariant est figé (§3.8), pas l'algo. **Reco : différer** — full-bright (ou skylight trivial) pour la tranche verticale, vrai éclairage ensuite. *Tranché le 2026-10-26 (#23) : propagation de case en case, ciel et blocs séparés, voir §3.8.*
 
 **Dimensions de chunk.** **Reco : 32³** comme défaut (le format stocke ses propres dims → ajustable). Compromis draw-calls / coût de meshing.
 
@@ -319,7 +328,7 @@ Le premier livrable qui **prouve que les fondations tiennent**. Pas une couche d
 4. **Se déplacer** dessus : caméra + collision basique.
 
 **Non-goals explicites de la tranche** (à ne PAS faire maintenant, pour ne pas déraper) :
-- éclairage réel (full-bright OK) ;
+- éclairage réel (full-bright OK) — *levé le 2026-10-26 par #23 (§3.8)* ;
 - smooth / densité ;
 - sous-grilles mobiles / véhicules ;
 - script runtime complet (le « un vrai bloc » peut passer par une def data minimale, la couche script vient juste après) ;
