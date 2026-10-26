@@ -26,6 +26,25 @@ pub struct ChunkPos {
     pub z: i32,
 }
 
+/// Les chunks dont le mesh lit le voxel `v` (coordonnées monde) : le sien,
+/// et ceux qu'il touche s'il est au bord — le culling, l'ombrage des coins
+/// et la lumière lisent les cases autour d'une face, diagonales comprises.
+/// Peut répéter un chunk.
+pub fn meshes_reading(v: [i64; 3], size: u32) -> impl Iterator<Item = ChunkPos> {
+    let s = size as i64;
+    let offsets = v.map(|c| match c.rem_euclid(s) {
+        0 => [-1, 0],
+        l if l == s - 1 => [0, 1],
+        _ => [0, 0],
+    });
+    let p = v.map(|c| c.div_euclid(s) as i32);
+    offsets[0].into_iter().flat_map(move |dx| {
+        offsets[1].into_iter().flat_map(move |dy| {
+            offsets[2].into_iter().map(move |dz| ChunkPos { x: p[0] + dx, y: p[1] + dy, z: p[2] + dz })
+        })
+    })
+}
+
 /// Un chunk cubique : palette locale + tableau dense d'indices.
 #[derive(Debug, Clone)]
 pub struct Chunk {

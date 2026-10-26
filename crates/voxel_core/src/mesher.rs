@@ -24,6 +24,12 @@
 //! ombre constante le long de la fusion, et le rectangle fusionné la rend
 //! exactement.
 //!
+//! **Lumière** (#23) : chaque sommet porte la lumière du ciel et celle des
+//! blocs ([`crate::light`]), moyennées sur les cases autour du coin qui ne
+//! font pas d'ombre — les mêmes cases que l'ombrage. Comme l'ombre, elle
+//! entre dans la clé de fusion, et pour la même raison la fusion reste
+//! exacte.
+//!
 //! **Étape 1 (culling naïf)** : un chunk plein de pierre n'a pas besoin de
 //! 32³ cubes — seules les faces **au contact de l'air** existent
 //! visuellement. On émet une face uniquement si le voisin dans cette
@@ -69,6 +75,12 @@ const AO_LIGHT: [f32; 4] = [0.45, 0.65, 0.82, 1.0];
 /// Ombres d'une face sans ombrage : les quatre coins à 3.
 const NO_SHADE: u8 = u8::MAX;
 
+/// Lumière des quatre coins d'une face, au rang `cu + 2 cv` comme les
+/// ombres : `[ciel, blocs]` en niveaux × 12 / nombre de cases moyennées
+/// (12 se divise par 1 à 4 cases : la moyenne reste entière, donc
+/// comparable dans la clé de fusion).
+type Lights = [[u16; 2]; 4];
+
 /// Couche d'un bloc sans texture.
 pub const NO_TEXTURE: u32 = u32::MAX;
 
@@ -84,6 +96,8 @@ pub struct MeshData {
     pub uvs: Vec<[f32; 2]>,
     /// Couche du texture array par sommet ; [`NO_TEXTURE`] : couleur seule.
     pub layers: Vec<u32>,
+    /// `[ciel, blocs]` par sommet, dans [0, 1] (1 : le ciel ouvert).
+    pub lights: Vec<[f32; 2]>,
     /// Triangles, en sens antihoraire (CCW) vu de l'extérieur — la
     /// convention de face avant de Bevy/wgpu.
     pub indices: Vec<u32>,
@@ -110,7 +124,7 @@ impl MeshData {
 /// bordure est émise. C'est la variante « chunk isolé » (tests, outillage) —
 /// en jeu, préférer [`mesh_chunk_in_world`] qui raccorde les chunks entre eux.
 pub fn mesh_chunk(chunk: &Chunk, registry: &Registry, voxel_size_m: f32) -> MeshData {
-    mesh_chunk_with(chunk, registry, voxel_size_m, false, |_| None, |_| None)
+    mesh_chunk_with(chunk, registry, voxel_size_m, false, |_| None, |_| None, |_| [1, 0], 1)
 }
 
 /// Meshe le chunk `pos` en interrogeant le **monde** pour les voxels hors
@@ -132,10 +146,21 @@ pub fn mesh_chunk_in_world(world: &VoxelWorld, pos: ChunkPos, voxel_size_m: f32)
     let at = |p: [i32; 3]| [base[0] + p[0] as i64, base[1] + p[1] as i64, base[2] + p[2] as i64];
     let reg = &world.registry;
     let vpm = world.voxels_per_meter();
+    let full = world.full_light();
+    // Sa propre lumière lue sans passer par la table des chunks.
+    let own = world.chunk_light(pos);
+    let s = size as i32;
+    let light = |p: [i32; 3]| match own {
+        Some([sky, block]) if p.iter().all(|&c| (0..s).contains(&c)) => {
+            let i = (p[0] + s * (p[1] + s * p[2])) as usize;
+            [sky.get(i), block.get(i)]
+        }
+        _ => world.light_at(at(p)),
+    };
     let mesh = |blend| {
         mesh_chunk_with(chunk, reg, voxel_size_m, blend, |p| world.voxel(at(p)), |p| {
             world.liquid(world.voxel(at(p))?).map(|l| liquids::height(world.liquid_level(at(p)), liquids::reach(&l, vpm)))
-        })
+        }, light, full)
     };
     Some([mesh(false), mesh(true)])
 }
@@ -144,7 +169,9 @@ pub fn mesh_chunk_in_world(world: &VoxelWorld, pos: ChunkPos, voxel_size_m: f32)
 /// chunk) hors bornes, `None` = rien (air) — c'est là que se joue le raccord.
 /// `blend` : la passe semi-transparente, sinon le reste. `surface` : la
 /// hauteur d'un liquide sous de l'air (part de voxel), `None` pour un bloc
-/// plein.
+/// plein. `light` : `[ciel, blocs]` d'une case, dans ou hors du chunk ;
+/// `full` : le niveau du ciel ouvert.
+#[allow(clippy::too_many_arguments)]
 fn mesh_chunk_with(
     chunk: &Chunk,
     registry: &Registry,
@@ -152,6 +179,8 @@ fn mesh_chunk_with(
     blend: bool,
     outside: impl Fn([i32; 3]) -> Option<ContentId>,
     surface: impl Fn([i32; 3]) -> Option<f32>,
+    light: impl Fn([i32; 3]) -> [u8; 2],
+    full: u8,
 ) -> MeshData {
     let size = chunk.size() as i32;
     let n = chunk.size() as usize;
@@ -180,11 +209,11 @@ fn mesh_chunk_with(
         }
     };
 
-    // (index de palette, haut, bas, ombres) de `p` si sa face vers `q` se
-    // voit ; haut et bas sur 255, `FULL` et 0 pour une face entière ; ombres
-    // des quatre coins ([`face_ao`]). `p` est toujours dans le chunk, `q`
-    // peut en sortir.
-    let visible_face = |p: [i32; 3], q: [i32; 3], axes: [usize; 3]| -> Option<(u16, u8, u8, u8)> {
+    // (index de palette, haut, bas, ombres, lumière) de `p` si sa face vers
+    // `q` se voit ; haut et bas sur 255, `FULL` et 0 pour une face entière ;
+    // ombres et lumière des quatre coins ([`face_ao`], [`face_light`]). `p`
+    // est toujours dans le chunk, `q` peut en sortir.
+    let visible_face = |p: [i32; 3], q: [i32; 3], axes: [usize; 3]| -> Option<Key> {
         let idx = chunk.get_local(p[0] as u32, p[1] as u32, p[2] as u32);
         let block = &resolved[idx as usize];
         if !block.drawn || block.blend != blend {
@@ -203,7 +232,7 @@ fn mesh_chunk_with(
         // lac).
         if block.liquid && q[1] == p[1] && neighbor.is_some_and(|o| o.id == block.id) {
             let theirs = height_at(q, block.id);
-            return (theirs < height).then_some((idx, height, theirs, NO_SHADE));
+            return (theirs < height).then(|| (idx, height, theirs, NO_SHADE, face_light(occludes, &light, q, axes)));
         }
         let hidden = neighbor.is_some_and(|other| hides(other, block));
         // Surface abaissée : un bloc posé dessus ne la touche pas.
@@ -213,14 +242,14 @@ fn mesh_chunk_with(
         }
         // Les liquides et le semi-transparent ne reçoivent pas d'ombre.
         let ao = if block.liquid || blend { NO_SHADE } else { face_ao(occludes, q, axes) };
-        Some((idx, height, 0, ao))
+        Some((idx, height, 0, ao, face_light(occludes, &light, q, axes)))
     };
 
     let mut mesh = MeshData::default();
     // Masque 2D réutilisé pour chaque tranche : None = pas de face visible,
     // Some(clé) = face visible, la clé de fusion étant (index de palette,
-    // haut, bas, ombres).
-    let mut mask: Vec<Option<(u16, u8, u8, u8)>> = vec![None; n * n];
+    // haut, bas, ombres, lumière).
+    let mut mask: Vec<Option<Key>> = vec![None; n * n];
 
     // `d` est l'axe de la normale ; `u`/`v` les deux axes du plan de la
     // tranche. (d, u, v) reste une permutation cyclique de (x, y, z) pour
@@ -287,7 +316,7 @@ fn mesh_chunk_with(
                             origin: [iu as i32, iv as i32],
                             extent: [w as i32, h as i32],
                         };
-                        emit_rect(&mut mesh, &quad, normal, &resolved[key.0 as usize], [key.1, key.2], key.3, voxel_size_m);
+                        emit_rect(&mut mesh, &quad, normal, &resolved[key.0 as usize], [key.1, key.2], (key.3, key.4, full), voxel_size_m);
                     }
                 }
             }
@@ -295,6 +324,9 @@ fn mesh_chunk_with(
     }
     mesh
 }
+
+/// Clé de fusion du greedy : (index de palette, haut, bas, ombres, lumière).
+type Key = (u16, u8, u8, u8, Lights);
 
 /// Un rectangle fusionné dans le plan d'une tranche, avant projection en 3D.
 struct SliceQuad {
@@ -310,9 +342,10 @@ struct SliceQuad {
     extent: [i32; 2],
 }
 
-/// `[haut, bas]` : la part de voxel couverte (sur 255) ; `ao` : les ombres
-/// des coins ; voir `visible_face`.
-fn emit_rect(mesh: &mut MeshData, quad: &SliceQuad, normal: [f32; 3], block: &Resolved, [top_h, bottom_h]: [u8; 2], ao: u8, scale: f32) {
+/// `[haut, bas]` : la part de voxel couverte (sur 255) ; `ao`, `lights` : les
+/// ombres et la lumière des coins, `full` le niveau du ciel ouvert ; voir
+/// `visible_face`.
+fn emit_rect(mesh: &mut MeshData, quad: &SliceQuad, normal: [f32; 3], block: &Resolved, [top_h, bottom_h]: [u8; 2], (ao, lights, full): (u8, Lights, u8), scale: f32) {
     let [d, u, v] = quad.axes;
     // La face d'un voxel `layer` côté +d est dans le plan `layer + 1` ;
     // côté -d, dans le plan `layer`.
@@ -339,6 +372,7 @@ fn emit_rect(mesh: &mut MeshData, quad: &SliceQuad, normal: [f32; 3], block: &Re
     let mut shades = [0; 4];
     for (i, [cu, cv]) in corners.into_iter().enumerate() {
         shades[i] = corner_shade(ao, cu > 0, cv > 0);
+        let light = corner_light(lights, full, cu > 0, cv > 0);
         let mut p = [0i32; 3];
         p[d] = plane;
         p[u] = quad.origin[0] + cu;
@@ -351,7 +385,7 @@ fn emit_rect(mesh: &mut MeshData, quad: &SliceQuad, normal: [f32; 3], block: &Re
             y += lift;
         }
         let pos = [p[0] as f32 * scale, y * scale, p[2] as f32 * scale];
-        push_vertex(mesh, pos, normal, block, AO_LIGHT[shades[i] as usize]);
+        push_vertex(mesh, pos, normal, block, AO_LIGHT[shades[i] as usize], light);
     }
     push_quad_indices(mesh, base, shades);
 }
@@ -386,6 +420,43 @@ fn corner_shade(ao: u8, high_u: bool, high_v: bool) -> u8 {
     (ao >> (2 * (u8::from(high_u) + 2 * u8::from(high_v)))) & 3
 }
 
+/// La lumière des quatre coins de la face dont la cellule devant est `q` :
+/// pour chaque coin, la moyenne des cases qui l'entourent devant la face
+/// (celles de [`face_ao`] et `q`), sans celles qui font de l'ombre — elles
+/// sont noires, la lumière ne les traverse pas. Un coin fermé par ses deux
+/// côtés ne voit pas la case du coin.
+fn face_light(occludes: impl Fn([i32; 3]) -> bool, light: impl Fn([i32; 3]) -> [u8; 2], q: [i32; 3], [_, u, v]: [usize; 3]) -> Lights {
+    let mut lights = [[0; 2]; 4];
+    for (cu, cv) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+        let (su, sv) = (if cu == 1 { 1 } else { -1 }, if cv == 1 { 1 } else { -1 });
+        let mut side_u = q;
+        side_u[u] += su;
+        let mut side_v = q;
+        side_v[v] += sv;
+        let mut corner = side_u;
+        corner[v] += sv;
+        let (ou, ov) = (occludes(side_u), occludes(side_v));
+        let cells = [(q, true), (side_u, !ou), (side_v, !ov), (corner, !(ou && ov || occludes(corner)))];
+        let (mut sum, mut count) = ([0u16; 2], 0u16);
+        for (cell, counted) in cells {
+            if counted {
+                let l = light(cell);
+                sum = [sum[0] + u16::from(l[0]), sum[1] + u16::from(l[1])];
+                count += 1;
+            }
+        }
+        lights[cu + 2 * cv] = sum.map(|x| x * 12 / count);
+    }
+    lights
+}
+
+/// La lumière du coin (`high_u`, `high_v`), dans [0, 1].
+fn corner_light(lights: Lights, full: u8, high_u: bool, high_v: bool) -> [f32; 2] {
+    let [sky, block] = lights[usize::from(high_u) + 2 * usize::from(high_v)];
+    let unit = 12.0 * f32::from(full);
+    [f32::from(sky) / unit, f32::from(block) / unit]
+}
+
 /// Deux triangles CCW sur les 4 coins du quad. Le GPU interpole la couleur
 /// dans chaque triangle : on coupe le long de la diagonale la plus claire,
 /// pour qu'un coin sombre isolé reste dans un seul triangle au lieu de
@@ -398,7 +469,7 @@ fn push_quad_indices(mesh: &mut MeshData, base: u32, shades: [u8; 4]) {
 
 /// Un sommet : position, normale, couleur, et sa texture (couche +
 /// coordonnées en mètres, prises dans le plan de la face).
-fn push_vertex(mesh: &mut MeshData, pos: [f32; 3], normal: [f32; 3], block: &Resolved, light: f32) {
+fn push_vertex(mesh: &mut MeshData, pos: [f32; 3], normal: [f32; 3], block: &Resolved, light: f32, sky_block: [f32; 2]) {
     let [x, y, z] = pos;
     // Sur les côtés, v descend avec y : l'image est à l'endroit (le haut du
     // PNG en haut du bloc).
@@ -417,6 +488,7 @@ fn push_vertex(mesh: &mut MeshData, pos: [f32; 3], normal: [f32; 3], block: &Res
     mesh.colors.push([r * light, g * light, b * light, a]);
     mesh.uvs.push(uv);
     mesh.layers.push(layer);
+    mesh.lights.push(sky_block);
 }
 
 /// Ce que le mesher lit d'une entrée de palette, résolu une fois.
@@ -575,7 +647,7 @@ fn emit_quad(mesh: &mut MeshData, voxel: [u32; 3], face: &Face, block: &Resolved
             (voxel[1] + corner[1]) as f32 * scale,
             (voxel[2] + corner[2]) as f32 * scale,
         ];
-        push_vertex(mesh, pos, face.normal, block, AO_LIGHT[shade as usize]);
+        push_vertex(mesh, pos, face.normal, block, AO_LIGHT[shade as usize], [1.0, 0.0]); // l'oracle ignore la lumière
     }
     push_quad_indices(mesh, base, shades);
 }
@@ -584,6 +656,7 @@ fn emit_quad(mesh: &mut MeshData, voxel: [u32; 3], face: &Face, block: &Resolved
 mod tests {
     use super::*;
     use crate::registry::{ContentEntry, Registry};
+    use crate::world::VoxelWorld;
 
     fn test_registry() -> (Registry, ContentId, ContentId) {
         let mut reg = Registry::new();
@@ -989,5 +1062,47 @@ mod tests {
                 assert!(dot > 0.0, "triangle enroulé à l'envers");
             }
         }
+    }
+
+    /// Sous le ciel, le sol est un seul quad en pleine lumière ; une lampe
+    /// posée dessus éclaire les coins voisins et coupe la fusion.
+    #[test]
+    fn faces_carry_sky_and_lamp_light() {
+        let (mut reg, air, stone) = test_registry();
+        let mut lamp = ContentEntry::new_block("core:lamp", true, [1.0; 3]);
+        if let crate::registry::Kind::Block(b) = &mut lamp.kind {
+            b.emits_light = Some(4.0);
+        }
+        let lamp = reg.register(lamp).unwrap();
+        let mut chunk = Chunk::filled(8, air);
+        for x in 0..8 {
+            for z in 0..8 {
+                chunk.set(x, 0, z, stone);
+            }
+        }
+        let pos = ChunkPos { x: 0, y: 0, z: 0 };
+        let mut world = VoxelWorld::new(reg, 8, 1.0);
+        world.insert_chunk(pos, chunk);
+        // Sommets du dessus du sol (y = 1, normale +y) : position → lumière.
+        let floor = |world: &VoxelWorld| {
+            let [mesh, _] = mesh_chunk_in_world(world, pos, 1.0).unwrap();
+            (0..mesh.positions.len())
+                .filter(|&i| mesh.normals[i] == [0.0, 1.0, 0.0] && mesh.positions[i][1] == 1.0)
+                .map(|i| (mesh.positions[i], mesh.lights[i]))
+                .collect::<Vec<_>>()
+        };
+
+        let open = floor(&world);
+        assert_eq!(open.len(), 4, "un seul quad");
+        assert!(open.iter().all(|&(_, l)| l == [1.0, 0.0]));
+
+        world.set_voxel([4, 1, 4], lamp);
+        let lit = floor(&world);
+        assert!(lit.len() > 4, "la lumière coupe la fusion");
+        let at = |p: [f32; 3]| lit.iter().find(|&&(q, _)| q == p).unwrap().1;
+        // Coin de la lampe : moyenne des trois cases d'air autour (8, 12,
+        // 12 niveaux sur 60), la lampe elle-même ne compte pas.
+        assert!((at([4.0, 1.0, 4.0])[1] - 32.0 / 3.0 / 60.0).abs() < 1e-6);
+        assert_eq!(at([0.0, 1.0, 0.0]), [1.0, 0.0], "hors de portée");
     }
 }

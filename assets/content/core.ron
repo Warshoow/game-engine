@@ -22,14 +22,15 @@
         recipes: [(inputs: ["core:stone", "core:stone"], count: 2, station: "core:workbench")]),
 
     // Lampe : un clic droit bascule entre éteinte et allumée (§3.6, règles).
-    // Aucun code Rust ne la connaît. Pas de vraie lumière (non-goal §7) :
-    // seule la couleur change. Allumée, elle se casse en lampe éteinte.
+    // Aucun code Rust ne la connaît. Allumée, elle éclaire à 14 m
+    // (`emits_light`, #23) et se casse en lampe éteinte.
     (identifier: "core:lamp", kind: Block((solid: true, color: (0.30, 0.27, 0.12),
         texture: Some((side: "lamp")),
         rules: [(on: Used, then: [ReplaceSelf("core:lamp_lit")])])),
         recipes: [(inputs: ["core:stone", "core:stone", "core:stone", "core:dirt"], station: "core:workbench")]),
     (identifier: "core:lamp_lit", kind: Block((solid: true, color: (1.0, 0.85, 0.35),
         texture: Some((side: "lamp_lit")),
+        emits_light: Some(14.0),
         drops: Some(["core:lamp"]),
         rules: [(on: Used, then: [ReplaceSelf("core:lamp")])]))),
 
@@ -105,14 +106,16 @@
     // mètres, temps d'un pas en secondes, deux sources voisines en font une
     // troisième (`renewable`), freinage du joueur (`drag`). Posés depuis
     // l'inventaire (touche G), on ne les casse pas.
-    // Eau : semi-transparente (`Blend`, opacité 0.6), rapide.
-    (identifier: "core:water", kind: Block((solid: false, color: (0.20, 0.40, 0.85), alpha: Blend(0.6),
+    // Eau : semi-transparente (`Blend`, opacité 0.6), rapide. Sous elle, la
+    // lumière du ciel porte moins loin (`light_loss`, #23) : on voit le fond
+    // jusqu'à ~10 m.
+    (identifier: "core:water", kind: Block((solid: false, color: (0.20, 0.40, 0.85), alpha: Blend(0.6), light_loss: 0.5,
         texture: Some((side: "water")),
         generated_textures: [(name: "water", pattern: Plain, color: (0.20, 0.40, 0.85), noise: 0.1, seed: 12)],
         liquid: Some((spread: 7.0, delay: 0.25, renewable: true, drag: 0.5))))),
-    // Lave : opaque, lente, épaisse, ne se renouvelle pas. Au contact de
-    // l'eau, elle devient pierre — une règle, aucun code Rust.
-    (identifier: "core:lava", kind: Block((solid: false, color: (0.95, 0.40, 0.05),
+    // Lave : opaque, lente, épaisse, ne se renouvelle pas, éclaire à 15 m.
+    // Au contact de l'eau, elle devient pierre — une règle, aucun code Rust.
+    (identifier: "core:lava", kind: Block((solid: false, color: (0.95, 0.40, 0.05), emits_light: Some(15.0),
         texture: Some((side: "lava")),
         generated_textures: [(name: "lava", pattern: Spots, color: (0.95, 0.40, 0.05), noise: 0.35, seed: 13)],
         liquid: Some((spread: 3.0, delay: 1.5, drag: 0.8)),

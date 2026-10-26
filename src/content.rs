@@ -79,6 +79,7 @@ pub fn apply_content(
     // chunk affiché est à re-mesher.
     let array = texture_array(&registry);
     game.world.registry = registry;
+    game.world.relight();
     dirty.0.extend(chunks.iter().map(|c| c.0));
     // Nouvelle image sous un nouveau handle : remplacer l'image sous le
     // même handle laissait le matériau sur l'ancienne (un bloc généré

@@ -272,6 +272,20 @@ impl Worldgen {
         Ok(Self { terrain, climate_size_m: s.climate_size, biomes, ores, features, sea })
     }
 
+    /// Hauteur maximale d'une feature au-dessus du sol, en mètres.
+    fn reach_m(&self) -> f32 {
+        self.features.iter().map(|f| f.height.1 + f.top.as_ref().map_or(0.0, |t| t.radius)).fold(0.0, f32::max)
+    }
+
+    /// Altitude en mètres au-dessus de laquelle ce générateur ne pose rien :
+    /// un chunk plus haut, s'il n'est pas dans la save, est vide sans le
+    /// générer (le ciel de la lumière, §3.8).
+    pub fn top_m(&self) -> f32 {
+        let t = &self.terrain;
+        let land = t.ground_level_m + t.amplitude_m + self.reach_m();
+        self.sea.as_ref().map_or(land, |sea| land.max(sea.level))
+    }
+
     /// Le biome de la colonne (x, z), en mètres. Hors de toute plage : le
     /// dernier.
     pub fn biome_m(&self, x_m: f32, z_m: f32) -> &Biome<ContentId> {
@@ -301,7 +315,7 @@ impl Worldgen {
         }
         let size = chunk.size() as i64;
         let (ox, oy, oz) = (pos.x as i64 * size, pos.y as i64 * size, pos.z as i64 * size);
-        let reach_m = self.features.iter().map(|f| f.height.1 + f.top.as_ref().map_or(0.0, |t| t.radius)).fold(0.0, f32::max);
+        let reach_m = self.reach_m();
         let (lowest, highest) = (
             self.terrain.ground_level_m - self.terrain.amplitude_m - reach_m,
             self.terrain.ground_level_m + self.terrain.amplitude_m + reach_m,

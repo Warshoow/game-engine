@@ -1,12 +1,15 @@
 //! Compare le coût du culling naïf et du greedy meshing sur les chunks
 //! réels du worldgen (mêmes paramètres que le binaire). Le greedy ne
 //! fusionne que des faces de même ombre (#7) : avant l'ombrage, 88 655 quads.
+//! Puis les mêmes chunks dans un monde : raccord entre chunks et lumière
+//! (#23), qui coupe aussi la fusion.
 //!
 //! Headless : `cargo run -p voxel_core --example mesh_stats`
 
 use voxel_core::chunk::{ChunkPos, CHUNK_SIZE};
-use voxel_core::mesher::{mesh_chunk, mesh_chunk_naive};
+use voxel_core::mesher::{mesh_chunk, mesh_chunk_in_world, mesh_chunk_naive};
 use voxel_core::registry::{ContentEntry, Registry};
+use voxel_core::world::VoxelWorld;
 use voxel_core::worldgen::{HeightmapGenerator, WorldGenerator};
 
 fn main() {
@@ -36,7 +39,9 @@ fn main() {
     let (mut naive_total, mut greedy_total) = (0usize, 0usize);
     let mut gen_time = std::time::Duration::ZERO;
     let mut mesh_time = std::time::Duration::ZERO;
-    for cy in -1..=0 {
+    let mut chunks = Vec::new();
+    // Du haut vers le bas, comme le streaming : la lumière du ciel descend.
+    for cy in [0, -1] {
         for cx in -2..=2 {
             for cz in -2..=2 {
                 let pos = ChunkPos { x: cx, y: cy, z: cz };
@@ -47,9 +52,21 @@ fn main() {
                 let start = std::time::Instant::now();
                 greedy_total += mesh_chunk(&chunk, &registry, 1.0).face_count();
                 mesh_time += start.elapsed();
+                chunks.push((pos, chunk));
             }
         }
     }
+
+    let positions: Vec<ChunkPos> = chunks.iter().map(|(pos, _)| *pos).collect();
+    let mut world = VoxelWorld::new(registry.clone(), CHUNK_SIZE, 1.0);
+    let start = std::time::Instant::now();
+    for (pos, chunk) in chunks {
+        world.insert_chunk(pos, chunk);
+    }
+    let light_time = start.elapsed();
+    let start = std::time::Instant::now();
+    let world_total: usize = positions.iter().map(|&pos| mesh_chunk_in_world(&world, pos, 1.0).unwrap()[0].face_count()).sum();
+    let world_time = start.elapsed();
 
     println!("50 chunks {CHUNK_SIZE}³ (seed 42, couches y = -1 et 0) :");
     println!("  génération   : {:.2} ms/chunk", gen_time.as_secs_f64() * 1000.0 / 50.0);
@@ -61,4 +78,7 @@ fn main() {
         naive_total as f64 / greedy_total as f64,
         100.0 * (1.0 - greedy_total as f64 / naive_total as f64)
     );
+    println!("Dans un monde (raccord entre chunks + lumière) :");
+    println!("  lumière      : {:.2} ms/chunk à l'arrivée", light_time.as_secs_f64() * 1000.0 / 50.0);
+    println!("  greedy       : {:.2} ms/chunk, {world_total} quads", world_time.as_secs_f64() * 1000.0 / 50.0);
 }

@@ -17,12 +17,12 @@ use std::collections::{HashMap, HashSet};
 use bevy::asset::RenderAssetUsages;
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
-use bevy::mesh::{Indices, Mesh};
-use bevy::pbr::{ExtendedMaterial, MaterialExtension};
+use bevy::mesh::{Indices, Mesh, MeshVertexAttribute, MeshVertexBufferLayoutRef};
+use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline};
 use bevy::prelude::*;
 use bevy::render::render_resource::{
-    AsBindGroup, Extent3d, PrimitiveTopology, TextureDimension, TextureFormat, TextureViewDescriptor,
-    TextureViewDimension,
+    AsBindGroup, Extent3d, PrimitiveTopology, RenderPipelineDescriptor, SpecializedMeshPipelineError, TextureDimension,
+    TextureFormat, TextureViewDescriptor, TextureViewDimension, VertexFormat,
 };
 use bevy::shader::ShaderRef;
 
@@ -65,9 +65,36 @@ pub struct BlockTextures {
     array: Handle<Image>,
 }
 
+/// Lumière d'un sommet (#23) : `[ciel, blocs]` dans [0, 1]. Id au hasard,
+/// grand, comme le demande Bevy pour un attribut à soi.
+const ATTRIBUTE_LIGHT: MeshVertexAttribute = MeshVertexAttribute::new("Light", 230_118_771, VertexFormat::Float32x2);
+
 impl MaterialExtension for BlockTextures {
+    fn vertex_shader() -> ShaderRef {
+        "shaders/voxel.wgsl".into()
+    }
+
     fn fragment_shader() -> ShaderRef {
         "shaders/voxel.wgsl".into()
+    }
+
+    /// Les attributs que lit le vertex shader, lumière comprise (les
+    /// emplacements de `voxel.wgsl`).
+    fn specialize(
+        _pipeline: &MaterialExtensionPipeline,
+        descriptor: &mut RenderPipelineDescriptor,
+        layout: &MeshVertexBufferLayoutRef,
+        _key: MaterialExtensionKey<Self>,
+    ) -> Result<(), SpecializedMeshPipelineError> {
+        descriptor.vertex.buffers = vec![layout.0.get_layout(&[
+            Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
+            Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
+            Mesh::ATTRIBUTE_UV_0.at_shader_location(2),
+            Mesh::ATTRIBUTE_UV_1.at_shader_location(3),
+            Mesh::ATTRIBUTE_COLOR.at_shader_location(5),
+            ATTRIBUTE_LIGHT.at_shader_location(8),
+        ])?];
+        Ok(())
     }
 }
 
@@ -277,7 +304,8 @@ fn setup_world(
         },
     ));
 
-    // --- Éclairage full-bright-ish (non-goal §7 : pas de vrai éclairage). ---
+    // --- Le soleil : sa lumière passe par celle du ciel de chaque sommet
+    // (#23, voxel.wgsl). ---
     commands.spawn((
         DirectionalLight::default(),
         Transform::from_xyz(50.0, 80.0, 30.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -290,17 +318,21 @@ fn setup_world(
 /// quand il n'est pas vide.
 pub fn remesh_dirty(
     mut commands: Commands,
-    game: Res<GameWorld>,
+    mut game: ResMut<GameWorld>,
     mut dirty: ResMut<DirtyChunks>,
     mut meshes: ResMut<Assets<Mesh>>,
     chunk_meshes: Query<(Entity, &ChunkMesh, Option<&Mesh3d>)>,
     blend_meshes: Query<(Entity, &BlendMesh, Option<&Mesh3d>)>,
 ) {
+    let existing: HashMap<ChunkPos, (Entity, Option<&Mesh3d>)> =
+        chunk_meshes.iter().map(|(e, cm, m)| (cm.0, (e, m))).collect();
+    // Lumière changée (#23) : seuls les chunks affichés sont re-meshés, les
+    // autres le seront quand le streaming les affichera.
+    let lit = game.world.take_light_changed();
+    dirty.0.extend(lit.into_iter().filter(|pos| existing.contains_key(pos)));
     if dirty.0.is_empty() {
         return;
     }
-    let existing: HashMap<ChunkPos, (Entity, Option<&Mesh3d>)> =
-        chunk_meshes.iter().map(|(e, cm, m)| (cm.0, (e, m))).collect();
     let blend: HashMap<ChunkPos, (Entity, Option<&Mesh3d>)> =
         blend_meshes.iter().map(|(e, b, m)| (b.0, (e, m))).collect();
     let voxel_size_m = 1.0 / game.world.voxels_per_meter();
@@ -424,8 +456,7 @@ fn to_bevy_mesh(data: MeshData) -> Mesh {
     .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, data.normals)
     .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, data.colors)
     .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, data.uvs)
-    // La couche passe par le 2ᵉ jeu d'UV, que le shader standard transmet
-    // déjà au fragment : pas de vertex shader à écrire. -1 : pas de texture.
+    // La couche passe par le 2ᵉ jeu d'UV. -1 : pas de texture.
     .with_inserted_attribute(
         Mesh::ATTRIBUTE_UV_1,
         data.layers
@@ -433,5 +464,6 @@ fn to_bevy_mesh(data: MeshData) -> Mesh {
             .map(|&l| [if l == NO_TEXTURE { -1.0 } else { l as f32 }, 0.0])
             .collect::<Vec<[f32; 2]>>(),
     )
+    .with_inserted_attribute(ATTRIBUTE_LIGHT, data.lights)
     .with_inserted_indices(Indices::U32(data.indices))
 }

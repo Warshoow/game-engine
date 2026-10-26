@@ -12,6 +12,7 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 
 use crate::chunk::{Chunk, ChunkPos};
+use crate::light::{self, Light};
 use crate::liquids;
 use crate::registry::{ContentId, Liquid, Registry};
 use crate::rules;
@@ -94,6 +95,8 @@ pub struct VoxelWorld {
     /// Vérité ; `updates` ne sert qu'à trouver les échus, comme `queue`.
     pending: HashMap<[i64; 3], u64>,
     updates: BinaryHeap<Reverse<(u64, [i64; 3])>>,
+    /// Lumière (#23, §3.8) : dérivée des voxels, jamais sauvée.
+    light: Light,
 }
 
 impl VoxelWorld {
@@ -111,6 +114,7 @@ impl VoxelWorld {
             levels: HashMap::new(),
             pending: HashMap::new(),
             updates: BinaryHeap::new(),
+            light: Light::default(),
         }
     }
 
@@ -315,9 +319,53 @@ impl VoxelWorld {
         self.chunk_size
     }
 
+    /// Ajoute un chunk et calcule sa lumière. Un chunk sans données
+    /// au-dessus de lui est sous le ciel ouvert (§3.8) : insérer d'abord ce
+    /// qui pourrait le couvrir.
     pub fn insert_chunk(&mut self, pos: ChunkPos, chunk: Chunk) {
         debug_assert_eq!(chunk.size(), self.chunk_size);
         self.chunks.insert(pos, chunk);
+        // Champs empruntés un par un : `light` change, le reste est lu.
+        let ctx = light::Ctx { chunks: &self.chunks, registry: &self.registry, size: self.chunk_size, vpm: self.voxels_per_meter };
+        self.light.insert(&ctx, pos);
+    }
+
+    fn light_ctx(&self) -> light::Ctx<'_> {
+        light::Ctx { chunks: &self.chunks, registry: &self.registry, size: self.chunk_size, vpm: self.voxels_per_meter }
+    }
+
+    /// Recalcule toute la lumière : le registre a changé (contenu
+    /// rechargé), un bloc peut maintenant éclairer ou arrêter la lumière.
+    /// Du haut vers le bas, comme le streaming.
+    pub fn relight(&mut self) {
+        self.light = Light::default();
+        let mut positions: Vec<ChunkPos> = self.chunks.keys().copied().collect();
+        positions.sort_by_key(|p| Reverse(p.y));
+        let ctx = light::Ctx { chunks: &self.chunks, registry: &self.registry, size: self.chunk_size, vpm: self.voxels_per_meter };
+        for pos in positions {
+            self.light.insert(&ctx, pos);
+        }
+    }
+
+    /// `[ciel, blocs]` du voxel `v` ; hors des données, le ciel ouvert.
+    pub fn light_at(&self, v: [i64; 3]) -> [u8; 2] {
+        self.light.levels_at(&self.light_ctx(), v).unwrap_or([self.full_light(), 0])
+    }
+
+    /// `[ciel, blocs]` du chunk `pos`, case par case.
+    pub fn chunk_light(&self, pos: ChunkPos) -> Option<&[light::Channel; 2]> {
+        self.light.chunk(pos)
+    }
+
+    /// Niveau du ciel ouvert : l'unité des deux lumières.
+    pub fn full_light(&self) -> u8 {
+        light::full_sky(self.voxels_per_meter)
+    }
+
+    /// Les chunks dont la lumière a changé depuis le dernier appel : à
+    /// re-mesher.
+    pub fn take_light_changed(&mut self) -> Vec<ChunkPos> {
+        self.light.take_changed()
     }
 
     pub fn chunk(&self, pos: ChunkPos) -> Option<&Chunk> {
@@ -379,6 +427,8 @@ impl VoxelWorld {
             self.block_entities.insert(v, Vec::new());
         }
         self.edited.insert(pos);
+        let ctx = light::Ctx { chunks: &self.chunks, registry: &self.registry, size: self.chunk_size, vpm: self.voxels_per_meter };
+        self.light.update(&ctx, v, old);
         Some(pos)
     }
 

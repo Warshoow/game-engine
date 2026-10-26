@@ -128,19 +128,32 @@ pub fn stream_chunks(
             // Sauvé (modifié par le joueur) : relu ; sinon généré depuis la
             // seed. Un fichier illisible arrête le jeu plutôt que d'être
             // écrasé par un chunk régénéré au prochain édit.
-            let saved = save.as_ref().map_or(Ok(None), |s| s.0.read_chunk(pos));
-            match saved.unwrap_or_else(|err| panic!("{err}")) {
-                Some((chunk, state)) => {
-                    game.world.insert_saved_chunk(pos, chunk, state);
-                    storage.0.extend(game.world.block_entity_positions(pos));
+            let read = |pos| save.as_ref().map_or(Ok(None), |s| s.0.read_chunk(pos)).unwrap_or_else(|err| panic!("{err}"));
+            // La lumière (§3.8) tient un chunk sans données au-dessus de lui
+            // pour sous le ciel ouvert : on charge d'abord ce qui pourrait
+            // le couvrir, jusqu'à un chunk déjà là ou sûrement vide (plus
+            // haut que tout ce que pose le générateur, et pas dans la save).
+            // Ces chunks-là ont des données mais pas d'entité.
+            let mut column = vec![(pos, read(pos))];
+            let mut above = ChunkPos { y: pos.y + 1, ..pos };
+            while (above.y as f32) * extent_m < WORLD_MAX_Y_M && game.world.chunk(above).is_none() {
+                let saved = read(above);
+                if saved.is_none() && above.y as f32 * extent_m >= game.generator.top_m() {
+                    break;
                 }
-                None => {
-                    let chunk = game.generator.generate_chunk(
-                        pos,
-                        game.world.chunk_size(),
-                        game.world.voxels_per_meter(),
-                    );
-                    game.world.insert_chunk(pos, chunk);
+                column.push((above, saved));
+                above.y += 1;
+            }
+            for (pos, saved) in column.into_iter().rev() {
+                match saved {
+                    Some((chunk, state)) => {
+                        game.world.insert_saved_chunk(pos, chunk, state);
+                        storage.0.extend(game.world.block_entity_positions(pos));
+                    }
+                    None => {
+                        let chunk = game.generator.generate_chunk(pos, game.world.chunk_size(), game.world.voxels_per_meter());
+                        game.world.insert_chunk(pos, chunk);
+                    }
                 }
             }
             // La bordure des voisins déjà affichés doit se recoudre contre
@@ -202,16 +215,24 @@ mod tests {
     }
 
     fn stream_all_air_with(y_m: f32, save: Option<Save>) -> (App, Vec<ChunkPos>) {
+        stream_under(-1000.0, y_m, save)
+    }
+
+    /// Comme [`stream_all_air`], avec un sol de pierre à `ground_level_m`.
+    fn stream_under(ground_level_m: f32, y_m: f32, save: Option<Save>) -> (App, Vec<ChunkPos>) {
         let mut registry = Registry::new();
         let air = registry
             .register(ContentEntry::new_block("core:air", false, [0.0; 3]))
             .unwrap();
+        let stone = registry
+            .register(ContentEntry::new_block("core:stone", true, [0.5; 3]))
+            .unwrap();
         let generator = HeightmapGenerator {
             seed: 1,
             air,
-            ground: air,
-            stone: air,
-            ground_level_m: -1000.0,
+            ground: stone,
+            stone,
+            ground_level_m,
             amplitude_m: 1.0,
             feature_size_m: 24.0,
         };
@@ -293,5 +314,19 @@ mod tests {
         assert_eq!(game.world.voxel([1, 2, 3]), Some(marker), "relu, pas régénéré");
         assert_eq!(game.world.voxel([1, 2, 4]), Some(air));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// La lumière du ciel (§3.8) : sous une montagne plus haute que la zone
+    /// chargée, le streaming charge d'abord ce qui la couvre (des données,
+    /// sans entité), et le joueur est dans le noir.
+    #[test]
+    fn chunks_above_the_view_are_loaded_for_the_sky() {
+        let (app, loaded) = stream_under(150.0, 0.0, None);
+        let world = &app.world().resource::<GameWorld>().world;
+        assert_eq!(world.light_at([0, 0, 0])[voxel_core::light::SKY], 0);
+        let covering = ChunkPos { x: 0, y: 4, z: 0 }; // 128 à 160 m : le sommet
+        assert!(world.chunk(covering).is_some());
+        assert!(!loaded.contains(&covering), "chargé pour le ciel, pas affiché");
+        assert!(world.chunk(ChunkPos { x: 0, y: 5, z: 0 }).is_none(), "au-dessus de tout relief : rien");
     }
 }

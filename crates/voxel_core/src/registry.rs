@@ -31,6 +31,8 @@ pub struct ContentId(pub u32);
 /// Chaque variante porte ses propres données : un `Block` sans `BlockData`
 /// (ou un `Item` avec) est irreprésentable — c'est le type qui porte
 /// l'invariant, pas la discipline de l'appelant.
+// Quelques centaines d'entrées au plus : la taille d'un `Kind` ne compte pas.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub enum Kind {
     Block(BlockData),
@@ -76,7 +78,20 @@ pub struct BlockData {
     /// jamais solide.
     #[serde(default)]
     pub liquid: Option<Liquid>,
+    /// Le bloc éclaire autour de lui (#23, §3.8) : portée en mètres, la
+    /// lumière baisse jusqu'à zéro à cette distance.
+    #[serde(default)]
+    pub emits_light: Option<f32>,
+    /// Distance comptée en plus par la lumière qui traverse ce bloc, par
+    /// mètre (#23) : 1,0 = un mètre de ce bloc coûte deux mètres de portée.
+    /// Ce qui assombrit l'eau avec la profondeur.
+    #[serde(default)]
+    pub light_loss: f32,
 }
+
+/// Portée maximale d'un bloc lumineux, en mètres : borne le calcul de
+/// lumière quand un bloc en pose ou en retire un.
+pub const MAX_LIGHT_RANGE_M: f32 = 32.0;
 
 /// Réglages d'un liquide (#28). Tout en mètres et en secondes (§2).
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
@@ -184,6 +199,8 @@ impl ContentEntry {
                 generated_textures: Vec::new(),
                 alpha: Alpha::Opaque,
                 liquid: None,
+                emits_light: None,
+                light_loss: 0.0,
             }),
             recipes: Vec::new(),
         }
@@ -453,6 +470,14 @@ fn invalid_value(b: &BlockData) -> Option<String> {
         && !(0.0..=1.0).contains(&o)
     {
         return Some(format!("opacité {o} hors de [0, 1]"));
+    }
+    if let Some(r) = b.emits_light
+        && !(r > 0.0 && r <= MAX_LIGHT_RANGE_M)
+    {
+        return Some(format!("emits_light {r} hors de ]0, {MAX_LIGHT_RANGE_M}] m"));
+    }
+    if !(0.0..=16.0).contains(&b.light_loss) {
+        return Some(format!("light_loss {} hors de [0, 16]", b.light_loss));
     }
     let l = b.liquid?;
     if b.solid {

@@ -26,7 +26,7 @@
 
 use bevy::prelude::*;
 
-use voxel_core::chunk::ChunkPos;
+use voxel_core::chunk::meshes_reading;
 use voxel_core::crafting;
 use voxel_core::registry::ContentId;
 use voxel_core::rules::{self, Action, Context, Hook};
@@ -221,20 +221,8 @@ impl Edit<'_, '_, '_> {
         // Un voxel en bordure change aussi les chunks voisins : leurs faces
         // contre lui (culling inter-chunks) et l'ombre de leurs coins, y
         // compris en diagonale (arête ou coin du chunk).
-        let size = self.game.world.chunk_size();
-        let (_, local) = self.game.world.split(voxel);
-        let offsets = local.map(|l| match l {
-            0 => [0, -1],
-            l if l == size - 1 => [0, 1],
-            _ => [0, 0],
-        });
-        for dx in offsets[0] {
-            for dy in offsets[1] {
-                for dz in offsets[2] {
-                    self.dirty.0.insert(ChunkPos { x: pos.x + dx, y: pos.y + dy, z: pos.z + dz });
-                }
-            }
-        }
+        debug_assert_eq!(pos, self.game.world.split(voxel).0);
+        self.dirty.0.extend(meshes_reading(voxel, self.game.world.chunk_size()));
         true
     }
 
