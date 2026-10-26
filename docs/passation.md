@@ -25,7 +25,8 @@ eau, lave, mer, nage, semi-transparent), validés sous Windows le
 2026-10-25 (sauf la mer d'un monde neuf, pas encore essayée). Puis
 l'**ombrage des coins** (#7), vu sous Windows. Puis la **lumière du ciel et
 des blocs** (#23 : grottes noires, lampe allumée, lave, eau qui assombrit),
-pas encore vue sous Windows.
+validée sous Windows par Warshow le 2026-10-26 sur le PC sans GPU ; pas
+encore essayée sur le PC avec RTX 4060.
 
 1. Chunk généré depuis la seed (heightmap fBm maison, **grottes** par
    bruit 3D, **biomes, minerais, arbres** décrits dans
@@ -408,8 +409,10 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   par Warshow ; design doc amendé d'abord (§3.8, §5, §7), non-goal levé
   dans `CLAUDE.md`. Options écartées : #52. Données : `emits_light`
   (portée en m), `light_loss` (eau 0,5). Vu dans WSL : un monde neuf (la
-  mer comprise) rend comme avant en plein jour ; grottes et lampes pas
-  encore vues.
+  mer comprise) rend comme avant en plein jour. Testé sous Windows par
+  Warshow (PC sans GPU) : « cela fonctionne bien ». Reste à voir sur le
+  PC avec RTX 4060 : le rendu et le coût (scénarios ajoutés à #41).
+- Poussé par Warshow jusqu'à `0545d1b` ; #23 fermé.
 
 ## Prochaines étapes
 
@@ -420,10 +423,12 @@ faits et validés sous Windows (reste à voir : la mer, dans un monde neuf).
 particulier. Mais le PC de test n'a pas de GPU (rendu logiciel) et le jeu
 y était déjà peu fluide avant #7 : **#41 profilage à faire sur le PC avec
 RTX 4060** (méthode, scénarios et solutions possibles dans le ticket).
-#23 éclairage fait le 2026-10-26 : **à voir sous Windows** (grotte noire,
-lampe allumée par clic droit, lave, fond de la mer ; force de la lumière
-des blocs réglée à l'estime, `BLOCK_LIGHT` dans `voxel.wgsl`). Ensuite,
-choisi avec Warshow le 2026-10-25 : #51 effets de rendu et #30 jour/nuit. Ce qui a été reporté (#18, #27, #28) est listé
+#23 éclairage fait le 2026-10-26, validé sous Windows sur le PC sans GPU.
+**À faire sur le PC avec RTX 4060** : #41 (profilage, scénarios de la
+lumière compris) et un coup d'œil au rendu de la lumière (force des
+lampes réglée à l'estime : `BLOCK_LIGHT` dans `voxel.wgsl`). Ensuite,
+choisi avec Warshow le 2026-10-25 : #51 effets de rendu, puis #30
+jour/nuit. Ce qui a été reporté (#18, #27, #28) est listé
 dans `docs/jalons.md`, « Plus tard », et dans #49.
 Principe (design doc §2) : le moteur fournit des mécanismes, `core.ron`
 n'est qu'un jeu d'exemple. Mipmaps si les textures scintillent au loin.
