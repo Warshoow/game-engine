@@ -100,6 +100,12 @@ WSL le rendu est logiciel et rame — normal.
   `random_edits_match_a_fresh_computation` compare l'incrémental à un
   calcul de zéro : toute modification de la propagation doit le garder
   vert.
+- **Vertex shader à nous** (#23, `assets/shaders/voxel.wgsl`) : la
+  lumière passe par un attribut à soi (`ATTRIBUTE_LIGHT`, emplacement 8).
+  Tout mesh rendu avec `VoxelMaterial` doit l'avoir (`to_bevy_mesh`).
+  `BlockTextures::specialize` remplace les attributs de **toutes** les
+  passes : le prepass de Bevy (ombres, SSAO) attend d'autres emplacements
+  et casserait. À régler avant d'activer un effet qui l'utilise (#51).
 - **Liquides** (#28) : le voxel reste l'ID du liquide, son niveau est dans
   `VoxelWorld::levels` (absent = source, `Some(0)` = chute, sinon distance
   à plat en voxels). `set_voxel` efface le niveau : écrire le niveau
@@ -427,8 +433,11 @@ RTX 4060** (méthode, scénarios et solutions possibles dans le ticket).
 **À faire sur le PC avec RTX 4060** : #41 (profilage, scénarios de la
 lumière compris) et un coup d'œil au rendu de la lumière (force des
 lampes réglée à l'estime : `BLOCK_LIGHT` dans `voxel.wgsl`). Ensuite,
-choisi avec Warshow le 2026-10-25 : #51 effets de rendu, puis #30
-jour/nuit. Ce qui a été reporté (#18, #27, #28) est listé
+choisi avec Warshow le 2026-10-25 : **#51 effets de rendu** (nouveau
+mécanisme : phase exploratoire d'abord ; points à trancher, ce que Bevy
+0.19 fournit et le piège du prepass préparés en commentaire du ticket),
+puis #30 jour/nuit (le ciel est déjà séparé dans les sommets : se fera
+dans le shader, sans re-mesher). Ce qui a été reporté (#18, #27, #28) est listé
 dans `docs/jalons.md`, « Plus tard », et dans #49.
 Principe (design doc §2) : le moteur fournit des mécanismes, `core.ron`
 n'est qu'un jeu d'exemple. Mipmaps si les textures scintillent au loin.
