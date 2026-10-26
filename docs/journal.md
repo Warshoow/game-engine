@@ -965,3 +965,57 @@ chunk qui arrive re-meshe ses 26 voisins affichés au lieu de 6. Si le
 streaming saccade sous Windows : une copie du chunk avec sa bordure
 accélérerait le meshing (#50), et #41 dirait où part le temps.
 
+
+## 2026-10-26 — Lumière du ciel et des blocs (#23)
+
+Lève le non-goal « éclairage réel » de §7. Phase exploratoire présentée à
+Warshow : quatre options comparées sur le coût par image, en pointe, la
+mémoire, la save, ce qu'elles figent, et si elles permettent plus tard le
+rendu des packs de shaders Minecraft. Warshow a suivi la reco. Écartées ou
+reportées : #52.
+
+**Retenu : la propagation de case en case, à la Minecraft, ciel et blocs
+séparés.** Rien n'est calculé à chaque image (le PC de test n'a pas de
+GPU), rien ne va dans la save, et la lumière est une fonction des voxels,
+donc déterministe : une règle pourra la lire. Les packs de shaders
+reçoivent de Minecraft exactement ces deux valeurs par sommet ; les
+ombres du soleil (#51) s'ajouteront par-dessus. Les vraies lumières de
+Bevy ont été écartées comme base : rien n'assombrit une grotte, et une
+lampe éclaire à travers les murs sans ses ombres, qui coûtent cher.
+
+**La propagation** (`voxel_core::light`). Une file : chaque case donne à
+ses voisines son niveau moins un pas, et une voisine ne prend que si c'est
+plus que ce qu'elle a. Le ciel plein descend sans perte. Pour éteindre, on
+ne peut pas « retirer » une lumière : on éteint tout ce qui pouvait venir
+de la case (les voisines plus sombres qu'elle d'un pas ou plus), puis on
+repropage depuis les cases restées allumées au bord. Le test principal
+fait mille poses et casses au hasard et compare, toutes les cent, à un
+calcul repris de zéro ; il attrape un mutant qui oublie de repropager.
+
+**En mètres et en quarts de case.** Une portée en mètres devient
+`mètres × résolution × 4` niveaux : à 2 voxels par mètre, une lampe de
+14 m éclaire toujours à 14 m. Le quart de case laisse `light_loss`
+prendre des valeurs comme 0,5 (l'eau : on voit le fond jusqu'à ~10 m ; à
+1,0 tout serait noir sous 8 m).
+
+**Le ciel, avec des chunks cubiques.** On ne charge que ±48 m en hauteur.
+Un chunk sans données au-dessus de lui est tenu pour sous le ciel ouvert ;
+c'est donc au streaming de charger d'abord ce qui pourrait le couvrir. Le
+générateur sait jusqu'où il pose des blocs (`Worldgen::top_m` : relief,
+arbres, mer) : au-dessus, un chunk absent de la save est vide sans le
+générer. Sous une montagne plus haute que la zone, les chunks du sommet
+sont chargés en données, sans entité.
+
+**Le rendu.** Le mesher lit la lumière des cases autour de chaque coin
+(celles de l'ombrage, sans les opaques) et la met dans un attribut de
+sommet à soi ; il a fallu écrire le vertex shader (celui de Bevy, plus la
+lumière). Le ciel multiplie ce que voient le soleil et l'ambiance ; la
+lumière des blocs s'ajoute à part, d'une teinte chaude unique. Le
+jour/nuit (#30) baissera le ciel dans le shader, sans re-mesher. La
+force de la lumière des blocs est réglée à l'estime : à vérifier à l'œil.
+
+**Le coût.** `mesh_stats` : calcul de la lumière ~1,5 ms par chunk à
+l'arrivée ; la fusion n'en souffre presque pas (161 617 quads dans le
+monde). Le greedy isolé passe de ~4,3 à ~5,1 ms par chunk (lumière des
+coins) ; dans le monde, avec le raccord et les deux passes, ~9,8 ms. À
+mesurer sur le PC avec GPU (#41).

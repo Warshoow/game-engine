@@ -218,7 +218,8 @@ quand une mesure la réclame.
 6. **#23 éclairage réel + #7 coins de grottes assombris, puis #51 effets
    de rendu et #30 jour/nuit** — le jour/nuit n'a de sens qu'avec un vrai
    éclairage. #7 fait le 2026-10-25 (ombrage par sommet, options écartées
-   dans #50).
+   dans #50) ; #23 fait le 2026-10-26 (propagation ciel + blocs, options
+   écartées dans #52).
 7. **#14 / #15 → #32 → #33** — formes non cubiques et modèles, puis mobs,
    puis vie et survie. #33 est un choix de jeu : du contenu que `core.ron`
    active, pas une règle du moteur.

@@ -23,7 +23,9 @@ trous** (#22 : feuilles, verre), les **blocs qui évoluent seuls** (#34 :
 minuteurs `After` + tick aléatoire `Tick`, le blé) et les **liquides** (#28 :
 eau, lave, mer, nage, semi-transparent), validés sous Windows le
 2026-10-25 (sauf la mer d'un monde neuf, pas encore essayée). Puis
-l'**ombrage des coins** (#7), pas encore vu sous Windows.
+l'**ombrage des coins** (#7), vu sous Windows. Puis la **lumière du ciel et
+des blocs** (#23 : grottes noires, lampe allumée, lave, eau qui assombrit),
+pas encore vue sous Windows.
 
 1. Chunk généré depuis la seed (heightmap fBm maison, **grottes** par
    bruit 3D, **biomes, minerais, arbres** décrits dans
@@ -69,15 +71,18 @@ WSL le rendu est logiciel et rame — normal.
   Deux obligations en découlent, déjà codées mais faciles à casser :
   un chunk qui apparaît → re-mesh de ses 26 voisins affichés ; un voxel
   édité en bordure → re-mesh des chunks voisins, diagonales comprises
-  (jusqu'à 7). Oublier l'une = trous ; oublier les diagonales = ombre
-  des coins fausse le long des arêtes de chunk (#7).
+  (jusqu'à 7, `chunk::meshes_reading`). Oublier l'une = trous ; oublier
+  les diagonales = ombre des coins fausse le long des arêtes de chunk (#7).
+  La lumière ajoute les siens : les chunks dont une case a changé de
+  lumière (`take_light_changed`, re-meshés par `remesh_dirty` s'ils sont
+  affichés).
 - **Une face est cachée par un voisin solide opaque, ou par un voisin
   identique** (`mesher::hides`, #22, #28). Le greedy et l'oracle naïf
   partagent cette règle : la changer dans l'un seul casse les tests
   d'équivalence. `solid` = collidable ; meshé = solide ou liquide. Deux
   meshes par chunk (`mesh_chunk_in_world` rend `[reste, Blend]`), deux
   entités (`ChunkMesh`, `BlendMesh`). La clé de fusion du greedy est
-  (index de palette, haut, bas, ombres des 4 coins) : une surface de
+  (index de palette, haut, bas, ombres et lumière des 4 coins) : une surface de
   liquide abaissée ne fusionne pas avec une pleine, ni deux faces
   d'ombres différentes.
 - **Ombrage des coins** (#7) : calculé au meshing (`mesher::face_ao`),
@@ -85,6 +90,15 @@ WSL le rendu est logiciel et rame — normal.
   (`Resolved::casts_shadow`, la même règle que `hides`). L'ombre d'un coin
   ne dépend que de sa position : c'est ce qui rend la fusion exacte, et
   l'oracle naïf la vérifie sommet par sommet.
+- **Lumière** (#23, `voxel_core::light`) : calculée par `insert_chunk` et
+  `set_voxel`, jamais sauvée. **Un chunk sans données au-dessus est sous le
+  ciel ouvert** : le streaming charge d'abord les chunks qui pourraient le
+  couvrir (jusqu'à `Worldgen::top_m`, ou dans la save) ; insérer à la main
+  un chunk sous un autre absent le croit au soleil (rattrapé si le haut
+  arrive ensuite). Changer le registre (touche R) → `relight()`. Le test
+  `random_edits_match_a_fresh_computation` compare l'incrémental à un
+  calcul de zéro : toute modification de la propagation doit le garder
+  vert.
 - **Liquides** (#28) : le voxel reste l'ID du liquide, son niveau est dans
   `VoxelWorld::levels` (absent = source, `Some(0)` = chute, sinon distance
   à plat en voxels). `set_voxel` efface le niveau : écrire le niveau
@@ -213,13 +227,13 @@ crates/voxel_core/    TOUT le cœur voxel, PUR (zéro dépendance Bevy, testable
   save.rs             dossier du monde, format binaire des chunks
 ```
 
-Règle de séparation stricte : logique voxel → `voxel_core` (87 tests
+Règle de séparation stricte : logique voxel → `voxel_core` (96 tests
 headless, ~0 s), le binaire ne fait que brancher dans l'ECS.
 
 ## Vérifications avant de conclure une étape
 
 ```bash
-cargo test --workspace                    # 94 tests (87 cœur + 7 binaire), headless
+cargo test --workspace                    # 104 tests (96 cœur + 8 binaire), headless
 cargo test -- --ignored claude            # génération réelle par claude (~6 s)
 cargo clippy --workspace --all-targets    # zéro warning exigé
 cargo run                                 # smoke test à l'occasion
@@ -388,6 +402,15 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   (ombres du soleil, brouillard, bloom, SSAO, reflets) : #51, après #23.
   Vu sous Windows (PC sans GPU) : rien de particulier.
 
+## Fait dans la session du 2026-10-26
+
+- #23 lumière du ciel et des blocs. Phase exploratoire, option 1 retenue
+  par Warshow ; design doc amendé d'abord (§3.8, §5, §7), non-goal levé
+  dans `CLAUDE.md`. Options écartées : #52. Données : `emits_light`
+  (portée en m), `light_loss` (eau 0,5). Vu dans WSL : un monde neuf (la
+  mer comprise) rend comme avant en plein jour ; grottes et lampes pas
+  encore vues.
+
 ## Prochaines étapes
 
 Ordre décidé avec Warshow (2026-10-08) : **`docs/jalons.md`, « Suite :
@@ -397,14 +420,15 @@ faits et validés sous Windows (reste à voir : la mer, dans un monde neuf).
 particulier. Mais le PC de test n'a pas de GPU (rendu logiciel) et le jeu
 y était déjà peu fluide avant #7 : **#41 profilage à faire sur le PC avec
 RTX 4060** (méthode, scénarios et solutions possibles dans le ticket).
-Ensuite, choisi avec Warshow le 2026-10-25 : **#23 éclairage réel** (lève
-un non-goal §7 : phase exploratoire complète d'abord, voir `CLAUDE.md` ;
-points à trancher préparés en commentaire du ticket),
-puis #51 effets de rendu et #30 jour/nuit. Ce qui a été reporté (#18, #27, #28) est listé
+#23 éclairage fait le 2026-10-26 : **à voir sous Windows** (grotte noire,
+lampe allumée par clic droit, lave, fond de la mer ; force de la lumière
+des blocs réglée à l'estime, `BLOCK_LIGHT` dans `voxel.wgsl`). Ensuite,
+choisi avec Warshow le 2026-10-25 : #51 effets de rendu et #30 jour/nuit. Ce qui a été reporté (#18, #27, #28) est listé
 dans `docs/jalons.md`, « Plus tard », et dans #49.
 Principe (design doc §2) : le moteur fournit des mécanismes, `core.ron`
 n'est qu'un jeu d'exemple. Mipmaps si les textures scintillent au loin.
 
 Limitations assumées (ne pas « corriger » sans besoin) : palette non
 compactée, re-mesh complet du chunk au moindre voxel, chunks sauvés sans
-compression, items au sol sauvés sans leur vitesse, full-bright.
+compression, items au sol sauvés sans leur vitesse ; les items et le bloc
+tenu ne reçoivent pas la lumière du monde (pleine lumière dans une grotte).
