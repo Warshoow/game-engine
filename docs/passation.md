@@ -245,6 +245,7 @@ cargo test -- --ignored claude            # génération réelle par claude (~6 
 cargo clippy --workspace --all-targets    # zéro warning exigé
 cargo run                                 # smoke test à l'occasion
 cargo windows                             # .exe Windows (README, « Build Windows natif »)
+cargo windows-profile                     # le même, avec le profilage (#41, README)
 ```
 
 ⚠️ Ne jamais lire le succès d'un build via un pipe (`cargo build | tail`
@@ -432,10 +433,16 @@ RTX 4060** (méthode, scénarios et solutions possibles dans le ticket).
 #23 éclairage fait le 2026-10-26, validé sous Windows sur le PC sans GPU.
 **À faire sur le PC avec RTX 4060** : #41 (profilage, scénarios de la
 lumière compris) et un coup d'œil au rendu de la lumière (force des
-lampes réglée à l'estime : `BLOCK_LIGHT` dans `voxel.wgsl`). Ensuite,
-choisi avec Warshow le 2026-10-25 : **#51 effets de rendu** (nouveau
-mécanisme : phase exploratoire d'abord ; points à trancher, ce que Bevy
-0.19 fournit et le piège du prepass préparés en commentaire du ticket),
+lampes réglée à l'estime : `BLOCK_LIGHT` dans `voxel.wgsl`). Outillage
+prêt le 2026-10-28 : feature `profile` (`cargo windows-profile`), lanceur
+`tools/profilage.bat`, résumé d'une trace par `tools/trace_stats.py` ;
+dossier `Downloads\voxel_engine_rtx` (les deux exe + `LISEZMOI.txt`, le
+protocole) remis à Warshow. FPS à relever avec l'exe normal, le profilage
+ralentit. Ensuite,
+choisi avec Warshow le 2026-10-25 : **#51 effets de rendu** (exploration
+présentée le 2026-10-28, en attente de la décision de Warshow ; points à
+trancher, ce que Bevy 0.19 fournit et le piège du prepass en commentaire
+du ticket),
 puis #30 jour/nuit (le ciel est déjà séparé dans les sommets : se fera
 dans le shader, sans re-mesher). Ce qui a été reporté (#18, #27, #28) est listé
 dans `docs/jalons.md`, « Plus tard », et dans #49.

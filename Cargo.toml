@@ -16,6 +16,10 @@ bevy = "0.19"
 # Pour un build de release : `cargo build --release --no-default-features`.
 default = ["dev"]
 dev = ["bevy/dynamic_linking"]
+# Profilage (#41) : temps par système dans `trace-*.json` (à ouvrir dans
+# Perfetto), temps GPU par passe et diagnostics dans la console.
+# `cargo windows-profile`.
+profile = ["bevy/trace_chrome"]
 
 # Recos Bevy : un peu d'opt sur notre code, plein régime sur les dépendances
 # (compilées une fois, puis cachées) — sinon le debug est injouable.

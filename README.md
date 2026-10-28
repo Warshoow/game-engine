@@ -74,6 +74,15 @@ The executable lands in `target/x86_64-pc-windows-gnu/release/voxel_engine.exe`;
 copy it **with the `assets/` folder next to it** (content files are read at
 startup) to the Windows side (e.g. `/mnt/c/Users/<you>/`) and run it.
 
+**Profiling build (#41):** `cargo windows-profile` builds the same exe with
+the `profile` feature (same output path: copy it as
+`voxel_engine_profile.exe`, next to `tools/profilage.bat`). Run
+`profilage.bat <scenario>`, play, then close the window: you get
+`trace-<scenario>.json` (time per system, open it in
+[Perfetto](https://ui.perfetto.dev)) and `log-<scenario>.txt` (FPS, frame
+time, entities, CPU/memory and GPU time per render pass, every 5 s). The
+scenarios are listed in issue #41.
+
 ### Content
 
 Blocks are data, not code: `assets/content/core.ron`. Add an entry at the end

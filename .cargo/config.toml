@@ -8,3 +8,5 @@ rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 # Sans `dev` : le linking dynamique de Bevy ne sert qu'à itérer sous Linux.
 [alias]
 windows = "build --release --no-default-features --target x86_64-pc-windows-gnu"
+# Même exe, avec la feature `profile` (#41).
+windows-profile = "build --release --no-default-features --features profile --target x86_64-pc-windows-gnu"

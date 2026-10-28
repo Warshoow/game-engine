@@ -136,8 +136,8 @@ fn main() {
     // SAFETY: avant la création de tout thread (première ligne de main).
     unsafe { std::env::remove_var("WAYLAND_DISPLAY") };
 
-    App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
+    let mut app = App::new();
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Moteur Voxel".into(),
                 ..default()
@@ -194,8 +194,20 @@ fn main() {
         .add_systems(
             FixedUpdate,
             (items::simulate_items.after(player::physics_step), interact::tick_blocks),
-        )
-        .run();
+        );
+    // Diagnostics toutes les 5 s dans la console : images, entités, CPU et
+    // mémoire, temps GPU par passe (DX12 et Vulkan seulement).
+    #[cfg(feature = "profile")]
+    app.add_plugins((
+        bevy::diagnostic::LogDiagnosticsPlugin {
+            wait_duration: std::time::Duration::from_secs(5),
+            ..default()
+        },
+        bevy::diagnostic::EntityCountDiagnosticsPlugin::default(),
+        bevy::diagnostic::SystemInformationDiagnosticsPlugin,
+        bevy::render::diagnostic::RenderDiagnosticsPlugin,
+    ));
+    app.run();
 }
 
 fn setup_world(
