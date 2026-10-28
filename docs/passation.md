@@ -440,7 +440,8 @@ dossier `Downloads\voxel_engine_rtx` (les deux exe + `LISEZMOI.txt`, le
 protocole) remis à Warshow. FPS à relever avec l'exe normal, le profilage
 ralentit. Premier passage le 2026-10-28 (PC portable, « RTX 4060 Laptop
 GPU », branché ; toujours mesurer branché) : GPU quasi au repos, 144 FPS
-(vsync) après le chargement ; le chargement passe 2 à 5 s à ~3 FPS à cause
+(vsync : à 144 Hz le compteur cache le coût d'un effet, mesurer #51 avec
+les lignes `elapsed_gpu` du log de profilage) après le chargement ; le chargement passe 2 à 5 s à ~3 FPS à cause
 de `remesh_dirty` → **#53** (meshing hors de l'image) ; une saccade de
 90 ms de `save_edited_chunks` → **#54**. Détail dans #41. Ordre entre #53,
 #54 et #51 à choisir avec Warshow. Ensuite,
