@@ -438,11 +438,15 @@ prêt le 2026-10-28 : feature `profile` (`cargo windows-profile`), lanceur
 `tools/profilage.bat`, résumé d'une trace par `tools/trace_stats.py` ;
 dossier `Downloads\voxel_engine_rtx` (les deux exe + `LISEZMOI.txt`, le
 protocole) remis à Warshow. FPS à relever avec l'exe normal, le profilage
-ralentit. Ensuite,
+ralentit. Premier passage le 2026-10-28 (PC portable, « RTX 4060 Laptop
+GPU », branché ; toujours mesurer branché) : GPU quasi au repos, 144 FPS
+(vsync) après le chargement ; le chargement passe 2 à 5 s à ~3 FPS à cause
+de `remesh_dirty` → **#53** (meshing hors de l'image) ; une saccade de
+90 ms de `save_edited_chunks` → **#54**. Détail dans #41. Ordre entre #53,
+#54 et #51 à choisir avec Warshow. Ensuite,
 choisi avec Warshow le 2026-10-25 : **#51 effets de rendu** (exploration
-présentée le 2026-10-28, en attente de la décision de Warshow ; points à
-trancher, ce que Bevy 0.19 fournit et le piège du prepass en commentaire
-du ticket),
+présentée le 2026-10-28, en attente de la décision de Warshow ; options,
+reco et piège du prepass en commentaires du ticket),
 puis #30 jour/nuit (le ciel est déjà séparé dans les sommets : se fera
 dans le shader, sans re-mesher). Ce qui a été reporté (#18, #27, #28) est listé
 dans `docs/jalons.md`, « Plus tard », et dans #49.
