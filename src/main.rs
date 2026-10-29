@@ -3,6 +3,7 @@
 //! registre → worldgen → mesher → entités Bevy, et le contrôleur joueur.
 
 mod content;
+mod effects;
 mod generate;
 mod interact;
 mod inventory;
@@ -19,6 +20,7 @@ use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::mesh::{Indices, Mesh, MeshVertexAttribute, MeshVertexBufferLayoutRef};
 use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline};
+use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::render::render_resource::{
     AsBindGroup, Extent3d, PrimitiveTopology, RenderPipelineDescriptor, SpecializedMeshPipelineError, TextureDimension,
@@ -79,14 +81,25 @@ impl MaterialExtension for BlockTextures {
         "shaders/voxel.wgsl".into()
     }
 
+    /// La passe de profondeur (ombres, #51) découpe les trous des blocs
+    /// `Mask` dans nos textures ; son vertex shader reste celui de Bevy.
+    fn prepass_fragment_shader() -> ShaderRef {
+        "shaders/voxel_prepass.wgsl".into()
+    }
+
     /// Les attributs que lit le vertex shader, lumière comprise (les
-    /// emplacements de `voxel.wgsl`).
+    /// emplacements de `voxel.wgsl`). Passe principale seulement : Bevy
+    /// appelle aussi `specialize` pour la passe de profondeur, qui garde
+    /// ses propres emplacements (`prepass_io.wgsl`).
     fn specialize(
         _pipeline: &MaterialExtensionPipeline,
         descriptor: &mut RenderPipelineDescriptor,
         layout: &MeshVertexBufferLayoutRef,
         _key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
+        if descriptor.vertex.shader_defs.contains(&"PREPASS_PIPELINE".into()) {
+            return Ok(());
+        }
         descriptor.vertex.buffers = vec![layout.0.get_layout(&[
             Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
             Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
@@ -169,6 +182,7 @@ fn main() {
         }))
         .add_plugins((
             player::PlayerPlugin,
+            effects::EffectsPlugin,
             FrameTimeDiagnosticsPlugin::default(),
             MaterialPlugin::<VoxelMaterial>::default(),
         ))
@@ -316,7 +330,7 @@ fn setup_world(
         },
     ));
     commands.spawn((
-        Text::new("Clic gauche : jouer · Échap : libérer la souris · F : plein écran\nWASD/Espace : bouger · gauche : casser · droit : utiliser/poser · Maj+droit : poser · molette : bloc · C : fabriquer (menu) · I : générer un bloc (IA) · R : recharger le contenu · G : un de chaque bloc (debug)"),
+        Text::new("Clic gauche : jouer · Échap : libérer la souris · F : plein écran\nWASD/Espace : bouger · gauche : casser · droit : utiliser/poser · Maj+droit : poser · molette : bloc · C : fabriquer (menu) · I : générer un bloc (IA) · R : recharger le contenu · G : un de chaque bloc (debug) · F1-F4 : effets"),
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(12.0),
@@ -344,13 +358,6 @@ fn setup_world(
             bottom: Val::Px(12.0),
             ..default()
         },
-    ));
-
-    // --- Le soleil : sa lumière passe par celle du ciel de chaque sommet
-    // (#23, voxel.wgsl). ---
-    commands.spawn((
-        DirectionalLight::default(),
-        Transform::from_xyz(50.0, 80.0, 30.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 }
 
@@ -401,8 +408,9 @@ pub fn remesh_dirty(
         let at = Transform::from_xyz(pos.x as f32 * extent, pos.y as f32 * extent, pos.z as f32 * extent);
         let (entity, mesh) =
             existing.get(&pos).copied().unwrap_or_else(|| (commands.spawn((ChunkMesh(pos), at)).id(), None));
+        // Le semi-transparent (l'eau) ne projette pas d'ombre (#51).
         let (blend_entity, blend_mesh) =
-            blend.get(&pos).copied().unwrap_or_else(|| (commands.spawn((BlendMesh(pos), at)).id(), None));
+            blend.get(&pos).copied().unwrap_or_else(|| (commands.spawn((BlendMesh(pos), at, NotShadowCaster)).id(), None));
         put_mesh(&mut commands, &mut meshes, (entity, mesh), solid, &game.material);
         put_mesh(&mut commands, &mut meshes, (blend_entity, blend_mesh), transparent, &game.blend_material);
     }
@@ -443,6 +451,7 @@ fn update_debug_text(
     diagnostics: Res<DiagnosticsStore>,
     chunks: Query<(), With<ChunkMesh>>,
     reload: Res<content::ReloadStatus>,
+    effects: Res<effects::Effects>,
     mut text: Query<&mut Text, With<DebugText>>,
 ) {
     let Ok(mut text) = text.single_mut() else { return };
@@ -450,7 +459,7 @@ fn update_debug_text(
         .get(&FrameTimeDiagnosticsPlugin::FPS)
         .and_then(|d| d.smoothed())
         .unwrap_or(0.0);
-    text.0 = format!("{fps:.0} FPS · {} chunks\n{}", chunks.iter().count(), reload.0);
+    text.0 = format!("{fps:.0} FPS · {} chunks\n{}\n{}", chunks.iter().count(), effects.summary(), reload.0);
 }
 
 /// Dossier du jeu : celui du `Cargo.toml` sous `cargo run`, celui de

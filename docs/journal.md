@@ -1104,3 +1104,29 @@ se croisent pas, la dernière gagne. Sur `AppExit`, le jeu ferme le canal
 et attend le fil, sinon le dernier edit pourrait se perdre. Écarté :
 regrouper les écritures toutes les N secondes (un plantage perdrait les
 dernières secondes).
+
+## 2026-10-30 — Effets de rendu (#51)
+
+**Décision.** Warshow a suivi la reco de l'exploration du 2026-10-28 :
+ombres du soleil, brouillard de distance, bloom. Une remarque a fait
+reprendre le brouillard en volume et les rayons de lumière, que la reco
+reportait pour leur coût : elle datait d'avant la nouvelle cible (la 4060 à
+144 Hz, plus le PC sans GPU), et ce sont eux qui mènent le plus droit au
+rendu des packs de shaders.
+
+**Ce qui a été fait.**
+- La passe de profondeur (qui sert aux ombres) cassait : notre
+  `specialize` imposait nos emplacements d'attributs à toutes les passes.
+  Il ne touche plus que la passe principale, et un fragment de prepass à
+  nous découpe les trous des feuilles dans nos textures.
+- Les faces d'une lampe recevaient la lumière de la case devant elles, à
+  peine plus que le mur voisin : le mesher les met en pleine lumière de
+  bloc, pour que le halo du bloom parte d'elles.
+- Une touche par effet (F1 à F4), l'état dans le HUD : c'est l'outil de la
+  mesure avant/après. Tout est coupé en rendu logiciel.
+
+**Leçon.** Une reco se relit quand sa cible change. Celle-ci avait été
+écrite pour un PC sans GPU ; personne ne l'avait recalculée pour la 4060.
+
+**Limite.** Rien n'a été vu en vrai : en rendu logiciel le jeu tombe à
+1 FPS avec les effets. Réglages et coûts restent à voir sur la 4060.

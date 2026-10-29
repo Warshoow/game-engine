@@ -281,13 +281,20 @@ impl Region {
                 return None;
             }
             let height = if block.liquid { height_at(p, block.id) } else { FULL };
+            let lights = |q| {
+                let mut lights = face_light(occludes, light, q, axes);
+                if block.emits {
+                    lights.iter_mut().for_each(|l| l[1] = 12 * u16::from(full));
+                }
+                lights
+            };
             let neighbor = self.block(q);
             // Côté d'un liquide contre le même liquide plus bas : seule la
             // différence de hauteur se voit (une pente d'eau, une chute dans un
             // lac).
             if block.liquid && q[1] == p[1] && neighbor.is_some_and(|o| o.id == block.id) {
                 let theirs = height_at(q, block.id);
-                return (theirs < height).then(|| (idx, height, theirs, NO_SHADE, face_light(occludes, light, q, axes)));
+                return (theirs < height).then(|| (idx, height, theirs, NO_SHADE, lights(q)));
             }
             let hidden = neighbor.is_some_and(|other| hides(other, block));
             // Surface abaissée : un bloc posé dessus ne la touche pas.
@@ -297,7 +304,7 @@ impl Region {
             }
             // Les liquides et le semi-transparent ne reçoivent pas d'ombre.
             let ao = if block.liquid || blend { NO_SHADE } else { face_ao(occludes, q, axes) };
-            Some((idx, height, 0, ao, face_light(occludes, light, q, axes)))
+            Some((idx, height, 0, ao, lights(q)))
         };
 
         let mut mesh = MeshData::default();
@@ -569,6 +576,9 @@ struct Resolved {
     blend: bool,
     /// Cache entièrement ce qu'il y a derrière lui.
     opaque: bool,
+    /// Émet de la lumière (`emits_light`) : ses faces sont en pleine
+    /// lumière de bloc, pour que le halo (bloom, #51) parte de lui.
+    emits: bool,
     color: [f32; 4],
     /// Couche du côté, du dessus, du dessous.
     layers: [u32; 3],
@@ -596,6 +606,7 @@ fn resolve(registry: &Registry, id: ContentId) -> Resolved {
             liquid: false,
             blend: false,
             opaque: true,
+            emits: false,
             color: [1.0, 0.0, 1.0, 1.0],
             layers: [NO_TEXTURE; 3],
         };
@@ -621,6 +632,7 @@ fn resolve(registry: &Registry, id: ContentId) -> Resolved {
         liquid,
         blend: matches!(b.alpha, Alpha::Blend(_)),
         opaque: b.alpha == Alpha::Opaque,
+        emits: b.emits_light.is_some(),
         color,
         layers,
     }
@@ -1171,5 +1183,14 @@ mod tests {
         // 12 niveaux sur 60), la lampe elle-même ne compte pas.
         assert!((at([4.0, 1.0, 4.0])[1] - 32.0 / 3.0 / 60.0).abs() < 1e-6);
         assert_eq!(at([0.0, 1.0, 0.0]), [1.0, 0.0], "hors de portée");
+
+        // Les faces de la lampe elle-même : pleine lumière de bloc, sinon
+        // elle ne brillerait pas plus que le sol voisin (bloom, #51).
+        let [mesh, _] = mesh_chunk_in_world(&world, pos, 1.0).unwrap();
+        let lamp_top = (0..mesh.positions.len())
+            .filter(|&i| mesh.normals[i] == [0.0, 1.0, 0.0] && mesh.positions[i][1] == 2.0)
+            .map(|i| mesh.lights[i][1])
+            .collect::<Vec<_>>();
+        assert_eq!(lamp_top, [1.0; 4]);
     }
 }

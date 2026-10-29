@@ -322,6 +322,14 @@ flowchart TB
 - **Voisins d'abord.** Le streaming ne meshe un chunk qu'une fois les données de ses voisins de la zone chargée connues. Chaque chunk est meshé une fois au chargement (5,9 fois avant). Ceux du bord le sont une fois de plus quand la zone avance.
 - **Écartés** : budget de meshes seul (le travail reste), anneau de chunks générés autour de la zone (×3 de données), mesh sur le GPU. Détail : #55.
 
+**Effets de rendu** (ajout 2026-10-30, #51). Ce sont des réglages de la machine, jamais de la save ni du registre.
+- **Ombres du soleil.** Une `DirectionalLight` avec cartes d'ombre en cascades jusqu'à la distance de vue. La lumière du ciel du sommet (§3.8) multiplie toujours le soleil : pas de soleil dans une grotte, même au-delà de la carte d'ombre. La passe de profondeur (qui sert aux ombres) a son shader à nous : les trous des blocs `Mask` y sont découpés, les feuilles projettent une ombre trouée. Le semi-transparent (eau) ne projette pas d'ombre.
+- **Brouillard de distance**, couleur du ciel, qui finit à la distance de vue : cache le bord du monde chargé.
+- **Brouillard en volume et rayons de lumière** (`VolumetricFog`) : un léger voile dans un volume qui suit la caméra, éclairé par le soleil à travers sa carte d'ombre. Le plus cher des effets (64 pas par pixel) ; gardé parce que la cible est la 4060 (7 ms par image, passe opaque à 0,2–0,75 ms) et qu'il mène au rendu des packs de shaders.
+- **Bloom** (halo des lumières fortes), qui demande le rendu HDR. Les faces d'un bloc à `emits_light` sont en pleine lumière de bloc : le halo part de la lampe, pas du mur voisin.
+- **Une touche par effet**, l'état dans le HUD de debug : sert à la mesure avant/après. Défaut : tout activé, sauf sur un rendu logiciel (pas de carte graphique).
+- **Reportés ou écartés** : SSAO et ombres de contact (doublons de l'ombrage des coins), reflets sur l'eau, ciel (avec #30), ombres par rayons, réglages sauvés, brouillard sous l'eau. Détail : #56.
+
 ---
 
 ## 7. La tranche verticale — définition de « fait »
@@ -376,6 +384,7 @@ Ces non-goals sont *prévus par le data model* (§3) mais *pas implémentés* da
 | Runtime script | `mlua` v1 (reco), wasm en graduation | **Ouvert** | — |
 | Algo éclairage | Différé, full-bright pour la slice | **Ouvert** | — |
 | Meshing | Tâches en parallèle sur une copie avec bordure ; un chunk meshé quand ses voisins sont chargés (#53) | Mou (2026-10-29) | faible |
+| Effets de rendu | Ombres du soleil, brouillard de distance et en volume, bloom ; une touche par effet (#51) | Mou (2026-10-30) | faible |
 | Dims chunk | 32³ (reco) | **Ouvert** | faible (format porte ses dims) |
 | Index palette | `u16` (reco), adaptatif plus tard | **Ouvert** | faible |
 | Internals UI / API mod / worldgen / backend / multi | Laissés mous | **Mou** | — |

@@ -48,12 +48,12 @@ use crate::{ChunkMesh, DirtyChunks, GameWorld, Meshing};
 
 /// Rayon de vue, en **mètres** (§2 : le gameplay ne parle jamais « en
 /// chunks » — la conversion se fait ici et nulle part ailleurs).
-const VIEW_DISTANCE_M: f32 = 96.0;
+pub const VIEW_DISTANCE_M: f32 = 96.0;
 /// Hystérésis de déchargement, en mètres.
 const UNLOAD_MARGIN_M: f32 = 32.0;
 /// Demi-hauteur de la zone chargée, en mètres (distance verticale max entre
 /// le joueur et le centre d'un chunk).
-const VERTICAL_VIEW_M: f32 = 48.0;
+pub const VERTICAL_VIEW_M: f32 = 48.0;
 /// Bornes verticales du monde, en mètres (§3.4 : −128 à 384).
 const WORLD_MIN_Y_M: f32 = -128.0;
 const WORLD_MAX_Y_M: f32 = 384.0;

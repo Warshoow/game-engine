@@ -108,9 +108,15 @@ WSL le rendu est logiciel et rame — normal.
 - **Vertex shader à nous** (#23, `assets/shaders/voxel.wgsl`) : la
   lumière passe par un attribut à soi (`ATTRIBUTE_LIGHT`, emplacement 8).
   Tout mesh rendu avec `VoxelMaterial` doit l'avoir (`to_bevy_mesh`).
-  `BlockTextures::specialize` remplace les attributs de **toutes** les
-  passes : le prepass de Bevy (ombres, SSAO) attend d'autres emplacements
-  et casserait. À régler avant d'activer un effet qui l'utilise (#51).
+  `BlockTextures::specialize` ne touche qu'à la passe principale (sort
+  tout de suite si `PREPASS_PIPELINE`) : la passe de profondeur (ombres)
+  garde les emplacements de Bevy (`prepass_io.wgsl`), avec notre fragment
+  `voxel_prepass.wgsl` qui découpe les trous des blocs `Mask` (#51).
+- **Effets de rendu** (#51, `src/effects.rs`) : F1 ombres, F2 brouillard,
+  F3 brouillard en volume, F4 bloom ; coupés au démarrage en rendu
+  logiciel (llvmpipe sous WSL : 1 FPS avec, 6 sans). L'eau (`BlendMesh`)
+  est `NotShadowCaster`. Les faces d'un bloc à `emits_light` sont en
+  pleine lumière de bloc (mesher) : c'est d'elles que part le halo.
 - **Liquides** (#28) : le voxel reste l'ID du liquide, son niveau est dans
   `VoxelWorld::levels` (absent = source, `Some(0)` = chute, sinon distance
   à plat en voxels). `set_voxel` efface le niveau : écrire le niveau
@@ -485,6 +491,17 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   4060), pas de l'encodage (0,02 ms). Le chunk est encodé dans l'image et
   écrit par un fil à part, dans l'ordre d'envoi ; la fermeture attend les
   écritures en cours.
+- #51 codé : ombres du soleil (prepass à nous, feuilles trouées), brouillard
+  de distance couleur du ciel (le fond devient bleu ciel), brouillard en
+  volume et rayons de lumière (repris par rapport à la reco du 2026-10-28 :
+  la cible est la 4060), bloom avec faces émissives ; options reportées :
+  #56. **Pas vu en vrai** : sous WSL le rendu logiciel tombe à 1 FPS avec
+  les effets, et Warshow a signalé que le PC ne suivait plus ; arrêté là.
+  Une seule capture, prise avant que le monde soit chargé : image
+  uniformément gris-bleu, d'où la densité du voile baissée à l'estime
+  (`HAZE_DENSITY`). **À voir et mesurer sur la 4060** avant de fermer #51 :
+  rendu de chaque effet (F1 à F4), réglages (densité du voile, biais
+  d'ombre, force du bloom), temps GPU par passe (`elapsed_gpu`).
 
 ## Prochaines étapes
 
@@ -511,9 +528,8 @@ de `remesh_dirty` → **#53**, fait le 2026-10-29, à re-mesurer sur la
 4060 ; une saccade de 90 ms de `save_edited_chunks` → **#54**, fait le
 2026-10-30. Détail dans
 #41. Ensuite,
-choisi avec Warshow le 2026-10-25 : **#51 effets de rendu** (exploration
-présentée le 2026-10-28, en attente de la décision de Warshow ; options,
-reco et piège du prepass en commentaires du ticket),
+choisi avec Warshow le 2026-10-25 : **#51 effets de rendu** (codé le
+2026-10-30, à voir et mesurer sur la 4060 ; options reportées : #56),
 puis #30 jour/nuit (le ciel est déjà séparé dans les sommets : se fera
 dans le shader, sans re-mesher). Ce qui a été reporté (#18, #27, #28) est listé
 dans `docs/jalons.md`, « Plus tard », et dans #49.
