@@ -456,13 +456,25 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   `tools/profilage.bat`, `tools/trace_stats.py`), testé sur le PC sans GPU
   puis premier passage de Warshow sur la 4060 (résultats dans #41).
   Ouvert : #54 (sauvegarde d'un chunk dans l'image).
-- #53 fait le 2026-10-29 (meshing et génération hors de l'image, chunk
+- Commits jusqu'à `b01c67e`, à pousser par Warshow.
+
+## Fait dans la session du 2026-10-29
+
+- Cible de perf revue avec Warshow : écran 144 Hz de la 4060, 7 ms par
+  image ; le PC sans GPU n'est plus une cible (un jeu demande au moins une
+  puce graphique).
+- #53 fait (meshing et génération hors de l'image, chunk
   meshé une fois ; options écartées : #55). Sur le PC de dev : pire image
   du chargement 366 ms → 6 à 8 ms, course à 8 m/s médiane 1 ms et 0 à 11
   images sur 1440 au-delà de 7 ms (la lumière d'un chunk inséré, 1 à 7 ms,
   reste dans l'image). **À re-mesurer sur la 4060** (`profilage.bat
-  chargement` puis `course`) avant de fermer #53.
-- Commits jusqu'à `17f87dc`, à pousser par Warshow.
+  chargement` puis `course`) avant de fermer #53. Le dossier
+  `Downloads\voxel_engine_rtx` a encore les exe d'avant #53 : à refaire
+  (`cargo windows`, `cargo windows-profile`) quand Warshow prévoit la
+  mesure, pas avant (demandé le 2026-10-29) ; ajouter alors le scénario
+  « chargement » (monde neuf) au `LISEZMOI.txt`.
+- Commits jusqu'à `cf63639` (plus celui de cette passation), à pousser
+  par Warshow.
 
 ## Prochaines étapes
 
