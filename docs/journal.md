@@ -1019,3 +1019,31 @@ l'arrivée ; la fusion n'en souffre presque pas (161 617 quads dans le
 monde). Le greedy isolé passe de ~4,3 à ~5,1 ms par chunk (lumière des
 coins) ; dans le monde, avec le raccord et les deux passes, ~9,8 ms. À
 mesurer sur le PC avec GPU (#41).
+
+## 2026-10-28 — Profilage sur la RTX 4060 (#41)
+
+**Le besoin.** Le PC de test n'a pas de GPU : ses mesures ne disaient
+rien. Warshow allait tester sur son portable avec RTX 4060 ; le compteur
+de FPS seul aurait dit « ça va » ou « ça rame », pas pourquoi.
+
+**L'outillage.** Une feature `profile`, hors du build normal : la trace
+de Bevy (`trace_chrome`, le temps de chaque système à chaque image) et,
+toutes les 5 s dans la console, FPS, CPU, mémoire et le temps GPU de
+chaque passe de rendu. Un lanceur par scénario, et un script qui résume
+la trace. Premier écueil : à 144 FPS, la trace grossit d'environ 100 Mo
+par seconde (5 Go en 20 s chez Warshow, impossible à ouvrir). Le lanceur
+la zippe (~22× plus petit) et le script lit le zip, ligne à ligne, et
+donne les systèmes de chaque seconde lente.
+
+**Ce que la mesure a montré.** La carte ne force pas : la passe des blocs
+prend 0,2 à 0,75 ms par image, et les 144 FPS sont la limite de l'écran
+(vsync). Le problème est au chargement : 2 à 5 s à ~3 FPS, toutes dues à
+`remesh_dirty`, qui meshe dans l'image tous les chunks sales, et chaque
+nouveau chunk salit ses voisins. Une fois chargé, le monde ne coûte
+presque rien. Une saccade isolée de 90 ms vient de l'écriture d'un chunk
+sur le disque, elle aussi dans l'image. Deux tickets : #53, #54.
+
+**Leçons.** Les FPS de l'exe de profilage ne sont pas une référence
+(l'enregistrement coûte). Sur un écran 144 Hz, la vsync cache le coût d'un
+effet : mesurer #51 au temps GPU par passe. Un portable se mesure branché.
+

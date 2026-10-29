@@ -25,8 +25,10 @@ eau, lave, mer, nage, semi-transparent), validés sous Windows le
 2026-10-25 (sauf la mer d'un monde neuf, pas encore essayée). Puis
 l'**ombrage des coins** (#7), vu sous Windows. Puis la **lumière du ciel et
 des blocs** (#23 : grottes noires, lampe allumée, lave, eau qui assombrit),
-validée sous Windows par Warshow le 2026-10-26 sur le PC sans GPU ; pas
-encore essayée sur le PC avec RTX 4060.
+validée sous Windows par Warshow le 2026-10-26 sur le PC sans GPU. Premier
+passage sur le PC avec RTX 4060 le 2026-10-28 : 144 FPS après le
+chargement, mais 2 à 5 s à ~3 FPS au chargement (#53) ; la force des
+lampes n'a pas encore été jugée à l'œil.
 
 1. Chunk généré depuis la seed (heightmap fBm maison, **grottes** par
    bruit 3D, **biomes, minerais, arbres** décrits dans
@@ -286,6 +288,13 @@ retourne le code de `tail`). Vérifier `EXIT=$?` explicitement.
 - **Save locale** : `cargo run` lit/écrit `saves/world/` à la racine du
   dépôt (gitignoré) ; l'effacer pour un monde neuf, notamment si un test
   dépend du terrain généré.
+- **Trace de profilage** : à 144 FPS elle grossit d'environ 100 Mo par
+  seconde ; `profilage.bat` la zippe, `trace_stats.py` lit le zip (Perfetto
+  sature au-delà de ~1 Go). 20 s maximum par scénario. Les FPS de référence
+  se prennent avec l'exe normal ; sur la 4060 la vsync plafonne à 144, le
+  coût d'un effet se lit dans les lignes `elapsed_gpu` du log.
+- **Clé USB de Warshow** (D: sous Windows) : non montée dans WSL. La lire
+  par `cmd.exe /c copy D:\<fichier> <dossier C:>`, puis depuis `/mnt/c`.
 - **Piège ECS** : les entités spawnées via `Commands` ne sont visibles dans
   les `Query` qu'à la frame suivante — d'où `DirtyChunks` + un seul système
   de meshing (`remesh_dirty`), voir les invariants.
@@ -420,6 +429,18 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   Warshow (PC sans GPU) : « cela fonctionne bien ». Reste à voir sur le
   PC avec RTX 4060 : le rendu et le coût (scénarios ajoutés à #41).
 - Poussé par Warshow jusqu'à `0545d1b` ; #23 fermé.
+
+## Fait dans la session du 2026-10-28
+
+- #51 : phase exploratoire présentée (options, coûts, reco en commentaire
+  du ticket). **En attente de la décision de Warshow** ; ticket des options
+  écartées à créer à la décision.
+- #41 : outillage de profilage (feature `profile`, `cargo windows-profile`,
+  `tools/profilage.bat`, `tools/trace_stats.py`), testé sur le PC sans GPU
+  puis premier passage de Warshow sur la 4060 (résultats dans #41).
+  Ouvert : #53 (meshing hors de l'image), #54 (sauvegarde d'un chunk dans
+  l'image).
+- Commits jusqu'à `17f87dc`, à pousser par Warshow.
 
 ## Prochaines étapes
 
