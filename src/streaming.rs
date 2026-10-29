@@ -6,14 +6,15 @@
 //! frame :
 //!
 //! 1. **Charger** : les chunks dans le rayon de vue qui n'ont pas de données
-//!    sont générés (du plus proche au plus loin), sous un **budget par
-//!    frame** — le coût se lisse sur plusieurs frames au lieu d'un gros
-//!    hitch quand on franchit une frontière de chunk.
-//! 2. **Noter à mesher** ([`DirtyChunks`]) : les chunks générés ET leurs
-//!    voisins déjà affichés — le culling inter-chunks fait que la bordure
-//!    d'un chunk dépend de ses voisins ; quand un voisin apparaît, la couture
-//!    doit se refermer. Le meshing lui-même est fait après, par
-//!    `remesh_dirty` (main.rs), une fois par chunk.
+//!    sont lus dans la save ou générés (du plus proche au plus loin) dans
+//!    des **tâches** en parallèle ([`Generating`], #53). L'image n'en insère
+//!    que quelques-uns dans le monde : leur lumière se calcule là.
+//! 2. **Mesher** ([`DirtyChunks`]) : un chunk l'est quand ses voisins de la
+//!    zone ont leurs données — la bordure d'un chunk dépend de ses voisins
+//!    (culling inter-chunks, ombre des coins). Il est ainsi meshé une fois
+//!    au chargement, et non une fois par voisin arrivé après lui ; un chunk
+//!    affiché dont un voisin arrive plus tard est re-meshé une fois de plus.
+//!    Le meshing lui-même tourne dans des tâches (`remesh_dirty`, main.rs).
 //! 3. **Décharger** : les entités-chunk au-delà du rayon + une marge
 //!    d'hystérésis sont despawnées (et leur asset GPU libéré). Les
 //!    **données** du chunk restent en mémoire : les modifications du joueur
@@ -31,17 +32,19 @@
 //! servirait à rien. Le monde est borné en hauteur (§3.4) : aucune couche
 //! hors de `[WORLD_MIN_Y_M, WORLD_MAX_Y_M)` n'est générée.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use bevy::prelude::*;
+use bevy::tasks::{block_on, AsyncComputeTaskPool, Task};
 
-use voxel_core::chunk::ChunkPos;
+use voxel_core::chunk::{Chunk, ChunkPos};
+use voxel_core::world::ChunkState;
 use voxel_core::worldgen::WorldGenerator;
 
 use crate::items::StorageChanged;
 use crate::player::Player;
 use crate::save::WorldSave;
-use crate::{ChunkMesh, DirtyChunks, GameWorld};
+use crate::{ChunkMesh, DirtyChunks, GameWorld, Meshing};
 
 /// Rayon de vue, en **mètres** (§2 : le gameplay ne parle jamais « en
 /// chunks » — la conversion se fait ici et nulle part ailleurs).
@@ -54,8 +57,24 @@ const VERTICAL_VIEW_M: f32 = 48.0;
 /// Bornes verticales du monde, en mètres (§3.4 : −128 à 384).
 const WORLD_MIN_Y_M: f32 = -128.0;
 const WORLD_MAX_Y_M: f32 = 384.0;
-/// Chunks générés/meshés par frame — lisse le coût du streaming.
-const GEN_BUDGET_PER_FRAME: usize = 4;
+/// Générations en cours au plus, dans des tâches (#53).
+const GEN_TASKS: usize = 8;
+/// Chunks insérés dans le monde par image, au plus une colonne près : leur
+/// lumière (§3.8) se calcule dans l'image, 1 à 3,5 ms chacun.
+const INSERT_BUDGET_PER_FRAME: usize = 1;
+/// Meshings lancés par image : la copie du chunk se fait dans l'image,
+/// 0,5 à 2 ms chacune (plus en course : les données ne sont plus en cache).
+const MESH_BUDGET_PER_FRAME: usize = 2;
+
+/// Une colonne chargée par une tâche : le chunk demandé, puis ceux au-dessus
+/// qui pourraient le couvrir (§3.8), du bas vers le haut ; avec leur état
+/// s'ils viennent de la save.
+type Column = Vec<(ChunkPos, Chunk, Option<ChunkState>)>;
+
+/// Colonnes en cours de chargement dans des tâches (#53), par chunk
+/// demandé : le chunk où la colonne s'arrête, et la tâche.
+#[derive(Resource, Default)]
+pub struct Generating(HashMap<ChunkPos, (ChunkPos, Task<Result<Column, String>>)>);
 
 // Paramètres de système Bevy : c'est la forme normale (cf. `interact`).
 #[allow(clippy::too_many_arguments)]
@@ -63,6 +82,10 @@ pub fn stream_chunks(
     mut commands: Commands,
     mut game: ResMut<GameWorld>,
     mut dirty: ResMut<DirtyChunks>,
+    mut meshing: ResMut<Meshing>,
+    mut generating: ResMut<Generating>,
+    // Chunks affichés dont un voisin a reçu ses données depuis leur mesh.
+    mut stale: Local<HashSet<ChunkPos>>,
     mut storage: ResMut<StorageChanged>,
     save: Option<Res<WorldSave>>,
     player: Query<&Transform, With<Player>>,
@@ -114,58 +137,115 @@ pub fn stream_chunks(
     let dist_m = |pos: ChunkPos| horiz_m(pos).hypot(vert_m(pos));
     desired.sort_by(|a, b| dist_m(*a).total_cmp(&dist_m(*b)));
 
-    // --- 2. Générer (budget), en notant tout ce qui devra être meshé. ---
-    let mut budget = GEN_BUDGET_PER_FRAME;
-    for pos in desired {
+    // --- 2. Insérer les colonnes chargées, sous budget. ---
+    // Lumière changée avant (pose/casse, blocs qui changent seuls) : re-meshé
+    // tout de suite, avec le reste de l'edit.
+    let lit = game.world.take_light_changed();
+    dirty.0.extend(lit.into_iter().filter(|n| displayed.contains(n) || meshing.contains(*n)));
+    // Une colonne arrêtée sous un chunk encore en chargement attend qu'il
+    // soit inséré : sinon elle se croirait sous le ciel ouvert.
+    let finished: Vec<ChunkPos> = generating
+        .0
+        .iter()
+        .filter(|(_, (stop, task))| task.is_finished() && !generating.0.contains_key(stop))
+        .map(|(pos, _)| *pos)
+        .collect();
+    let mut inserted = 0;
+    for key in finished {
+        if inserted >= INSERT_BUDGET_PER_FRAME {
+            break;
+        }
+        // Un fichier illisible arrête le jeu plutôt que d'être écrasé par un
+        // chunk régénéré au prochain édit.
+        let column = block_on(generating.0.remove(&key).unwrap().1).unwrap_or_else(|err| panic!("{err}"));
+        // Du haut vers le bas : la lumière du ciel descend.
+        for (pos, chunk, state) in column.into_iter().rev() {
+            if game.world.chunk(pos).is_some() {
+                continue; // apporté par une autre colonne
+            }
+            match state {
+                Some(state) => {
+                    game.world.insert_saved_chunk(pos, chunk, state);
+                    storage.0.extend(game.world.block_entity_positions(pos));
+                }
+                None => game.world.insert_chunk(pos, chunk),
+            }
+            inserted += 1;
+            // La bordure des voisins déjà meshés doit se recoudre contre ce
+            // nouveau chunk (culling inter-chunks, ombre des coins).
+            stale.extend(neighbors(pos).filter(|n| displayed.contains(n) || meshing.contains(*n)));
+        }
+    }
+    // La lumière que ces chunks ont changée chez leurs voisins : re-meshés
+    // sous le budget de l'étape 4, comme les bordures.
+    let lit = game.world.take_light_changed();
+    stale.extend(lit.into_iter().filter(|n| displayed.contains(n) || meshing.contains(*n)));
+
+    // --- 3. Lancer le chargement des chunks sans données, du plus proche au
+    // plus loin. ---
+    for &pos in &desired {
+        if generating.0.len() >= GEN_TASKS {
+            break;
+        }
+        let pending = |pos: ChunkPos| game.world.chunk(pos).is_some() || generating.0.contains_key(&pos);
+        if pending(pos) {
+            continue;
+        }
+        // La lumière (§3.8) tient un chunk sans données au-dessus de lui
+        // pour sous le ciel ouvert : la colonne monte jusqu'à un chunk déjà
+        // là ou en cours de chargement, ou sûrement vide (plus haut que tout
+        // ce que pose le générateur, et pas dans la save). Ces chunks-là ont
+        // des données mais pas d'entité.
+        let mut stop = ChunkPos { y: pos.y + 1, ..pos };
+        while (stop.y as f32) * extent_m < WORLD_MAX_Y_M && !pending(stop) {
+            stop.y += 1;
+        }
+        let (generator, save) = (game.generator.clone(), save.as_ref().map(|s| s.0.clone()));
+        let (size, vpm) = (game.world.chunk_size(), game.world.voxels_per_meter());
+        let task = AsyncComputeTaskPool::get().spawn(async move {
+            // Sauvé (modifié par le joueur) : relu ; sinon généré depuis la seed.
+            let load = |pos: ChunkPos| -> Result<_, String> {
+                Ok(match save.as_ref().map_or(Ok(None), |s| s.read_chunk(pos))? {
+                    Some((chunk, state)) => (pos, chunk, Some(state)),
+                    None => (pos, generator.generate_chunk(pos, size, vpm), None),
+                })
+            };
+            let mut column = vec![load(pos)?];
+            for y in pos.y + 1..stop.y {
+                let above = ChunkPos { y, ..pos };
+                let saved = save.as_ref().map_or(Ok(None), |s| s.read_chunk(above))?;
+                if saved.is_none() && y as f32 * extent_m >= generator.top_m() {
+                    break;
+                }
+                column.push(match saved {
+                    Some((chunk, state)) => (above, chunk, Some(state)),
+                    None => load(above)?,
+                });
+            }
+            Ok(column)
+        });
+        generating.0.insert(pos, (stop, task));
+    }
+
+    // --- 4. Mesher ce qui est prêt. ---
+    let wanted: HashSet<ChunkPos> = desired.iter().copied().collect();
+    let mut budget = MESH_BUDGET_PER_FRAME;
+    for &pos in &desired {
         if budget == 0 {
             break;
         }
-        let has_data = game.world.chunk(pos).is_some();
-        if has_data && displayed.contains(&pos) {
-            continue; // déjà chargé et affiché : rien à faire
+        // Jamais affiché (chunk neuf, ou données d'un passage précédent qui
+        // reviennent dans le rayon), ou un voisin est arrivé depuis.
+        let new = !displayed.contains(&pos) && !meshing.contains(pos);
+        if !(new || stale.contains(&pos)) || game.world.chunk(pos).is_none() {
+            continue;
         }
-        if !has_data {
-            // Sauvé (modifié par le joueur) : relu ; sinon généré depuis la
-            // seed. Un fichier illisible arrête le jeu plutôt que d'être
-            // écrasé par un chunk régénéré au prochain édit.
-            let read = |pos| save.as_ref().map_or(Ok(None), |s| s.0.read_chunk(pos)).unwrap_or_else(|err| panic!("{err}"));
-            // La lumière (§3.8) tient un chunk sans données au-dessus de lui
-            // pour sous le ciel ouvert : on charge d'abord ce qui pourrait
-            // le couvrir, jusqu'à un chunk déjà là ou sûrement vide (plus
-            // haut que tout ce que pose le générateur, et pas dans la save).
-            // Ces chunks-là ont des données mais pas d'entité.
-            let mut column = vec![(pos, read(pos))];
-            let mut above = ChunkPos { y: pos.y + 1, ..pos };
-            while (above.y as f32) * extent_m < WORLD_MAX_Y_M && game.world.chunk(above).is_none() {
-                let saved = read(above);
-                if saved.is_none() && above.y as f32 * extent_m >= game.generator.top_m() {
-                    break;
-                }
-                column.push((above, saved));
-                above.y += 1;
-            }
-            for (pos, saved) in column.into_iter().rev() {
-                match saved {
-                    Some((chunk, state)) => {
-                        game.world.insert_saved_chunk(pos, chunk, state);
-                        storage.0.extend(game.world.block_entity_positions(pos));
-                    }
-                    None => {
-                        let chunk = game.generator.generate_chunk(pos, game.world.chunk_size(), game.world.voxels_per_meter());
-                        game.world.insert_chunk(pos, chunk);
-                    }
-                }
-            }
-            // La bordure des voisins déjà affichés doit se recoudre contre
-            // ce nouveau chunk (culling inter-chunks, ombre des coins).
-            for n in neighbors(pos) {
-                if displayed.contains(&n) {
-                    dirty.0.insert(n);
-                }
-            }
+        // Ses voisins de la zone d'abord : meshé une fois, et non une fois
+        // par voisin qui arrive après lui (#53).
+        if neighbors(pos).any(|n| wanted.contains(&n) && game.world.chunk(n).is_none()) {
+            continue;
         }
-        // Chunk fraîchement généré, ou données conservées d'un passage
-        // précédent (édits du joueur inclus) qui revient dans le rayon.
+        stale.remove(&pos);
         dirty.0.insert(pos);
         budget -= 1;
     }
@@ -181,6 +261,8 @@ pub fn stream_chunks(
             commands.entity(entity).despawn();
             // Plus d'entité : ne pas le re-mesher (ça la recréerait).
             dirty.0.remove(&cm.0);
+            meshing.forget(cm.0);
+            stale.remove(&cm.0);
         }
     }
 }
@@ -220,6 +302,15 @@ mod tests {
 
     /// Comme [`stream_all_air`], avec un sol de pierre à `ground_level_m`.
     fn stream_under(ground_level_m: f32, y_m: f32, save: Option<Save>) -> (App, Vec<ChunkPos>) {
+        let mut app = app_under(ground_level_m, 1.0, y_m, save);
+        settle(&mut app);
+        let mut q = app.world_mut().query::<&ChunkMesh>();
+        let loaded = q.iter(app.world()).map(|c| c.0).collect();
+        (app, loaded)
+    }
+
+    /// L'app headless du streaming, avant la première image.
+    fn app_under(ground_level_m: f32, amplitude_m: f32, y_m: f32, save: Option<Save>) -> App {
         let mut registry = Registry::new();
         let air = registry
             .register(ContentEntry::new_block("core:air", false, [0.0; 3]))
@@ -233,12 +324,15 @@ mod tests {
             ground: stone,
             stone,
             ground_level_m,
-            amplitude_m: 1.0,
+            amplitude_m,
             feature_size_m: 24.0,
         };
         let mut app = App::new();
-        app.init_resource::<Assets<Mesh>>()
+        app.add_plugins(TaskPoolPlugin::default())
+            .init_resource::<Assets<Mesh>>()
             .init_resource::<DirtyChunks>()
+            .init_resource::<Meshing>()
+            .init_resource::<Generating>()
             .init_resource::<StorageChanged>()
             .insert_resource(GameWorld {
                 world: VoxelWorld::new(registry, CHUNK_SIZE, 1.0),
@@ -255,15 +349,27 @@ mod tests {
             Player::default(),
             Transform::from_xyz(0.5, y_m, 0.5),
         ));
+        app
+    }
 
-        // Assez de frames pour tout charger au budget de 4/frame
-        // (~30 colonnes × 4 couches).
-        for _ in 0..100 {
+    /// Fait tourner l'app jusqu'à ce que le streaming n'ait plus rien en
+    /// cours : les tâches finissent à leur rythme, pas en un nombre
+    /// d'images connu d'avance.
+    fn settle(app: &mut App) {
+        let mut quiet = 0;
+        for _ in 0..100_000 {
             app.update();
+            let busy = !app.world().resource::<DirtyChunks>().0.is_empty()
+                || !app.world().resource::<Meshing>().0.is_empty()
+                || !app.world().resource::<Generating>().0.is_empty();
+            quiet = if busy { 0 } else { quiet + 1 };
+            // Deux images calmes : le streaming a pu demander ce qui restait.
+            if quiet == 2 {
+                return;
+            }
+            std::thread::yield_now();
         }
-        let mut q = app.world_mut().query::<&ChunkMesh>();
-        let loaded = q.iter(app.world()).map(|c| c.0).collect();
-        (app, loaded)
+        panic!("le streaming ne s'arrête pas");
     }
 
     /// Régression : un chunk vide n'avait pas d'entité, passait pour jamais
@@ -278,6 +384,7 @@ mod tests {
         // Une fois tout chargé, le streaming ne doit plus rien demander.
         app.world_mut().run_system_once(stream_chunks).unwrap();
         assert!(app.world().resource::<DirtyChunks>().0.is_empty());
+        assert!(app.world().resource::<Generating>().0.is_empty());
     }
 
     #[test]
@@ -328,5 +435,68 @@ mod tests {
         assert!(world.chunk(covering).is_some());
         assert!(!loaded.contains(&covering), "chargé pour le ciel, pas affiché");
         assert!(world.chunk(ChunkPos { x: 0, y: 5, z: 0 }).is_none(), "au-dessus de tout relief : rien");
+    }
+
+    /// Meshes demandés depuis la mise à zéro.
+    #[derive(Resource, Default)]
+    struct Asked(usize);
+
+    fn count_asked(app: &mut App) {
+        app.init_resource::<Asked>().add_systems(
+            Update,
+            (|dirty: Res<DirtyChunks>, mut asked: ResMut<Asked>| asked.0 += dirty.0.len())
+                .after(stream_chunks)
+                .before(remesh_dirty),
+        );
+    }
+
+    /// #53 : un chunk attend ses voisins de la zone avant d'être meshé, au
+    /// lieu d'être re-meshé à l'arrivée de chacun (5,9 meshes par chunk).
+    #[test]
+    fn each_chunk_is_meshed_once_on_load() {
+        let mut app = app_under(16.0, 6.0, 20.0, None);
+        count_asked(&mut app);
+        settle(&mut app);
+        let chunks = app.world_mut().query::<&ChunkMesh>().iter(app.world()).count();
+        assert!(chunks > 50, "{chunks} chunks");
+        assert_eq!(app.world().resource::<Asked>().0, chunks);
+    }
+
+    /// Mesure (#53) : temps de l'image (la part du streaming et du
+    /// meshing qui reste dans l'image) au chargement d'un monde neuf, puis en
+    /// courant à 8 m/s. Images cadencées à 144 Hz, comme l'écran de la 4060.
+    /// `cargo test --release --bin voxel_engine -- --ignored --nocapture
+    /// mesure_chargement`
+    #[test]
+    #[ignore]
+    fn mesure_chargement() {
+        let mut app = app_under(16.0, 6.0, 20.0, None);
+        count_asked(&mut app);
+        let frame = std::time::Duration::from_secs_f64(1.0 / 144.0);
+        let report = |app: &mut App, name: &str, frames: usize, speed_m_s: f32| {
+            app.world_mut().resource_mut::<Asked>().0 = 0;
+            let mut times = Vec::new();
+            for _ in 0..frames {
+                let start = std::time::Instant::now();
+                let mut q = app.world_mut().query_filtered::<&mut Transform, With<Player>>();
+                q.single_mut(app.world_mut()).unwrap().translation.x += speed_m_s * frame.as_secs_f32();
+                app.update();
+                let t = start.elapsed();
+                times.push(t.as_secs_f64() * 1000.0);
+                std::thread::sleep(frame.saturating_sub(t));
+            }
+            let chunks = app.world_mut().query::<&ChunkMesh>().iter(app.world()).count();
+            times.sort_by(f64::total_cmp);
+            eprintln!(
+                "{name} : {chunks} chunks affichés, {} meshes demandés, image médiane {:.2} ms, 99 % {:.2} ms, pire {:.2} ms, {} images > 7 ms",
+                app.world().resource::<Asked>().0,
+                times[times.len() / 2],
+                times[times.len() * 99 / 100],
+                times[times.len() - 1],
+                times.iter().filter(|&&t| t > 7.0).count(),
+            );
+        };
+        report(&mut app, "chargement (3 s)", 3 * 144, 0.0);
+        report(&mut app, "course (10 s)", 10 * 144, 8.0);
     }
 }

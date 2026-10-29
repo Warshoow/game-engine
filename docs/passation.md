@@ -27,14 +27,17 @@ l'**ombrage des coins** (#7), vu sous Windows. Puis la **lumière du ciel et
 des blocs** (#23 : grottes noires, lampe allumée, lave, eau qui assombrit),
 validée sous Windows par Warshow le 2026-10-26 sur le PC sans GPU. Premier
 passage sur le PC avec RTX 4060 le 2026-10-28 : 144 FPS après le
-chargement, mais 2 à 5 s à ~3 FPS au chargement (#53) ; la force des
-lampes n'a pas encore été jugée à l'œil.
+chargement, mais 2 à 5 s à ~3 FPS au chargement. Corrigé par #53 le
+2026-10-29 (meshing et génération en tâches, chunk meshé une fois),
+à re-mesurer sur la 4060. La force des lampes n'a pas encore été jugée à
+l'œil.
 
 1. Chunk généré depuis la seed (heightmap fBm maison, **grottes** par
    bruit 3D, **biomes, minerais, arbres** décrits dans
    `assets/content/worldgen.ron`, déterministe), **en continu autour du
    joueur** sur plusieurs couches (cylindre 96 m × ±48 m, borné à −128 /
-   384 m ; budget 4 chunks/frame, hystérésis).
+   384 m ; génération en tâches, 1 chunk inséré et 2 meshes lancés par
+   image, hystérésis).
 2. Mesher blocky **greedy** avec **raccord inter-chunks** (le naïf reste
    comme oracle de test).
 3. Pose/casse data-driven : casser fait tomber les drops du bloc en items
@@ -172,10 +175,24 @@ WSL le rendu est logiciel et rame — normal.
   de blocs en dur ; la barre lit couleur et nom dans le registre (§3.11).
 - **Un seul chemin de meshing** : génération, streaming et pose/casse
   notent les chunks à re-mesher dans `DirtyChunks` ; seul `remesh_dirty`
-  (main.rs) meshe (→ `mesh_chunk_in_world`) et crée les entités-chunk.
+  (main.rs) meshe et crée les entités-chunk.
   Ne pas re-mesher ailleurs : deux systèmes qui spawnent la même frame
   créent deux entités pour un chunk (spawn invisible aux `Query` avant la
   frame suivante).
+- **Meshing en tâches (#53, design doc §6)** : `remesh_dirty` copie chaque
+  chunk avec une case de bordure (`mesher::Region`, ~0,5 ms dans l'image)
+  et le meshe dans une tâche. Les meshes lancés à la même image forment un
+  lot (`Meshing`), appliqué d'un coup et dans l'ordre : pas de trou entre
+  deux chunks touchés par un même edit. Un chunk déchargé abandonne ses
+  meshes en cours (`Meshing::forget`), sinon ils recréeraient son entité.
+- **Streaming (#53)** : colonnes lues ou générées en tâches (`Generating`) ;
+  une colonne arrêtée sous un chunk encore en chargement attend qu'il soit
+  inséré (lumière du ciel, §3.8). Un chunk n'est meshé que quand ses
+  voisins de la zone ont leurs données (une fois au chargement, test
+  `each_chunk_is_meshed_once_on_load`) ; un chunk affiché dont un voisin
+  arrive ou dont la lumière change à cause du streaming est re-meshé sous
+  le même budget. Mesure : `cargo test --release --bin voxel_engine --
+  --ignored --nocapture mesure_chargement` (images cadencées à 144 Hz).
 - **Un chunk chargé a toujours une entité `ChunkMesh`**, même au mesh
   vide (alors sans `Mesh3d`). Sinon un chunk d'air passe pour non chargé
   et est re-meshé à chaque frame (test `streaming::tests`).
@@ -438,8 +455,13 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
 - #41 : outillage de profilage (feature `profile`, `cargo windows-profile`,
   `tools/profilage.bat`, `tools/trace_stats.py`), testé sur le PC sans GPU
   puis premier passage de Warshow sur la 4060 (résultats dans #41).
-  Ouvert : #53 (meshing hors de l'image), #54 (sauvegarde d'un chunk dans
-  l'image).
+  Ouvert : #54 (sauvegarde d'un chunk dans l'image).
+- #53 fait le 2026-10-29 (meshing et génération hors de l'image, chunk
+  meshé une fois ; options écartées : #55). Sur le PC de dev : pire image
+  du chargement 366 ms → 6 à 8 ms, course à 8 m/s médiane 1 ms et 0 à 11
+  images sur 1440 au-delà de 7 ms (la lumière d'un chunk inséré, 1 à 7 ms,
+  reste dans l'image). **À re-mesurer sur la 4060** (`profilage.bat
+  chargement` puis `course`) avant de fermer #53.
 - Commits jusqu'à `17f87dc`, à pousser par Warshow.
 
 ## Prochaines étapes
@@ -463,9 +485,9 @@ ralentit. Premier passage le 2026-10-28 (PC portable, « RTX 4060 Laptop
 GPU », branché ; toujours mesurer branché) : GPU quasi au repos, 144 FPS
 (vsync : à 144 Hz le compteur cache le coût d'un effet, mesurer #51 avec
 les lignes `elapsed_gpu` du log de profilage) après le chargement ; le chargement passe 2 à 5 s à ~3 FPS à cause
-de `remesh_dirty` → **#53** (meshing hors de l'image) ; une saccade de
-90 ms de `save_edited_chunks` → **#54**. Détail dans #41. Ordre entre #53,
-#54 et #51 à choisir avec Warshow. Ensuite,
+de `remesh_dirty` → **#53**, fait le 2026-10-29, à re-mesurer sur la
+4060 ; une saccade de 90 ms de `save_edited_chunks` → **#54**. Détail dans
+#41. Ensuite,
 choisi avec Warshow le 2026-10-25 : **#51 effets de rendu** (exploration
 présentée le 2026-10-28, en attente de la décision de Warshow ; options,
 reco et piège du prepass en commentaires du ticket),

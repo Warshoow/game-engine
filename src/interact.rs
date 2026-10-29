@@ -21,8 +21,9 @@
 //!
 //! Après une écriture, le chunk touché est noté à re-mesher intégralement
 //! ([`DirtyChunks`]). C'est brut (on reconstruit 32³ voxels pour un
-//! changement d'un seul) mais largement assez rapide — et c'est le *même*
-//! chemin de meshing que le streaming (`remesh_dirty`, main.rs).
+//! changement d'un seul) mais le meshing tourne hors de l'image (#53) — et
+//! c'est le *même* chemin de meshing que le streaming (`remesh_dirty`,
+//! main.rs). Les chunks touchés par un même edit changent à la même image.
 
 use bevy::prelude::*;
 

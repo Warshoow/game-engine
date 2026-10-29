@@ -124,7 +124,7 @@ impl MeshData {
 /// bordure est émise. C'est la variante « chunk isolé » (tests, outillage) —
 /// en jeu, préférer [`mesh_chunk_in_world`] qui raccorde les chunks entre eux.
 pub fn mesh_chunk(chunk: &Chunk, registry: &Registry, voxel_size_m: f32) -> MeshData {
-    mesh_chunk_with(chunk, registry, voxel_size_m, false, |_| None, |_| None, |_| [1, 0], 1)
+    Region::isolated(chunk, registry).mesh_pass(voxel_size_m, false)
 }
 
 /// Meshe le chunk `pos` en interrogeant le **monde** pour les voxels hors
@@ -136,193 +136,260 @@ pub fn mesh_chunk(chunk: &Chunk, registry: &Registry, voxel_size_m: f32) -> Mesh
 /// Rend `[le reste, le semi-transparent]` ; `None` si le chunk n'est pas
 /// chargé.
 pub fn mesh_chunk_in_world(world: &VoxelWorld, pos: ChunkPos, voxel_size_m: f32) -> Option<[MeshData; 2]> {
-    let chunk = world.chunk(pos)?;
-    let size = world.chunk_size() as i64;
-    let base = [
-        pos.x as i64 * size,
-        pos.y as i64 * size,
-        pos.z as i64 * size,
-    ];
-    let at = |p: [i32; 3]| [base[0] + p[0] as i64, base[1] + p[1] as i64, base[2] + p[2] as i64];
-    let reg = &world.registry;
-    let vpm = world.voxels_per_meter();
-    let full = world.full_light();
-    // Sa propre lumière lue sans passer par la table des chunks.
-    let own = world.chunk_light(pos);
-    let s = size as i32;
-    let light = |p: [i32; 3]| match own {
-        Some([sky, block]) if p.iter().all(|&c| (0..s).contains(&c)) => {
-            let i = (p[0] + s * (p[1] + s * p[2])) as usize;
-            [sky.get(i), block.get(i)]
-        }
-        _ => world.light_at(at(p)),
-    };
-    let mesh = |blend| {
-        mesh_chunk_with(chunk, reg, voxel_size_m, blend, |p| world.voxel(at(p)), |p| {
-            world.liquid(world.voxel(at(p))?).map(|l| liquids::height(world.liquid_level(at(p)), liquids::reach(&l, vpm)))
-        }, light, full)
-    };
-    Some([mesh(false), mesh(true)])
+    Some(Region::copy(world, pos)?.mesh(voxel_size_m))
 }
 
-/// Cœur du greedy : `outside` donne le contenu des coordonnées (locales au
-/// chunk) hors bornes, `None` = rien (air) — c'est là que se joue le raccord.
-/// `blend` : la passe semi-transparente, sinon le reste. `surface` : la
-/// hauteur d'un liquide sous de l'air (part de voxel), `None` pour un bloc
-/// plein. `light` : `[ciel, blocs]` d'une case, dans ou hors du chunk ;
-/// `full` : le niveau du ciel ouvert.
-#[allow(clippy::too_many_arguments)]
-fn mesh_chunk_with(
-    chunk: &Chunk,
-    registry: &Registry,
-    voxel_size_m: f32,
-    blend: bool,
-    outside: impl Fn([i32; 3]) -> Option<ContentId>,
-    surface: impl Fn([i32; 3]) -> Option<f32>,
-    light: impl Fn([i32; 3]) -> [u8; 2],
+/// Case sans données (chunk voisin non chargé) : comptée comme de l'air.
+const NOTHING: u16 = u16::MAX;
+
+/// Ce que le mesher lit d'un chunk : ses voxels et une case de bordure
+/// autour, avec la lumière et la hauteur des liquides. Copié du monde, il se
+/// meshe sans lui, donc dans une autre tâche pendant que le monde change
+/// (#53). ~200 Ko pour un chunk de 32³.
+pub struct Region {
+    /// Arête du chunk ; la copie en fait `size + 2`, de -1 à `size`.
+    size: i32,
+    /// Index dans `blocks` de chaque case, ou [`NOTHING`]. Au centre, c'est
+    /// l'index de palette du chunk.
+    cells: Vec<u16>,
+    blocks: Vec<Resolved>,
+    /// `[ciel, blocs]` de chaque case.
+    lights: Vec<[u8; 2]>,
+    /// Hauteur de la surface d'un liquide sous de l'air (sur 255), `FULL`
+    /// pour le reste.
+    heights: Vec<u8>,
+    /// Niveau du ciel ouvert.
     full: u8,
-) -> MeshData {
-    let size = chunk.size() as i32;
-    let n = chunk.size() as usize;
-    let resolved = resolve_palette(chunk, registry);
-    let inside = |q: [i32; 3]| q.iter().all(|&c| (0..size).contains(&c));
-    let id_at = |q: [i32; 3]| {
-        if inside(q) { Some(resolved[chunk.get_local(q[0] as u32, q[1] as u32, q[2] as u32) as usize].id) } else { outside(q) }
-    };
+}
 
-    // Hauteur du liquide `id` en `p` (sur 255) : sous autre chose que
-    // lui-même, sa surface est abaissée.
-    let height_at = |p: [i32; 3], id: ContentId| {
-        if id_at([p[0], p[1] + 1, p[2]]) == Some(id) {
-            FULL
-        } else {
-            surface(p).map_or(FULL, |h| (h * f32::from(FULL)).round() as u8)
-        }
-    };
-
-    // Fait de l'ombre aux coins des faces voisines.
-    let occludes = |q: [i32; 3]| {
-        if inside(q) {
-            resolved[chunk.get_local(q[0] as u32, q[1] as u32, q[2] as u32) as usize].casts_shadow()
-        } else {
-            outside(q).is_some_and(|id| resolve(registry, id).casts_shadow())
-        }
-    };
-
-    // (index de palette, haut, bas, ombres, lumière) de `p` si sa face vers
-    // `q` se voit ; haut et bas sur 255, `FULL` et 0 pour une face entière ;
-    // ombres et lumière des quatre coins ([`face_ao`], [`face_light`]). `p`
-    // est toujours dans le chunk, `q` peut en sortir.
-    let visible_face = |p: [i32; 3], q: [i32; 3], axes: [usize; 3]| -> Option<Key> {
-        let idx = chunk.get_local(p[0] as u32, p[1] as u32, p[2] as u32);
-        let block = &resolved[idx as usize];
-        if !block.drawn || block.blend != blend {
-            return None;
-        }
-        let height = if block.liquid { height_at(p, block.id) } else { FULL };
-        let beyond;
-        let neighbor = if inside(q) {
-            Some(&resolved[chunk.get_local(q[0] as u32, q[1] as u32, q[2] as u32) as usize])
-        } else {
-            beyond = outside(q).map(|id| resolve(registry, id));
-            beyond.as_ref()
+impl Region {
+    /// Le chunk seul : rien autour, tout au ciel ouvert.
+    fn isolated(chunk: &Chunk, registry: &Registry) -> Self {
+        let size = chunk.size() as i32;
+        let side = (size + 2) as usize;
+        let mut region = Region {
+            size,
+            cells: vec![NOTHING; side.pow(3)],
+            blocks: resolve_palette(chunk, registry),
+            lights: vec![[1, 0]; side.pow(3)],
+            heights: vec![FULL; side.pow(3)],
+            full: 1,
         };
-        // Côté d'un liquide contre le même liquide plus bas : seule la
-        // différence de hauteur se voit (une pente d'eau, une chute dans un
-        // lac).
-        if block.liquid && q[1] == p[1] && neighbor.is_some_and(|o| o.id == block.id) {
-            let theirs = height_at(q, block.id);
-            return (theirs < height).then(|| (idx, height, theirs, NO_SHADE, face_light(occludes, &light, q, axes)));
+        for_each_local(size, |p| {
+            let i = region.index(p);
+            region.cells[i] = chunk.get_local(p[0] as u32, p[1] as u32, p[2] as u32);
+        });
+        region
+    }
+
+    /// Le chunk `pos` et sa bordure, lus dans le monde ; `None` si le chunk
+    /// n'est pas chargé.
+    pub fn copy(world: &VoxelWorld, pos: ChunkPos) -> Option<Self> {
+        let chunk = world.chunk(pos)?;
+        let mut region = Self::isolated(chunk, &world.registry);
+        region.full = world.full_light();
+        let size = region.size;
+        let base = [pos.x, pos.y, pos.z].map(|c| i64::from(c) * i64::from(size));
+        let at = |p: [i32; 3]| [0, 1, 2].map(|a| base[a] + i64::from(p[a]));
+        if let Some([sky, block]) = world.chunk_light(pos) {
+            for_each_local(size, |p| {
+                let (i, k) = ((p[0] + size * (p[1] + size * p[2])) as usize, region.index(p));
+                region.lights[k] = [sky.get(i), block.get(i)];
+            });
         }
-        let hidden = neighbor.is_some_and(|other| hides(other, block));
-        // Surface abaissée : un bloc posé dessus ne la touche pas.
-        let lowered_top = height < FULL && q[1] > p[1];
-        if hidden && !lowered_top {
-            return None;
-        }
-        // Les liquides et le semi-transparent ne reçoivent pas d'ombre.
-        let ao = if block.liquid || blend { NO_SHADE } else { face_ao(occludes, q, axes) };
-        Some((idx, height, 0, ao, face_light(occludes, &light, q, axes)))
-    };
-
-    let mut mesh = MeshData::default();
-    // Masque 2D réutilisé pour chaque tranche : None = pas de face visible,
-    // Some(clé) = face visible, la clé de fusion étant (index de palette,
-    // haut, bas, ombres, lumière).
-    let mut mask: Vec<Option<Key>> = vec![None; n * n];
-
-    // `d` est l'axe de la normale ; `u`/`v` les deux axes du plan de la
-    // tranche. (d, u, v) reste une permutation cyclique de (x, y, z) pour
-    // que û × v̂ = d̂ — c'est ce qui rend l'enroulement CCW prévisible.
-    for d in 0..3 {
-        let u = (d + 1) % 3;
-        let v = (d + 2) % 3;
-        for positive in [true, false] {
-            let step: i32 = if positive { 1 } else { -1 };
-            let mut normal = [0.0f32; 3];
-            normal[d] = step as f32;
-
-            for layer in 0..size {
-                // 1. Projeter les faces visibles de la tranche dans le masque.
-                let mut any = false;
-                for iv in 0..size {
-                    for iu in 0..size {
-                        let mut p = [0i32; 3];
-                        p[d] = layer;
-                        p[u] = iu;
-                        p[v] = iv;
-                        let mut q = p;
-                        q[d] += step;
-                        let cell = visible_face(p, q, [d, u, v]);
-                        any |= cell.is_some();
-                        mask[(iu + iv * size) as usize] = cell;
+        // La bordure : les cases dont une coordonnée vaut -1 ou `size`.
+        for z in -1..=size {
+            for y in -1..=size {
+                for x in -1..=size {
+                    let p = [x, y, z];
+                    if p.iter().all(|&c| (0..size).contains(&c)) {
+                        continue;
                     }
-                }
-                if !any {
-                    continue;
-                }
-
-                // 2. Fusion gourmande : rectangles maximaux de même clé.
-                for iv in 0..n {
-                    for iu in 0..n {
-                        let Some(key) = mask[iu + iv * n] else { continue };
-                        // Largeur : étendre le long de u tant que la clé matche.
-                        let mut w = 1;
-                        while iu + w < n && mask[iu + w + iv * n] == Some(key) {
-                            w += 1;
-                        }
-                        // Hauteur : étendre le long de v tant que la *ligne
-                        // entière* [iu, iu+w) matche — condition nécessaire
-                        // pour que le résultat reste un rectangle.
-                        let mut h = 1;
-                        'grow: while iv + h < n {
-                            for k in 0..w {
-                                if mask[iu + k + (iv + h) * n] != Some(key) {
-                                    break 'grow;
-                                }
+                    let i = region.index(p);
+                    region.lights[i] = world.light_at(at(p));
+                    if let Some(id) = world.voxel(at(p)) {
+                        region.cells[i] = match region.blocks.iter().position(|b| b.id == id) {
+                            Some(k) => k as u16,
+                            None => {
+                                region.blocks.push(resolve(&world.registry, id));
+                                (region.blocks.len() - 1) as u16
                             }
-                            h += 1;
-                        }
-                        // Consommer le rectangle pour ne pas le réémettre.
-                        for dv in 0..h {
-                            for du in 0..w {
-                                mask[iu + du + (iv + dv) * n] = None;
-                            }
-                        }
-                        let quad = SliceQuad {
-                            axes: [d, u, v],
-                            positive,
-                            layer,
-                            origin: [iu as i32, iv as i32],
-                            extent: [w as i32, h as i32],
                         };
-                        emit_rect(&mut mesh, &quad, normal, &resolved[key.0 as usize], [key.1, key.2], (key.3, key.4, full), voxel_size_m);
                     }
                 }
             }
         }
+        let vpm = world.voxels_per_meter();
+        for z in -1..=size {
+            for y in -1..=size {
+                for x in -1..=size {
+                    let p = [x, y, z];
+                    let Some(block) = region.block(p) else { continue };
+                    if let Some(l) = block.liquid.then(|| world.liquid(block.id)).flatten() {
+                        let h = liquids::height(world.liquid_level(at(p)), liquids::reach(&l, vpm));
+                        let i = region.index(p);
+                        region.heights[i] = (h * f32::from(FULL)).round() as u8;
+                    }
+                }
+            }
+        }
+        Some(region)
     }
-    mesh
+
+    /// `[le reste, le semi-transparent]`.
+    pub fn mesh(&self, voxel_size_m: f32) -> [MeshData; 2] {
+        let blend = if self.blocks.iter().any(|b| b.blend) { self.mesh_pass(voxel_size_m, true) } else { MeshData::default() };
+        [self.mesh_pass(voxel_size_m, false), blend]
+    }
+
+    fn index(&self, p: [i32; 3]) -> usize {
+        let side = self.size + 2;
+        ((p[0] + 1) + side * ((p[1] + 1) + side * (p[2] + 1))) as usize
+    }
+
+    fn block(&self, p: [i32; 3]) -> Option<&Resolved> {
+        let k = self.cells[self.index(p)];
+        (k != NOTHING).then(|| &self.blocks[k as usize])
+    }
+
+    /// Cœur du greedy. `blend` : la passe semi-transparente, sinon le reste.
+    fn mesh_pass(&self, voxel_size_m: f32, blend: bool) -> MeshData {
+        let size = self.size;
+        let n = size as usize;
+        let resolved = &self.blocks;
+        let full = self.full;
+        let id_at = |q: [i32; 3]| self.block(q).map(|b| b.id);
+        let light = |q: [i32; 3]| self.lights[self.index(q)];
+
+        // Hauteur du liquide `id` en `p` (sur 255) : sous autre chose que
+        // lui-même, sa surface est abaissée.
+        let height_at = |p: [i32; 3], id: ContentId| {
+            if id_at([p[0], p[1] + 1, p[2]]) == Some(id) { FULL } else { self.heights[self.index(p)] }
+        };
+
+        // Fait de l'ombre aux coins des faces voisines.
+        let occludes = |q: [i32; 3]| self.block(q).is_some_and(Resolved::casts_shadow);
+
+        // (index de palette, haut, bas, ombres, lumière) de `p` si sa face vers
+        // `q` se voit ; haut et bas sur 255, `FULL` et 0 pour une face entière ;
+        // ombres et lumière des quatre coins ([`face_ao`], [`face_light`]). `p`
+        // est toujours dans le chunk, `q` peut en sortir.
+        let visible_face = |p: [i32; 3], q: [i32; 3], axes: [usize; 3]| -> Option<Key> {
+            let idx = self.cells[self.index(p)];
+            let block = &resolved[idx as usize];
+            if !block.drawn || block.blend != blend {
+                return None;
+            }
+            let height = if block.liquid { height_at(p, block.id) } else { FULL };
+            let neighbor = self.block(q);
+            // Côté d'un liquide contre le même liquide plus bas : seule la
+            // différence de hauteur se voit (une pente d'eau, une chute dans un
+            // lac).
+            if block.liquid && q[1] == p[1] && neighbor.is_some_and(|o| o.id == block.id) {
+                let theirs = height_at(q, block.id);
+                return (theirs < height).then(|| (idx, height, theirs, NO_SHADE, face_light(occludes, light, q, axes)));
+            }
+            let hidden = neighbor.is_some_and(|other| hides(other, block));
+            // Surface abaissée : un bloc posé dessus ne la touche pas.
+            let lowered_top = height < FULL && q[1] > p[1];
+            if hidden && !lowered_top {
+                return None;
+            }
+            // Les liquides et le semi-transparent ne reçoivent pas d'ombre.
+            let ao = if block.liquid || blend { NO_SHADE } else { face_ao(occludes, q, axes) };
+            Some((idx, height, 0, ao, face_light(occludes, light, q, axes)))
+        };
+
+        let mut mesh = MeshData::default();
+        // Masque 2D réutilisé pour chaque tranche : None = pas de face visible,
+        // Some(clé) = face visible, la clé de fusion étant (index de palette,
+        // haut, bas, ombres, lumière).
+        let mut mask: Vec<Option<Key>> = vec![None; n * n];
+
+        // `d` est l'axe de la normale ; `u`/`v` les deux axes du plan de la
+        // tranche. (d, u, v) reste une permutation cyclique de (x, y, z) pour
+        // que û × v̂ = d̂ — c'est ce qui rend l'enroulement CCW prévisible.
+        for d in 0..3 {
+            let u = (d + 1) % 3;
+            let v = (d + 2) % 3;
+            for positive in [true, false] {
+                let step: i32 = if positive { 1 } else { -1 };
+                let mut normal = [0.0f32; 3];
+                normal[d] = step as f32;
+
+                for layer in 0..size {
+                    // 1. Projeter les faces visibles de la tranche dans le masque.
+                    let mut any = false;
+                    for iv in 0..size {
+                        for iu in 0..size {
+                            let mut p = [0i32; 3];
+                            p[d] = layer;
+                            p[u] = iu;
+                            p[v] = iv;
+                            let mut q = p;
+                            q[d] += step;
+                            let cell = visible_face(p, q, [d, u, v]);
+                            any |= cell.is_some();
+                            mask[(iu + iv * size) as usize] = cell;
+                        }
+                    }
+                    if !any {
+                        continue;
+                    }
+
+                    // 2. Fusion gourmande : rectangles maximaux de même clé.
+                    for iv in 0..n {
+                        for iu in 0..n {
+                            let Some(key) = mask[iu + iv * n] else { continue };
+                            // Largeur : étendre le long de u tant que la clé matche.
+                            let mut w = 1;
+                            while iu + w < n && mask[iu + w + iv * n] == Some(key) {
+                                w += 1;
+                            }
+                            // Hauteur : étendre le long de v tant que la *ligne
+                            // entière* [iu, iu+w) matche — condition nécessaire
+                            // pour que le résultat reste un rectangle.
+                            let mut h = 1;
+                            'grow: while iv + h < n {
+                                for k in 0..w {
+                                    if mask[iu + k + (iv + h) * n] != Some(key) {
+                                        break 'grow;
+                                    }
+                                }
+                                h += 1;
+                            }
+                            // Consommer le rectangle pour ne pas le réémettre.
+                            for dv in 0..h {
+                                for du in 0..w {
+                                    mask[iu + du + (iv + dv) * n] = None;
+                                }
+                            }
+                            let quad = SliceQuad {
+                                axes: [d, u, v],
+                                positive,
+                                layer,
+                                origin: [iu as i32, iv as i32],
+                                extent: [w as i32, h as i32],
+                            };
+                            emit_rect(&mut mesh, &quad, normal, &resolved[key.0 as usize], [key.1, key.2], (key.3, key.4, full), voxel_size_m);
+                        }
+                    }
+                }
+            }
+        }
+        mesh
+    }
+}
+
+/// Appelle `f` sur chaque case `[x, y, z]` d'un chunk d'arête `size`.
+fn for_each_local(size: i32, mut f: impl FnMut([i32; 3])) {
+    for z in 0..size {
+        for y in 0..size {
+            for x in 0..size {
+                f([x, y, z]);
+            }
+        }
+    }
 }
 
 /// Clé de fusion du greedy : (index de palette, haut, bas, ombres, lumière).

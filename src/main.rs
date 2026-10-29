@@ -12,7 +12,7 @@ mod save;
 mod streaming;
 mod ui;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use bevy::asset::RenderAssetUsages;
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
@@ -25,9 +25,10 @@ use bevy::render::render_resource::{
     TextureFormat, TextureViewDescriptor, TextureViewDimension, VertexFormat,
 };
 use bevy::shader::ShaderRef;
+use bevy::tasks::{block_on, AsyncComputeTaskPool, Task};
 
 use voxel_core::chunk::{ChunkPos, CHUNK_SIZE};
-use voxel_core::mesher::{mesh_chunk_in_world, MeshData, NO_TEXTURE};
+use voxel_core::mesher::{MeshData, Region, NO_TEXTURE};
 use voxel_core::registry::{ContentId, Registry};
 use voxel_core::save::{Save, WorldMeta, FORMAT_VERSION};
 use voxel_core::world::{VoxelWorld, TICKS_PER_SECOND};
@@ -120,6 +121,28 @@ pub struct BlendMesh(pub ChunkPos);
 #[derive(Resource, Default)]
 pub struct DirtyChunks(pub HashSet<ChunkPos>);
 
+/// Meshes en cours dans des tâches (#53, design doc §6), par lot : un lot
+/// réunit les meshes lancés à la même image. Il est appliqué d'un coup quand
+/// toutes ses tâches ont fini, et les lots dans l'ordre : deux chunks
+/// voisins changent à la même image, et un vieux mesh n'écrase jamais un
+/// plus récent.
+#[derive(Resource, Default)]
+pub struct Meshing(VecDeque<Vec<(ChunkPos, Task<[MeshData; 2]>)>>);
+
+impl Meshing {
+    pub fn contains(&self, pos: ChunkPos) -> bool {
+        self.0.iter().flatten().any(|(p, _)| *p == pos)
+    }
+
+    /// Abandonne les meshes de `pos` en cours (chunk déchargé) : appliqués,
+    /// ils recréeraient son entité.
+    pub fn forget(&mut self, pos: ChunkPos) {
+        for batch in &mut self.0 {
+            batch.retain(|(p, _)| *p != pos);
+        }
+    }
+}
+
 /// Marque le texte HUD affichant le bloc en main.
 #[derive(Component)]
 pub struct HeldBlockText;
@@ -150,6 +173,8 @@ fn main() {
             MaterialPlugin::<VoxelMaterial>::default(),
         ))
         .init_resource::<DirtyChunks>()
+        .init_resource::<Meshing>()
+        .init_resource::<streaming::Generating>()
         .init_resource::<inventory::Inventory>()
         .init_resource::<items::StorageChanged>()
         .init_resource::<content::ReloadStatus>()
@@ -325,35 +350,49 @@ fn setup_world(
 }
 
 /// (Re)meshe les chunks notés dans [`DirtyChunks`] — l'unique chemin de
-/// meshing (génération, streaming, pose/casse). Chaque chunk a deux entités
-/// créées ensemble ([`ChunkMesh`], [`BlendMesh`]), chacune avec son mesh
-/// quand il n'est pas vide.
+/// meshing (génération, streaming, pose/casse). Copie chaque chunk avec sa
+/// bordure et le meshe dans une tâche ; applique les lots de [`Meshing`]
+/// finis. Chaque chunk a deux entités créées ensemble ([`ChunkMesh`],
+/// [`BlendMesh`]), chacune avec son mesh quand il n'est pas vide.
 pub fn remesh_dirty(
     mut commands: Commands,
     mut game: ResMut<GameWorld>,
     mut dirty: ResMut<DirtyChunks>,
+    mut meshing: ResMut<Meshing>,
     mut meshes: ResMut<Assets<Mesh>>,
     chunk_meshes: Query<(Entity, &ChunkMesh, Option<&Mesh3d>)>,
     blend_meshes: Query<(Entity, &BlendMesh, Option<&Mesh3d>)>,
 ) {
     let existing: HashMap<ChunkPos, (Entity, Option<&Mesh3d>)> =
         chunk_meshes.iter().map(|(e, cm, m)| (cm.0, (e, m))).collect();
-    // Lumière changée (#23) : seuls les chunks affichés sont re-meshés, les
-    // autres le seront quand le streaming les affichera.
+    // Lumière changée (#23) : seuls les chunks affichés ou en cours de
+    // meshing sont re-meshés, les autres le seront quand le streaming les
+    // affichera.
     let lit = game.world.take_light_changed();
-    dirty.0.extend(lit.into_iter().filter(|pos| existing.contains_key(pos)));
-    if dirty.0.is_empty() {
-        return;
+    dirty.0.extend(lit.into_iter().filter(|pos| existing.contains_key(pos) || meshing.contains(*pos)));
+    let voxel_size_m = 1.0 / game.world.voxels_per_meter();
+    let batch: Vec<_> = dirty
+        .0
+        .drain()
+        .filter_map(|pos| {
+            let region = Region::copy(&game.world, pos)?; // pas de données : rien à mesher
+            Some((pos, AsyncComputeTaskPool::get().spawn(async move { region.mesh(voxel_size_m) })))
+        })
+        .collect();
+    if !batch.is_empty() {
+        meshing.0.push_back(batch);
     }
+
     let blend: HashMap<ChunkPos, (Entity, Option<&Mesh3d>)> =
         blend_meshes.iter().map(|(e, b, m)| (b.0, (e, m))).collect();
-    let voxel_size_m = 1.0 / game.world.voxels_per_meter();
-
-    for pos in dirty.0.drain() {
-        let Some([solid, transparent]) = mesh_chunk_in_world(&game.world, pos, voxel_size_m) else {
-            continue; // pas de données : rien à mesher
-        };
-        let extent = game.world.chunk_size() as f32 * voxel_size_m;
+    let extent = game.world.chunk_size() as f32 * voxel_size_m;
+    // Le plus récent par chunk : deux lots finis à la même image ne doivent
+    // pas créer deux entités pour le même chunk.
+    let mut ready = HashMap::new();
+    while meshing.0.front().is_some_and(|batch| batch.iter().all(|(_, task)| task.is_finished())) {
+        ready.extend(meshing.0.pop_front().unwrap().into_iter().map(|(pos, task)| (pos, block_on(task))));
+    }
+    for (pos, [solid, transparent]) in ready {
         let at = Transform::from_xyz(pos.x as f32 * extent, pos.y as f32 * extent, pos.z as f32 * extent);
         let (entity, mesh) =
             existing.get(&pos).copied().unwrap_or_else(|| (commands.spawn((ChunkMesh(pos), at)).id(), None));

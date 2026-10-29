@@ -7,7 +7,7 @@
 //! Headless : `cargo run -p voxel_core --example mesh_stats`
 
 use voxel_core::chunk::{ChunkPos, CHUNK_SIZE};
-use voxel_core::mesher::{mesh_chunk, mesh_chunk_in_world, mesh_chunk_naive};
+use voxel_core::mesher::{mesh_chunk, mesh_chunk_in_world, mesh_chunk_naive, Region};
 use voxel_core::registry::{ContentEntry, Registry};
 use voxel_core::world::VoxelWorld;
 use voxel_core::worldgen::{HeightmapGenerator, WorldGenerator};
@@ -67,6 +67,10 @@ fn main() {
     let start = std::time::Instant::now();
     let world_total: usize = positions.iter().map(|&pos| mesh_chunk_in_world(&world, pos, 1.0).unwrap()[0].face_count()).sum();
     let world_time = start.elapsed();
+    let start = std::time::Instant::now();
+    let regions: Vec<Region> = positions.iter().map(|&pos| Region::copy(&world, pos).unwrap()).collect();
+    let copy_time = start.elapsed();
+    drop(regions);
 
     println!("50 chunks {CHUNK_SIZE}³ (seed 42, couches y = -1 et 0) :");
     println!("  génération   : {:.2} ms/chunk", gen_time.as_secs_f64() * 1000.0 / 50.0);
@@ -81,4 +85,5 @@ fn main() {
     println!("Dans un monde (raccord entre chunks + lumière) :");
     println!("  lumière      : {:.2} ms/chunk à l'arrivée", light_time.as_secs_f64() * 1000.0 / 50.0);
     println!("  greedy       : {:.2} ms/chunk, {world_total} quads", world_time.as_secs_f64() * 1000.0 / 50.0);
+    println!("    dont copie : {:.2} ms/chunk (dans l'image, le reste en tâche de fond)", copy_time.as_secs_f64() * 1000.0 / 50.0);
 }

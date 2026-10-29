@@ -1047,3 +1047,43 @@ sur le disque, elle aussi dans l'image. Deux tickets : #53, #54.
 (l'enregistrement coûte). Sur un écran 144 Hz, la vsync cache le coût d'un
 effet : mesurer #51 au temps GPU par passe. Un portable se mesure branché.
 
+
+## 2026-10-29 — Meshing hors de l'image (#53)
+
+**Problème.** Au chargement, chaque chunk était meshé 5,9 fois en moyenne
+(566 meshes pour 96 chunks, pire image 366 ms). On chargeait du plus
+proche au plus loin, et chaque nouveau chunk faisait re-mesher ses voisins
+déjà affichés, jusqu'à 26, pour recoudre bordures et ombres de coins.
+
+**Décision de Warshow** : la meilleure option, pas la moins chère. Le jeu
+vise un PC avec au moins une puce graphique ; le repère devient un écran à
+144 Hz, 7 ms par image. Le PC sans GPU n'est plus une cible de perf.
+
+**Ce qui a été fait.**
+- Un chunk n'est meshé que quand ses voisins de la zone ont leurs
+  données : une fois au chargement, plus une fois pour ceux du bord quand
+  la zone avance. On ne génère pas d'anneau en plus, comme Minecraft :
+  300 chunks de données pour 96 affichés.
+- Le mesher lit une copie du chunk avec une case de bordure
+  (`mesher::Region`) au lieu du monde. La copie se fait dans l'image
+  (~0,5 ms), le meshing dans une tâche. Effet de bord : le mesh dans le
+  monde passe de 8,7 à 5,0 ms, car l'ancien code résolvait le registre à
+  chaque lecture de bordure.
+- Les meshes lancés à la même image sont appliqués ensemble et dans
+  l'ordre. Un bloc cassé à la frontière de deux chunks ne laisse jamais
+  voir de trou. Minecraft évite ce trou en meshant les edits dans l'image,
+  ce qui coûterait ~10 ms par clic ici.
+- La génération passe aussi en tâches (une colonne par tâche). La lumière
+  reste dans l'image car elle a besoin du monde : 1 chunk inséré par image.
+
+**Résultat (PC de dev, headless, images cadencées à 144 Hz).** Au
+chargement, la pire image passe de 366 ms à 6-8 ms. En course à 8 m/s, la
+médiane est à 1 ms et 0 à 11 images sur 1440 dépassent 7 ms, selon les
+passages. À re-mesurer sur la 4060.
+
+**Leçons.**
+- Compter les meshes avant d'optimiser un mesh : le gain ×6 venait
+  d'éviter du travail, pas de le faire plus vite.
+- Un coût mesuré au calme ne vaut pas en course. La copie passe de
+  0,5 ms à 2 ms quand les données ne sont plus en cache ; ce n'est pas la
+  concurrence entre threads (même résultat avec une seule tâche à la fois).

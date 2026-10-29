@@ -315,6 +315,13 @@ flowchart TB
 
 **Lecture du flux :** le **Monde** possède ses métadonnées et son **registre**. Le registre attribue les IDs stables que les **chunks** stockent (via palette) et dont les fenêtres d'**UI** tirent les defs d'item. Le **comportement** (script/data) lit les defs du registre et s'y branche par hooks. La **simu** tourne en tick fixe ; le **rendu** (meshing + UI) en frame variable. Les **sous-grilles mobiles** et la **lumière** alimentent le mesher sans polluer l'identité du voxel.
 
+**Meshing hors de l'image** (ajout 2026-10-29, #53).
+- **Cible.** Le joueur visé a au moins une puce graphique ; le repère est un écran à 144 Hz, soit 7 ms par image. Un mesh coûte ~10 ms : il ne tient pas dans l'image.
+- **Tâches en parallèle.** Le meshing tourne dans des tâches, sur une copie du chunk et d'une case de bordure autour (blocs, lumière, hauteur des liquides). L'image ne fait que la copie et l'envoi du mesh au GPU.
+- **Application groupée.** Les meshes lancés dans la même image sont appliqués ensemble, dans l'ordre de lancement. Deux chunks voisins changent donc à la même image : pas de trou entre eux quand on casse un bloc à leur frontière.
+- **Voisins d'abord.** Le streaming ne meshe un chunk qu'une fois les données de ses voisins de la zone chargée connues. Chaque chunk est meshé une fois au chargement (5,9 fois avant). Ceux du bord le sont une fois de plus quand la zone avance.
+- **Écartés** : budget de meshes seul (le travail reste), anneau de chunks générés autour de la zone (×3 de données), mesh sur le GPU. Détail : #55.
+
 ---
 
 ## 7. La tranche verticale — définition de « fait »
@@ -368,6 +375,7 @@ Ces non-goals sont *prévus par le data model* (§3) mais *pas implémentés* da
 | UI | Réflexive du registre | Figé (principe) | — |
 | Runtime script | `mlua` v1 (reco), wasm en graduation | **Ouvert** | — |
 | Algo éclairage | Différé, full-bright pour la slice | **Ouvert** | — |
+| Meshing | Tâches en parallèle sur une copie avec bordure ; un chunk meshé quand ses voisins sont chargés (#53) | Mou (2026-10-29) | faible |
 | Dims chunk | 32³ (reco) | **Ouvert** | faible (format porte ses dims) |
 | Index palette | `u16` (reco), adaptatif plus tard | **Ouvert** | faible |
 | Internals UI / API mod / worldgen / backend / multi | Laissés mous | **Mou** | — |
