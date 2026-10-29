@@ -151,7 +151,13 @@ impl Save {
     /// Écrit le chunk `pos` du monde (s'il est chargé).
     pub fn write_chunk(&self, world: &VoxelWorld, pos: ChunkPos) -> Result<(), String> {
         let Some(chunk) = world.chunk(pos) else { return Ok(()) };
-        self.write(&chunk_file(pos), &encode_chunk(chunk, &world.chunk_state(pos)))
+        self.write_chunk_bytes(pos, &encode_chunk(chunk, &world.chunk_state(pos)))
+    }
+
+    /// Écrit un chunk déjà encodé (`encode_chunk`) : l'app encode dans
+    /// l'image et écrit le fichier à part (#54).
+    pub fn write_chunk_bytes(&self, pos: ChunkPos, bytes: &[u8]) -> Result<(), String> {
+        self.write(&chunk_file(pos), bytes)
     }
 
     fn read_ron<T: for<'de> Deserialize<'de>>(&self, name: &str) -> Result<Option<T>, String> {

@@ -1087,3 +1087,20 @@ passages. À re-mesurer sur la 4060.
 - Un coût mesuré au calme ne vaut pas en course. La copie passe de
   0,5 ms à 2 ms quand les données ne sont plus en cache ; ce n'est pas la
   concurrence entre threads (même résultat avec une seule tâche à la fois).
+
+## 2026-10-30 — Sauvegarde des chunks hors de l'image (#54)
+
+**Problème.** Sur la 4060, une image à 90 ms à cause de
+`save_edited_chunks` : chaque pose ou casse écrivait le fichier du chunk
+sur le thread principal.
+
+**Mesure d'abord.** Encoder un chunk : 0,02 ms. Écrire son fichier :
+0,25 ms sur le disque Linux, 12 ms sur le disque Windows vu de WSL. Tout
+le coût est dans l'écriture, donc seule l'écriture sort de l'image.
+
+**Ce qui a été fait.** Un fil dédié reçoit les chunks encodés par un
+canal et les écrit dans l'ordre d'envoi : deux versions du même chunk ne
+se croisent pas, la dernière gagne. Sur `AppExit`, le jeu ferme le canal
+et attend le fil, sinon le dernier edit pourrait se perdre. Écarté :
+regrouper les écritures toutes les N secondes (un plantage perdrait les
+dernières secondes).

@@ -131,7 +131,9 @@ WSL le rendu est logiciel et rame — normal.
 - **Save** : les IDs viennent de `registry.ron` de la save, puis `core.ron`
   est fusionné par identifier (`Registry::merge`). Un chunk est écrit dès
   qu'il est édité (`VoxelWorld::take_edited`, à marquer dans toute
-  nouvelle méthode qui modifie un chunk) ; joueur et items au sol toutes
+  nouvelle méthode qui modifie un chunk) : encodé dans l'image, le fichier
+  écrit par un fil à part (`save::ChunkWriter`, #54), attendu sur
+  `AppExit` ; joueur et items au sol toutes
   les 5 s et sur `AppExit`. Une save illisible arrête le jeu, jamais
   écrasée. Changer un format → incrémenter `save::FORMAT_VERSION` ; un
   fichier nouveau et optionnel (comme `items.ron`) n'en a pas besoin.
@@ -476,6 +478,14 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
 - Commits jusqu'à `cf63639` (plus celui de cette passation), à pousser
   par Warshow.
 
+## Fait dans la session du 2026-10-30
+
+- #54 fait : la saccade venait de l'écriture du fichier (12 ms sur le
+  disque Windows depuis WSL, 0,25 ms sur ext4 ; 90 ms mesurées sur la
+  4060), pas de l'encodage (0,02 ms). Le chunk est encodé dans l'image et
+  écrit par un fil à part, dans l'ordre d'envoi ; la fermeture attend les
+  écritures en cours.
+
 ## Prochaines étapes
 
 Ordre décidé avec Warshow (2026-10-08) : **`docs/jalons.md`, « Suite :
@@ -498,7 +508,8 @@ GPU », branché ; toujours mesurer branché) : GPU quasi au repos, 144 FPS
 (vsync : à 144 Hz le compteur cache le coût d'un effet, mesurer #51 avec
 les lignes `elapsed_gpu` du log de profilage) après le chargement ; le chargement passe 2 à 5 s à ~3 FPS à cause
 de `remesh_dirty` → **#53**, fait le 2026-10-29, à re-mesurer sur la
-4060 ; une saccade de 90 ms de `save_edited_chunks` → **#54**. Détail dans
+4060 ; une saccade de 90 ms de `save_edited_chunks` → **#54**, fait le
+2026-10-30. Détail dans
 #41. Ensuite,
 choisi avec Warshow le 2026-10-25 : **#51 effets de rendu** (exploration
 présentée le 2026-10-28, en attente de la décision de Warshow ; options,

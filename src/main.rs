@@ -215,7 +215,11 @@ fn main() {
                 save::save_edited_chunks.after(interact::interact),
             ),
         )
-        .add_systems(Last, save::save_player_and_items.after(bevy::window::ExitSystems))
+        .add_systems(
+            Last,
+            (save::save_player_and_items, save::finish_chunk_writes)
+                .after(bevy::window::ExitSystems),
+        )
         .add_systems(
             FixedUpdate,
             (items::simulate_items.after(player::physics_step), interact::tick_blocks),
@@ -291,6 +295,7 @@ fn setup_world(
     let material = chunk_material(AlphaMode::Mask(0.5));
     let blend_material = chunk_material(AlphaMode::Blend);
 
+    commands.insert_resource(save::ChunkWriter::new(save.clone()));
     commands.insert_resource(save::WorldSave(save));
     commands.insert_resource(GameWorld {
         world,

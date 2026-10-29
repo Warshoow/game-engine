@@ -226,7 +226,7 @@ Contenu logique d'une save :
 
 **Rechargement du registre** (ajout 2026-10-08, jalon 5). Au chargement d'une save, les **IDs viennent de la save** et ne bougent jamais. Les fichiers de contenu du jeu (`core.ron`) sont ensuite fusionnés par identifier : une entrée qu'ils déclarent prend **leur** définition (corriger une recette ou une texture s'applique aux mondes existants) ; une entrée nouvelle est ajoutée avec un ID neuf ; une entrée que seule la save connaît (contenu généré en jeu) est gardée telle quelle, pixels compris. Une save qui contient un élément de vocabulaire inconnu est refusée (§3.6), jamais écrasée. *Coût de changement :* Day-1 (fixe ce qu'un monde garde quand le jeu évolue).
 
-**Backend v1** (mou, 2026-10-08). Un dossier par monde : métadonnées et registre en RON, un fichier binaire par chunk **modifié** (palette + tableau dense + ses block-entities, en-tête versionné). Un chunk jamais modifié n'est pas écrit : il se régénère depuis la seed. Un chunk est écrit dès qu'il change ; joueur et inventaire périodiquement et à la fermeture.
+**Backend v1** (mou, 2026-10-08). Un dossier par monde : métadonnées et registre en RON, un fichier binaire par chunk **modifié** (palette + tableau dense + ses block-entities, en-tête versionné). Un chunk jamais modifié n'est pas écrit : il se régénère depuis la seed. Un chunk est écrit dès qu'il change : encodé dans l'image, son fichier écrit par un fil à part qui garde l'ordre (ajout 2026-10-30, #54 : l'écriture coûtait jusqu'à 90 ms par image sous Windows) ; la fermeture attend les écritures en cours. Joueur et inventaire périodiquement et à la fermeture.
 
 ### 3.11 UI réflexive du registre
 
