@@ -597,14 +597,16 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   grottes : la lumière du ciel règle maintenant aussi le reflet, et le
   plancher d'une grotte est une lueur fixe `DARK` dans `voxel.wgsl`) ;
   une bûche couchée était noire (lumière de sa propre case, pleine).
-  **À revoir par Warshow** : grotte sans lampe (noire, sans taches, avec
-  un cochon), bûche couchée, pose contre un bloc généré.
+  Revus et validés par Warshow le même jour (grotte sans lampe, bûche
+  couchée, pose contre un bloc généré). L'heure « non gardée » venait de
+  F5, qui ne fait que décaler l'affichage (non sauvé, voulu) : le HUD le
+  dit maintenant (`ef14ee6`).
 - Commits jusqu'à `3423ab0` (plus celui de cette passation), à pousser
   par Warshow. `3423ab0` porte `Closes #14` : pousser après l'essai en
   jeu, ou rouvrir #14 si l'essai montre un souci.
-- Puis `b24deff` (texture tournée, bûche couchée), `32eab4c` (design doc
-  de #15) et le commit de #15, qui porte `Closes #15` : même consigne,
-  pousser après l'essai en jeu.
+- Puis `b24deff`, `32eab4c`, `2c72711` (#15, `Closes #15`), `2d86fe7`,
+  `93ff582`, `d36ed8c`, `ef14ee6` et le commit de cette passation, à
+  pousser par Warshow : l'essai en jeu de #14 et #15 est fait et validé.
 
 ## Prochaines étapes
 
