@@ -645,11 +645,9 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   cochons fluides). Seul défaut trouvé : il sautait sur un escalier (la
   case d'escalier vue par A* est à 1 m) ; corrigé, il ne saute plus que
   si le pas automatique l'a bloqué au tick d'avant (`4a6e6fe`).
-- Commits à pousser par Warshow : `e58c46e`, `5cea975`, `0c31c5c`
-  (#32), `4a6e6fe`, `0c89327`, puis le design doc de #60, `acf30aa`
-  (`Closes #60`), `707c651`, `901c1cd` (`keep` en durée) et celui de
-  cette passation. #32 et #60 se ferment au
-  push.
+- Commits à pousser par Warshow : tout depuis `e58c46e` (#32, son
+  correctif d'escalier, #60 et son correctif `keep`, docs et tickets QA).
+  #32 et #60 se ferment au push.
 - #60 apparition des mobs, exploré puis tranché avec Warshow (reco B
   suivie ; design doc §3.6 « Apparition des mobs » ; options : #62).
   Règles `spawn` en donnée, essais près du joueur, disparition au loin,
