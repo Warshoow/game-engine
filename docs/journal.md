@@ -1216,3 +1216,49 @@ boîte pleine), sans fusion ni ombrage des coins ; un cube non tourné
 texture se prennent sur le modèle avant rotation : les fibres d'une
 bûche couchée suivent son axe. La bûche reçoit `bottom` : couchée, ses
 deux bouts se voient.
+
+## 2026-10-30 — Modèles d'entités (#15)
+
+**Ce qui est construit.** Une entrée `EntityType` porte son modèle :
+des parties (16 au plus), chacune avec un parent, un pivot et des boîtes
+en seizièmes de mètre (64 en tout au plus), chaque boîte nommant une
+texture du registre, PNG ou calculée. La collision (`size`, en mètres)
+est à part. Un cochon d'exemple se pose depuis l'inventaire (G puis clic
+droit) et reste dans la save (`mobs.ron`). Un item de bloc au sol se
+dessine comme son bloc en petit, au lieu du cube coloré.
+
+**Pourquoi des boîtes plutôt qu'une grille de voxels** (la reco initiale
+de #15). L'exploration a comparé quatre formats sur les mêmes critères
+(#59). Les boîtes partagent le rendu des blocs (texture array,
+coordonnées en mètres), donc l'aspect Minecraft que visent les packs de
+shaders ; une IA écrit « corps de (-4, 6, -7) à (4, 14, 7) » sans peine,
+alors qu'une grille de nombres lui échappe. La grille de voxels colorés
+(Veloren) sortait du texture array ; la grille de blocs du monde reste le
+format des véhicules (§3.7) ; un glTF dans la save serait opaque. Warshow
+a validé les boîtes, « ce qui me parais le plus ouvert à l'imagination ».
+
+**Pourquoi des seizièmes de mètre et pas de case.** Une entité vit en
+mètres (§2) : un cochon garde sa taille quelle que soit la résolution du
+monde. À 16 pixels par texture, un seizième vaut un pixel.
+
+**La lumière.** Un chunk porte sa lumière aux sommets, calculée au
+meshing. Une entité bouge : sa lumière se lit chaque image dans la grille
+à sa position et passe au shader par `MeshTag`, un entier par instance
+que Bevy donne déjà au shader (0 pour les chunks, qui n'en ont pas). Sans
+ça, un cochon dans une grotte serait éclairé comme en plein jour. Les
+items au sol en profitent aussi.
+
+**L'animation, plus tard.** Les parties tournent autour de leur pivot ;
+ce qui les fait tourner viendra avec les mobs (#32), en une liste courte
+de mouvements réglés dans l'entrée plutôt que des poses clés (une IA
+écrit mal des pistes).
+
+**Avis extérieur.** DeepSeek V4.1 Flash a choisi aussi les boîtes et la
+liste de mouvements ; son argument contre la grille de blocs était faux
+(#59, retenu et écarté).
+
+**Ce qui a été vu.** Tests headless : validation du modèle, mesh autour du
+pivot, chargement des textures d'une entité, item de bloc. Capture sous
+WSL, effets coupés, cochons et items écrits dans la save d'un monde neuf
+hors du dépôt : textures, yeux, groin, pattes et cap rendent. Pas vu : la
+lumière d'une grotte (rendu logiciel, surface seulement).

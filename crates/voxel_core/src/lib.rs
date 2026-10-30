@@ -11,6 +11,7 @@ pub mod generate;
 pub mod light;
 pub mod liquids;
 pub mod mesher;
+pub mod model;
 pub mod physics;
 pub mod raycast;
 pub mod registry;

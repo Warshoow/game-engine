@@ -225,7 +225,8 @@ quand une mesure la réclame.
    nous, `sky.ron` ; options reportées dans #57), à voir sur la 4060.
 7. **#14 / #15 → #32 → #33** — formes non cubiques et modèles, puis mobs,
    puis vie et survie. #14 fait le 2026-10-30 (boîtes en seizièmes de
-   case, rotation dans une table creuse ; options écartées dans #58). #33 est un choix de jeu : du contenu que `core.ron`
+   case, rotation dans une table creuse ; options écartées dans #58). #15
+   fait le même jour (modèles en parties de boîtes ; options dans #59). #33 est un choix de jeu : du contenu que `core.ron`
    active, pas une règle du moteur.
 
 **Quand le besoin apparaît, pas dans l'ordre :**

@@ -138,6 +138,17 @@ WSL le rendu est logiciel et rame — normal.
   ombrage, texture prise sur le modèle avant rotation ; les blocs à forme
   n'arrêtent pas la lumière. Le
   joueur au sol monte seul 0,6 m (`move_and_step`).
+- **Modèles d'entités** (#15, `voxel_core::model`, `src/entities.rs`) :
+  `Kind::EntityType(EntityData)` porte `model` (parties avec parent
+  déclaré avant, pivot et boîtes en seizièmes de mètre, repère du modèle)
+  et `size` (collision en mètres). `Part::mesh` rend les boîtes **autour
+  du pivot** ; chaque partie est une entité Bevy enfant de sa parente, à
+  `pivot - pivot du parent`. Lumière : un mesh `GridLit` reçoit dans
+  `MeshTag` la lumière de la grille à sa position (bit 16 = entité, ciel
+  et blocs sur 8 bits) ; `voxel.wgsl` la prend à la place de celle des
+  sommets. Un chunk n'a pas de `MeshTag` (0). Items de bloc au sol :
+  `mesh_block_item`, même matériau et même lumière. Entités posées dans
+  `mobs.ron` (entrée, pieds, cap).
 - **Liquides** (#28) : le voxel reste l'ID du liquide, son niveau est dans
   `VoxelWorld::levels` (absent = source, `Some(0)` = chute, sinon distance
   à plat en voxels). `set_voxel` efface le niveau : écrire le niveau
@@ -568,9 +579,21 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   Ensuite : la texture tourne avec le bloc, et correction d'une bûche
   couchée qui restait dessinée debout (le greedy ignorait sa rotation ;
   un cube tourné passe maintenant par le chemin des formes).
+- #15 modèles d'entités fait (exploration présentée, Warshow a validé les
+  boîtes ; avis de DeepSeek retenu ou écarté dans #59). Cochon d'exemple
+  (`core:pig`) posé depuis l'inventaire (touche G puis clic droit), immobile ;
+  items de bloc au sol dessinés comme leur bloc. Vu sous WSL (effets
+  coupés, cochons et items écrits dans la save d'un monde neuf hors du
+  dépôt) : textures, yeux, pattes, cap. **À essayer en jeu par Warshow** :
+  poser un cochon, le voir dans une grotte (sombre) et près d'une lampe,
+  items de bloc au sol, recharger le monde (les cochons restent).
+  Pas fait : animation et déplacement (#32), `model` d'item (#59).
 - Commits jusqu'à `3423ab0` (plus celui de cette passation), à pousser
   par Warshow. `3423ab0` porte `Closes #14` : pousser après l'essai en
   jeu, ou rouvrir #14 si l'essai montre un souci.
+- Puis `b24deff` (texture tournée, bûche couchée), `32eab4c` (design doc
+  de #15) et le commit de #15, qui porte `Closes #15` : même consigne,
+  pousser après l'essai en jeu.
 
 ## Prochaines étapes
 
@@ -601,9 +624,10 @@ choisi avec Warshow le 2026-10-25 : **#51 effets de rendu** (codé le
 2026-10-30, à voir et mesurer sur la 4060 ; options reportées : #56),
 puis #30 jour/nuit (codé le 2026-10-30, à voir sur la 4060 ; options
 reportées : #57). Puis #14 blocs à forme (fait le 2026-10-30, à essayer
-en jeu ; options écartées : #58). **Suite** : #15 modèles d'entités
-(exploration d'abord ; #15 recommande une petite grille de voxels, #14 a
-pris des boîtes : choisir entre les deux pour les modèles), puis #32 mobs.
+en jeu ; options écartées : #58). #15 modèles d'entités (fait le
+2026-10-30, boîtes en parties ; options écartées : #59). **Suite** : #32
+mobs (déplacement, IA, apparition, et l'animation en mouvements en
+donnée décidée par #15).
 Ce qui a été reporté (#18, #27, #28) est listé
 dans `docs/jalons.md`, « Plus tard », et dans #49.
 Principe (design doc §2) : le moteur fournit des mécanismes, `core.ron`

@@ -4,6 +4,7 @@
 
 mod content;
 mod effects;
+mod entities;
 mod generate;
 mod interact;
 mod inventory;
@@ -204,7 +205,7 @@ fn main() {
         .insert_resource(Time::<Fixed>::from_hz(f64::from(TICKS_PER_SECOND)))
         .add_systems(
             Startup,
-            (setup_world, player::spawn_player, save::restore_player, save::restore_items, inventory::spawn_hotbar).chain(),
+            (setup_world, player::spawn_player, save::restore_player, save::restore_items, save::restore_mobs, inventory::spawn_hotbar).chain(),
         )
         // Pose/casse puis streaming notent les chunks sales ; on meshe après.
         .add_systems(
@@ -216,6 +217,8 @@ fn main() {
                 items::add_item_visuals,
                 items::place_items,
                 items::show_stored.after(interact::interact),
+                entities::add_mob_models,
+                entities::light_grid_lit,
                 inventory::scroll_selection,
                 // Raccourcis coupés pendant la saisie d'un texte.
                 (
@@ -542,7 +545,7 @@ fn texture_array(registry: &Registry) -> Image {
 }
 
 /// Convertit les tampons purs du mesher en `Mesh` Bevy.
-fn to_bevy_mesh(data: MeshData) -> Mesh {
+pub(crate) fn to_bevy_mesh(data: MeshData) -> Mesh {
     Mesh::new(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,

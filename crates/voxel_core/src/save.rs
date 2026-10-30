@@ -8,7 +8,8 @@
 //!   et minuteurs compris. Un chunk absent se régénère depuis la seed ;
 //! - `clock.ron` : le numéro du tick fixe courant (horloge des minuteurs) ;
 //! - `player.ron` : position, regard, inventaire ;
-//! - `items.ron` : les items au sol (entrée + position des pieds, en mètres).
+//! - `items.ron` : les items au sol (entrée + position des pieds, en mètres) ;
+//! - `mobs.ron` : les entités posées (entrée, pieds en mètres, cap).
 //!
 //! Écritures atomiques (fichier temporaire puis renommage) : un arrêt en
 //! pleine écriture laisse l'ancienne version, jamais un fichier tronqué.
@@ -53,6 +54,10 @@ pub struct PlayerSave {
 /// Items au sol : entrée et position des pieds en mètres. La vitesse n'est
 /// pas gardée : un item sauvé en pleine chute repart à l'arrêt.
 pub type DroppedItems = Vec<(ContentId, [f32; 3])>;
+
+/// Entités posées (#15) : entrée `EntityType`, pieds en mètres, cap en
+/// radians (autour de +Y, 0 : regarde vers +Z).
+pub type Mobs = Vec<(ContentId, [f32; 3], f32)>;
 
 /// Le dossier d'un monde.
 #[derive(Debug, Clone)]
@@ -128,6 +133,15 @@ impl Save {
 
     pub fn write_items(&self, items: &DroppedItems) -> Result<(), String> {
         self.write_ron("items.ron", items)
+    }
+
+    /// Absent : aucune entité.
+    pub fn read_mobs(&self) -> Result<Mobs, String> {
+        Ok(self.read_ron("mobs.ron")?.unwrap_or_default())
+    }
+
+    pub fn write_mobs(&self, mobs: &Mobs) -> Result<(), String> {
+        self.write_ron("mobs.ron", mobs)
     }
 
     /// L'horloge du monde ; `None` pour un monde sauvé avant qu'elle existe
@@ -427,6 +441,10 @@ mod tests {
         let items = vec![(bench, [0.5, 4.0, -2.5])];
         save.write_items(&items).unwrap();
         assert_eq!(save.read_items().unwrap(), items);
+        assert_eq!(save.read_mobs().unwrap(), vec![]);
+        let mobs = vec![(bench, [1.5, 4.0, 2.5], 1.25)];
+        save.write_mobs(&mobs).unwrap();
+        assert_eq!(save.read_mobs().unwrap(), mobs);
 
         save.write_ron("world.ron", &WorldMeta { format: 99, seed: 0, voxels_per_meter: 1.0, chunk_size: 8 }).unwrap();
         assert!(save.read_meta().is_err(), "autre version refusée");

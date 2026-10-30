@@ -42,6 +42,7 @@ use voxel_core::world::{neighbors, VoxelWorld, MAX_UPDATES_PER_TICK, TICKS_PER_S
 
 use crate::player::{CursorCaptured, Player, PLAYER_HEIGHT_M, PLAYER_WIDTH_M, PlayerCamera};
 use crate::inventory::Inventory;
+use crate::entities::Mob;
 use crate::items::{DroppedItem, ItemVisual, StorageChanged};
 use crate::{ChunkMesh, DirtyChunks, GameWorld};
 
@@ -149,6 +150,25 @@ pub fn interact(
     {
         let actions = rules::actions(&edit.game.world.registry, target, Hook::Used, ctx);
         edit.apply(hit.voxel, &actions);
+        return;
+    }
+
+    // Une entité en main (#15) : posée sur la case devant la face visée,
+    // tournée vers le joueur. Ni collision ni chute encore (#32).
+    if let Some(id) = holding.filter(|&id| edit.game.world.registry.get(id).is_some_and(|e| e.entity().is_some())) {
+        if hit.normal == [0; 3] {
+            return;
+        }
+        let size_m = 1.0 / edit.game.world.voxels_per_meter();
+        let cell = Vec3::new(
+            (hit.voxel[0] + hit.normal[0] as i64) as f32,
+            (hit.voxel[1] + hit.normal[1] as i64) as f32,
+            (hit.voxel[2] + hit.normal[2] as i64) as f32,
+        );
+        let feet = (cell + Vec3::new(0.5, 0.0, 0.5)) * size_m;
+        let look = cam.forward().as_vec3();
+        edit.commands.spawn(Mob { content: id, feet, yaw: (-look.x).atan2(-look.z) });
+        edit.inventory.as_deref_mut().map(Inventory::take_selected);
         return;
     }
 

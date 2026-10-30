@@ -16,6 +16,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::model::EntityData;
 use crate::rules::Rule;
 use crate::shape::{Cuboid, Orient, MAX_BOXES};
 use crate::texgen::{self, GeneratedTexture};
@@ -38,7 +39,8 @@ pub struct ContentId(pub u32);
 pub enum Kind {
     Block(BlockData),
     Item,
-    EntityType,
+    /// Mob, et plus tard véhicule : son modèle et sa collision (#15).
+    EntityType(EntityData),
 }
 
 /// Données spécifiques aux blocs, lues par le mesher et la physique.
@@ -234,6 +236,14 @@ impl ContentEntry {
             _ => None,
         }
     }
+
+    /// Les données d'entité, si l'entrée en est une.
+    pub fn entity(&self) -> Option<&EntityData> {
+        match &self.kind {
+            Kind::EntityType(data) => Some(data),
+            _ => None,
+        }
+    }
 }
 
 /// Registre append-only. L'ID d'une entrée est son index d'insertion.
@@ -304,7 +314,7 @@ impl Registry {
         let registry = self;
         for (_, entry) in registry.iter() {
             let block = entry.block();
-            if let Some(reason) = block.and_then(invalid_value) {
+            if let Some(reason) = block.and_then(invalid_value).or_else(|| entry.entity().and_then(EntityData::invalid)) {
                 return Err(LoadError::Invalid { id: entry.identifier.clone(), reason });
             }
             let drops = block.into_iter().flat_map(|b| b.drops.iter().flatten());
@@ -326,7 +336,7 @@ impl Registry {
     }
 
     /// Lit dans `dir` le PNG (`<nom>.png`) de chaque texture citée par un
-    /// bloc et garde ses pixels. Sans PNG, les pixels déjà gardés (venus
+    /// bloc ou un modèle d'entité et garde ses pixels. Sans PNG, les pixels déjà gardés (venus
     /// d'une save) restent ; sinon erreur. Toutes doivent être carrées et
     /// de même taille (texture array). Une texture déclarée dans
     /// `generated_textures` est calculée, à la taille des autres (16 px
@@ -334,14 +344,18 @@ impl Registry {
     pub fn load_textures(&mut self, dir: &Path) -> Result<(), LoadError> {
         let mut names: Vec<String> = Vec::new();
         for (_, entry) in self.iter() {
-            for name in entry.block().and_then(|b| b.texture.as_ref()).into_iter().flat_map(Faces::names) {
+            let block = entry.block().and_then(|b| b.texture.as_ref()).into_iter().flat_map(Faces::names);
+            for name in block.chain(entry.entity().into_iter().flat_map(EntityData::texture_names)) {
                 if !names.contains(name) {
                     names.push(name.clone());
                 }
             }
         }
-        let generated: Vec<&GeneratedTexture> =
-            self.iter().filter_map(|(_, e)| e.block()).flat_map(|b| &b.generated_textures).collect();
+        let generated: Vec<&GeneratedTexture> = self
+            .iter()
+            .flat_map(|(_, e)| e.block().map(|b| &b.generated_textures).into_iter().chain(e.entity().map(|d| &d.generated_textures)))
+            .flatten()
+            .collect();
         let mut textures = Vec::with_capacity(names.len());
         // Calculées après les autres, quand la taille est connue : (couche, définition).
         let mut pending = Vec::new();

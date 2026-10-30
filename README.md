@@ -165,14 +165,15 @@ src/                  Bevy binary: plugs the core into the ECS
   player.rs           FPS controller (simulated in FixedUpdate)
   interact.rs         place/break/use, applies block rules, block ticks and timers
   streaming.rs        loading/unloading chunks (read from the save, else generated)
-  items.rs            items on the ground, items shown on a workbench
+  items.rs            items on the ground (block items drawn as their block), items shown on a workbench
+  entities.rs         placed entities: model parts, light from the grid (MeshTag)
   inventory.rs        inventory, hotbar, crafting menu (C), G (debug)
   content.rs          loads core.ron + textures, reloads them on R
   generate.rs         block generation window (I), Generator trait, claude CLI
   ui.rs               game windows: one at a time, frees the mouse, item slot, text field
   effects.rs          render effects: sun shadows, fog, volumetric fog, bloom (F1–F4)
   sky.rs              day and night: sun or moon, ambient light, sky dome, fog colour
-  save.rs             save writes and player/items restore
+  save.rs             save writes and player/items/entities restore
 assets/               content (core.ron, worldgen.ron, sky.ron), textures (PNG), shaders (voxel.wgsl, sky.wgsl)
 crates/voxel_core/    the WHOLE voxel core: pure, no Bevy dependency
   registry.rs         append-only content registry
@@ -190,6 +191,7 @@ crates/voxel_core/    the WHOLE voxel core: pure, no Bevy dependency
   generate.rs         what is sent to the generator, validation of its answer
   sky.rs              hour from the world clock, sky and lights of the moment (sky.ron)
   shape.rs            non-cubic blocks: boxes in sixteenths of a cell, the 24 rotations
+  model.rs            entity models: parts with a pivot, boxes in sixteenths of a metre
   save.rs             world folder, binary chunk format
 docs/                 in French
   jalons.md                      milestones, in order

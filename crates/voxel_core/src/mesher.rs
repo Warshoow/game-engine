@@ -625,6 +625,41 @@ fn face_layer(block: &Resolved, normal: [f32; 3]) -> u32 {
     }
 }
 
+/// Une boîte entière, ses six faces, sans ombrage, en pleine lumière du
+/// ciel (le rendu d'une entité la remplace par celle de la grille à sa
+/// position). `layers` : côté, dessus, dessous. `uv_scale` : coordonnées de
+/// texture par mètre (1 : une texture par mètre, §3.1).
+pub(crate) fn push_box(mesh: &mut MeshData, min: [f32; 3], max: [f32; 3], layers: [u32; 3], color: [f32; 4], uv_scale: f32) {
+    for face in &FACES {
+        let layer = if face.normal[1] > 0.0 { layers[1] } else if face.normal[1] < 0.0 { layers[2] } else { layers[0] };
+        let base = mesh.positions.len() as u32;
+        for corner in face.corners {
+            let pos = std::array::from_fn(|a| if corner[a] == 1 { max[a] } else { min[a] });
+            mesh.positions.push(pos);
+            mesh.normals.push(face.normal);
+            mesh.colors.push(color);
+            mesh.uvs.push(face_uv(pos.map(|c| c * uv_scale), face.normal));
+            mesh.layers.push(layer);
+            mesh.lights.push([1.0, 0.0]);
+        }
+        push_quad_indices(mesh, base, [3; 4]);
+    }
+}
+
+/// Le bloc `id` en petit (`side_m` de côté), centré sur l'origine, pour un
+/// item au sol : sa forme ou le cube, chaque face montre toute sa texture.
+/// `None` si `id` n'est pas un bloc.
+pub fn mesh_block_item(registry: &Registry, id: ContentId, side_m: f32) -> Option<MeshData> {
+    let shape = registry.get(id)?.block()?.shape.clone().unwrap_or_else(|| vec![Cuboid::FULL]);
+    let block = resolve(registry, id);
+    let mut mesh = MeshData::default();
+    for c in shape {
+        let [lo, hi] = c.to_cells().map(|p| p.map(|c| (c - 0.5) * side_m));
+        push_box(&mut mesh, lo, hi, block.layers, block.color, 1.0 / side_m);
+    }
+    Some(mesh)
+}
+
 /// Coordonnées de texture en mètres, prises dans le plan de la face. Sur
 /// les côtés, v descend avec y : l'image est à l'endroit (le haut du PNG en
 /// haut du bloc).

@@ -12,6 +12,7 @@ use voxel_core::chunk::ChunkPos;
 use voxel_core::save::{encode_chunk, PlayerSave, Save};
 
 use crate::inventory::Inventory;
+use crate::entities::Mob;
 use crate::items::{DroppedItem, ItemVisual};
 use crate::player::{Player, PlayerCamera};
 use crate::GameWorld;
@@ -87,8 +88,8 @@ pub fn finish_chunk_writes(mut exit: MessageReader<AppExit>, writer: Option<ResM
     }
 }
 
-/// Écrit le joueur (position, regard, inventaire), les items au sol et
-/// l'horloge du monde :
+/// Écrit le joueur (position, regard, inventaire), les items au sol, les
+/// entités posées et l'horloge du monde :
 /// périodiquement, et à la fermeture (le `AppExit` est émis dans `Last`,
 /// d'où l'ordre). Les items bougent sans cesse (chute, ramassage) : les
 /// écrire au même rythme que le joueur plutôt qu'à chaque changement.
@@ -102,6 +103,7 @@ pub fn save_player_and_items(
     player: Query<&Player>,
     inventory: Res<Inventory>,
     items: Query<&DroppedItem>,
+    mobs: Query<&Mob>,
     game: Res<GameWorld>,
 ) {
     *since += time.delta_secs();
@@ -115,6 +117,10 @@ pub fn save_player_and_items(
         error!("sauvegarde de l'horloge impossible : {err}");
     }
     let dropped = items.iter().map(|i| (i.content, i.feet().to_array())).collect();
+    let placed = mobs.iter().map(|m| (m.content, m.feet.to_array(), m.yaw)).collect();
+    if let Err(err) = save.0.write_mobs(&placed) {
+        error!("sauvegarde des entités impossible : {err}");
+    }
     if let Err(err) = save.0.write_items(&dropped) {
         error!("sauvegarde des items au sol impossible : {err}");
     }
@@ -165,6 +171,20 @@ pub fn restore_items(mut commands: Commands, save: Option<Res<WorldSave>>) {
     for (id, feet) in items {
         let item = DroppedItem::restored(id, Vec3::from_array(feet));
         commands.spawn((item, ItemVisual(id), Transform::default()));
+    }
+}
+
+/// Refait apparaître les entités posées sauvées (#15).
+pub fn restore_mobs(mut commands: Commands, save: Option<Res<WorldSave>>) {
+    let Some(save) = save else { return };
+    match save.0.read_mobs() {
+        Ok(mobs) => {
+            for (content, feet, yaw) in mobs {
+                commands.spawn(Mob { content, feet: Vec3::from_array(feet), yaw });
+            }
+        }
+        // Comme les items : illisibles, on les perd plutôt que le monde.
+        Err(err) => error!("entités non restaurées : {err}"),
     }
 }
 

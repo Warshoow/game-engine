@@ -143,4 +143,28 @@
         generated_textures: [(name: "lava", pattern: Spots, color: (0.95, 0.40, 0.05), noise: 0.35, seed: 13)],
         liquid: Some((spread: 3.0, delay: 1.5, drag: 0.8)),
         rules: [(on: NeighborChanged, when: [Touching("core:water")], then: [ReplaceSelf("core:stone")])]))),
+
+    // Entités (#15) : un modèle en parties, boîtes en seizièmes de mètre,
+    // dessiné pieds en y = 0 et regardant vers +Z ; chaque partie tourne
+    // autour de son pivot (animation : #32). `size` : la collision, en
+    // mètres. Posé depuis l'inventaire (touche G), il ne bouge pas encore.
+    (identifier: "core:pig", kind: EntityType((size: (0.9, 0.9),
+        model: [
+            (name: "body", pivot: (0, 10, 0), boxes: [((-5, 6, -8), (5, 14, 8), "pig_skin")]),
+            (name: "head", parent: "body", pivot: (0, 11, 8), boxes: [
+                ((-4, 8, 8), (4, 16, 14), "pig_skin"),
+                ((-2, 9, 14), (2, 12, 15), "pig_snout"),
+                ((-3, 13, 14), (-2, 14, 15), "pig_eye"),
+                ((2, 13, 14), (3, 14, 15), "pig_eye"),
+            ]),
+            (name: "leg_front_left", parent: "body", pivot: (3, 6, 5), boxes: [((1, 0, 3), (5, 6, 7), "pig_skin")]),
+            (name: "leg_front_right", parent: "body", pivot: (-3, 6, 5), boxes: [((-5, 0, 3), (-1, 6, 7), "pig_skin")]),
+            (name: "leg_back_left", parent: "body", pivot: (3, 6, -5), boxes: [((1, 0, -7), (5, 6, -3), "pig_skin")]),
+            (name: "leg_back_right", parent: "body", pivot: (-3, 6, -5), boxes: [((-5, 0, -7), (-1, 6, -3), "pig_skin")]),
+        ],
+        generated_textures: [
+            (name: "pig_skin", pattern: Spots, color: (0.93, 0.66, 0.64), noise: 0.15, seed: 15),
+            (name: "pig_snout", pattern: Plain, color: (0.85, 0.50, 0.55), noise: 0.1, seed: 16),
+            (name: "pig_eye", pattern: Plain, color: (0.08, 0.08, 0.08), seed: 17),
+        ]))),
 ]

@@ -77,7 +77,11 @@ fn vertex(vertex: Vertex) -> VoxelVertexOutput {
     out.visibility_range_dither = mesh_functions::get_visibility_range_dither_level(
         vertex.instance_index, world_from_local[3]);
 #endif
-    out.light = vertex.light;
+    // Entité (#15) : la lumière de la grille à sa position, passée par le
+    // tag de l'instance (0 : un chunk, sa lumière est aux sommets).
+    let tag = mesh_functions::get_tag(vertex.instance_index);
+    let grid = vec2(f32(tag & 0xffu), f32((tag >> 8u) & 0xffu)) / 255.0;
+    out.light = select(vertex.light, grid, tag != 0u);
     return out;
 }
 

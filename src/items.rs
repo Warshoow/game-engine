@@ -8,12 +8,14 @@ use std::collections::{HashMap, HashSet};
 
 use bevy::prelude::*;
 
+use voxel_core::mesher::mesh_block_item;
 use voxel_core::physics::{move_and_collide, Aabb};
 use voxel_core::registry::ContentId;
 
+use crate::entities::GridLit;
 use crate::inventory::{self, Inventory};
 use crate::player::{Player, GRAVITY_M_S2};
-use crate::GameWorld;
+use crate::{to_bevy_mesh, GameWorld, VoxelMaterial};
 
 /// Côté du cube affiché et de sa boîte de collision, en mètres.
 const ITEM_SIZE_M: f32 = 0.25;
@@ -92,9 +94,12 @@ pub fn simulate_items(
     }
 }
 
-/// Habille un item fraîchement apparu (ou dont le contenu a été rechargé) :
-/// un cube de la couleur de son entrée. Mesh et matériaux partagés (un
-/// matériau par couleur : une couleur changée au rechargement en crée un).
+/// Habille un item fraîchement apparu (ou dont le contenu a été rechargé).
+/// Un item de bloc est son bloc en petit (forme et textures, #15), éclairé
+/// par la grille ; un autre item, un cube de la couleur de son entrée (mesh
+/// et matériaux partagés, un matériau par couleur).
+// shortcut: un mesh par item de bloc, sans partage ; mettre en cache par
+// entrée si des centaines d'items au sol se voient au profilage.
 pub fn add_item_visuals(
     mut commands: Commands,
     game: Res<GameWorld>,
@@ -105,6 +110,11 @@ pub fn add_item_visuals(
     changed: Query<(Entity, &ItemVisual), Changed<ItemVisual>>,
 ) {
     for (entity, &ItemVisual(content)) in &changed {
+        if let Some(block) = mesh_block_item(&game.world.registry, content, ITEM_SIZE_M) {
+            let mesh = Mesh3d(meshes.add(to_bevy_mesh(block)));
+            commands.entity(entity).remove::<MeshMaterial3d<StandardMaterial>>().insert((mesh, MeshMaterial3d(game.material.clone()), GridLit));
+            continue;
+        }
         let cube = cube
             .get_or_insert_with(|| meshes.add(Cuboid::from_length(ITEM_SIZE_M)))
             .clone();
@@ -113,7 +123,7 @@ pub fn add_item_visuals(
             .entry(color.to_srgba().to_u8_array())
             .or_insert_with(|| materials.add(color))
             .clone();
-        commands.entity(entity).insert((Mesh3d(cube), MeshMaterial3d(material)));
+        commands.entity(entity).remove::<(MeshMaterial3d<VoxelMaterial>, GridLit)>().insert((Mesh3d(cube), MeshMaterial3d(material)));
     }
 }
 
