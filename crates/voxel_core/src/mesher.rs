@@ -281,7 +281,9 @@ impl Region {
 
     /// Les faces des blocs à forme (#14) et des cubes tournés de la passe
     /// `blend` : chaque boîte, tournée, sans fusion. Une face au bord de la case disparaît derrière
-    /// un voisin qui la cache. Lumière de la case elle-même, sans ombrage.
+    /// un voisin qui la cache. Sans ombrage. Lumière de la case où la face
+    /// donne : la voisine pour une face au bord (un cube tourné est plein,
+    /// sa propre case est noire), la sienne pour une face intérieure.
     // shortcut: pas de greedy, 2 quads par dalle de sol ; fusionner si un
     // sol de dalles se voit au profilage (#58). Un cube tourné (bûche
     // couchée) perd aussi l'ombrage de ses coins.
@@ -292,8 +294,10 @@ impl Region {
             let Some(block) = self.block(p).filter(|b| (turned || !b.shape.is_empty()) && b.blend == blend) else { return };
             let r = self.rotation(p);
             let boxes = if block.shape.is_empty() { &[Cuboid::FULL][..] } else { &block.shape };
-            let [sky, lit] = self.lights[self.index(p)];
-            let lights = [f32::from(sky) / full, if block.emits { 1.0 } else { f32::from(lit) / full }];
+            let lights_at = |c: [i32; 3]| {
+                let [sky, lit] = self.lights[self.index(c)];
+                [f32::from(sky) / full, if block.emits { 1.0 } else { f32::from(lit) / full }]
+            };
             for c in boxes {
                 let Cuboid(lo, hi) = c.rotated(r);
                 for face in &FACES {
@@ -315,7 +319,7 @@ impl Region {
                         let at_m = |s: [f32; 3]| std::array::from_fn(|a| (p[a] as f32 + s[a] / f32::from(CELL)) * voxel_size_m);
                         let pos = at_m(sixteenths.map(f32::from));
                         let uv = face_uv(at_m(model.map(|c| (c + i32::from(CELL)) as f32 / 2.0)), model_normal);
-                        push_vertex(mesh, pos, face.normal, block, layer, uv, 1.0, lights);
+                        push_vertex(mesh, pos, face.normal, block, layer, uv, 1.0, lights_at(if on_side { q } else { p }));
                     }
                     push_quad_indices(mesh, base, [3; 4]);
                 }

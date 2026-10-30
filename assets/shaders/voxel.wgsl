@@ -20,8 +20,10 @@
 // Force du jour dans [0, 1] (#30), voir `BlockTextures::daylight`.
 @group(#{MATERIAL_BIND_GROUP}) @binding(102) var<uniform> daylight: f32;
 
-// Le noir d'une grotte sans lampe : presque, pas tout à fait.
-const MIN_LIGHT: f32 = 0.02;
+// Le noir d'une grotte sans lampe : presque, pas tout à fait. Lumière
+// propre de la face (cd/m², un mur au soleil en fait ~3000), la même de
+// jour et de nuit : rien du soleil ne passe la roche.
+const DARK: f32 = 15.0;
 // Teinte de la lumière des blocs, une seule pour tous (couleur par bloc :
 // #52).
 const BLOCK_TINT: vec3<f32> = vec3(1.0, 0.82, 0.6);
@@ -120,12 +122,16 @@ fn fragment(voxel: VoxelVertexOutput, @builtin(front_facing) is_front: bool) -> 
     // baisse, #30) ; les blocs ajoutent leur lumière à part (une lampe
     // éclaire toutes les faces pareil), là où le ciel n'éclaire pas déjà :
     // dehors la nuit, une lampe éclaire.
+    // Le reflet aussi : sans ça, celui du soleil traverse la roche (des
+    // taches blanches au fond d'une grotte, orangées au coucher).
     let sky = brightness(voxel.light.x);
     let block = brightness(voxel.light.y);
     let base = pbr_input.material.base_color.rgb;
-    pbr_input.material.base_color = vec4(base * max(sky, MIN_LIGHT), pbr_input.material.base_color.a);
+    pbr_input.material.base_color = vec4(base * sky, pbr_input.material.base_color.a);
+    pbr_input.material.reflectance *= sky;
     // Alpha 1 : l'exposition de la caméra s'applique, comme au soleil.
-    pbr_input.material.emissive = vec4(base * BLOCK_TINT * block * (1.0 - sky * daylight) * BLOCK_LIGHT, 1.0);
+    let lit = BLOCK_TINT * block * (1.0 - sky * daylight) * BLOCK_LIGHT + DARK * (1.0 - sky);
+    pbr_input.material.emissive = vec4(base * lit, 1.0);
 
     var out: FragmentOutput;
     out.color = apply_pbr_lighting(pbr_input);

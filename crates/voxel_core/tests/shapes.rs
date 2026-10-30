@@ -136,6 +136,9 @@ fn a_laid_log_turns_with_its_texture() {
     }
     // Sur le dessus, les fibres (le v de l'image) suivent X, comme le tronc.
     let top = faces.iter().find(|&&f| mesh.normals[f * 4] == [0.0, 1.0, 0.0]).unwrap() * 4;
+    // Éclairé par la case devant chaque face, pas par la sienne (pleine,
+    // donc noire) : le dessus est au ciel ouvert.
+    assert!(mesh.lights[top..top + 4].iter().all(|l| l[0] == 1.0), "{:?}", &mesh.lights[top..top + 4]);
     for i in top..top + 4 {
         for j in top..top + 4 {
             let (a, b) = (mesh.positions[i], mesh.positions[j]);
