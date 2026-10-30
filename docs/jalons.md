@@ -219,15 +219,16 @@ quand une mesure la réclame.
    de rendu et #30 jour/nuit** — le jour/nuit n'a de sens qu'avec un vrai
    éclairage. #7 fait le 2026-10-25 (ombrage par sommet, options écartées
    dans #50) ; #23 fait le 2026-10-26 (propagation ciel + blocs, options
-   écartées dans #52).
+   écartées dans #52) ; #51 codé le 2026-10-30 (ombres, brouillards,
+   bloom ; options reportées dans #56), à voir et mesurer sur la 4060.
 7. **#14 / #15 → #32 → #33** — formes non cubiques et modèles, puis mobs,
    puis vie et survie. #33 est un choix de jeu : du contenu que `core.ron`
    active, pas une règle du moteur.
 
 **Quand le besoin apparaît, pas dans l'ordre :**
 - #41 profilage : dès que le build Windows saccade ;
-- #39 génération et meshing sur d'autres threads, puis #6 / #24 distance
-  de vue : dans cet ordre, voir loin coûte des chunks ;
+- #6 / #24 distance de vue : voir loin coûte des chunks (#39, génération
+  et meshing hors de l'image, fait par #53 le 2026-10-29) ;
 - #40 mémoire des chunks : mesurer avant ;
 - #12 Lua : quand un bloc ne s'exprime pas en règles ;
 - #19 console de debug (egui) : à glisser dès que téléporter ou changer

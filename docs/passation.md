@@ -502,6 +502,16 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   (`HAZE_DENSITY`). **À voir et mesurer sur la 4060** avant de fermer #51 :
   rendu de chaque effet (F1 à F4), réglages (densité du voile, biais
   d'ombre, force du bloom), temps GPU par passe (`elapsed_gpu`).
+- #39 fermé : fait par #53.
+- Les exe du dossier `Downloads\voxel_engine_rtx` datent d'avant #53, #54
+  et #51 : à refaire (`cargo windows`, `cargo windows-profile`) quand
+  Warshow prévoit le passage sur la 4060, avec au `LISEZMOI.txt` le
+  scénario « chargement » (monde neuf) et les touches F1 à F4 (effets).
+- Bevy 0.20.1 existe (signalé par Warshow le 2026-10-30) : rien dans
+  #51 n'en avait besoin ; montée de version à faire en ticket à part si
+  un besoin apparaît.
+- Commits jusqu'à `df33ae9` (plus celui de cette passation), à pousser
+  par Warshow.
 
 ## Prochaines étapes
 
