@@ -163,8 +163,9 @@
             (name: "leg_back_right", parent: "body", pivot: (-3, 6, -5), boxes: [((-5, 0, -7), (-1, 6, -3), "pig_skin")]),
         ],
         behaviors: [
-            // `keep` : un cochon apparu seul qui a suivi le blé reste (élevage).
-            Follow(holding: "core:wheat", range: 10.0, speed: 1.6, keep: true),
+            // `keep` : un cochon apparu seul qui a suivi le blé 10 s en tout
+            // reste (élevage) ; le croiser blé en main ne suffit pas.
+            Follow(holding: "core:wheat", range: 10.0, speed: 1.6, keep: Some(10.0)),
             LookAt(range: 6.0, time: 3.0),
             Wander(speed: 1.0, range: 8.0, pause: 6.0),
         ],

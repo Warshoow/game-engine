@@ -1337,6 +1337,10 @@ attendra que les données de chunks quittent la mémoire.
 disparaîtrait dès qu'on s'éloigne. Warshow : « élevage oui ». `Follow` a
 gagné `keep` : suivre le joueur rend le mob gardé. C'est le contenu qui
 le choisit, pas une règle propre au cochon. La reproduction est reportée.
+Première version : un drapeau, gardé dès la première seconde de suivi.
+Un second agent a relevé que marcher blé en main gardait alors tous les
+cochons croisés (et `mobs.ron` grandissait avec l'exploration) : `keep`
+est devenu une durée, 10 s de suivi pour le cochon.
 
 **Hauteur tirée.** Un essai tire aussi la hauteur, puis descend jusqu'au
 premier sol où le corps tient : sans ça, rien n'apparaîtrait jamais en

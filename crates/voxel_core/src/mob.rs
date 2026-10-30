@@ -52,14 +52,15 @@ pub enum Behavior {
     /// s'arrête jusqu'à `pause` secondes. Toujours applicable.
     Wander { speed: f32, range: f32, pause: f32 },
     /// Suivre le joueur qui tient l'entrée `holding`, à moins de `range`.
-    /// `keep` : un mob apparu seul qui a suivi le joueur ne disparaît plus
-    /// (élevage, #60).
+    /// `keep` : un mob apparu seul qui a suivi le joueur pendant `keep`
+    /// secondes en tout ne disparaît plus (élevage, #60) ; absent : jamais.
+    /// Une durée, pas un drapeau : croiser un mob blé en main ne le garde pas.
     Follow {
         holding: String,
         range: f32,
         speed: f32,
         #[serde(default)]
-        keep: bool,
+        keep: Option<f32>,
     },
     /// S'arrêter et regarder le joueur à moins de `range`, pendant `time`
     /// secondes ; pas avant `time` secondes de nouveau après.
@@ -72,7 +73,9 @@ impl Behavior {
         let ok = |v: f32, max: f32| v > 0.0 && v <= max;
         let fine = match self {
             Behavior::Wander { speed, range, pause } => ok(*speed, 20.0) && ok(*range, 64.0) && ok(*pause, 600.0),
-            Behavior::Follow { range, speed, .. } => ok(*range, 64.0) && ok(*speed, 20.0),
+            Behavior::Follow { range, speed, keep, .. } => {
+                ok(*range, 64.0) && ok(*speed, 20.0) && keep.is_none_or(|k| (0.0..=600.0).contains(&k))
+            }
             Behavior::LookAt { range, time } => ok(*range, 64.0) && ok(*time, 600.0),
         };
         (!fine).then(|| format!("comportement {self:?} : réglage nul, négatif ou trop grand"))
@@ -129,6 +132,8 @@ pub struct Mob {
     /// La recherche du prochain chemin, en cours.
     search: Option<Search>,
     stuck: u32,
+    /// Ticks passés à suivre le joueur (`Follow::keep`) ; pas sauvé.
+    followed: u64,
 }
 
 impl Mob {
@@ -148,6 +153,7 @@ impl Mob {
             path: Vec::new(),
             search: None,
             stuck: 0,
+            followed: 0,
         }
     }
 
@@ -215,7 +221,10 @@ impl Mob {
             }
             Behavior::Follow { speed, keep, .. } => {
                 let p = player.expect("Follow ne s'applique qu'avec un joueur");
-                self.spawned &= !keep;
+                self.followed += 1;
+                if keep.is_some_and(|k| self.followed >= ticks(k)) {
+                    self.spawned = false;
+                }
                 self.look_at = Some(p.eyes);
                 if dist(p.feet, self.body.feet) <= FOLLOW_STOP_M {
                     self.path.clear();
@@ -518,15 +527,16 @@ mod tests {
     }
 
     #[test]
-    fn a_spawned_pig_that_followed_is_kept_only_with_keep() {
-        for keep in [false, true] {
+    fn a_spawned_pig_is_kept_only_after_following_for_keep_seconds() {
+        // (réglage, secondes de suivi, encore « apparu seul » ?)
+        for (keep, seconds, spawned) in [("None", 5.0, true), ("Some(3.0)", 1.0, true), ("Some(3.0)", 5.0, false)] {
             let mut w = world(&format!(r#"Follow(holding: "t:wheat", range: 16.0, speed: 2.0, keep: {keep})"#));
             let wheat = w.registry.lookup("t:wheat");
             let player = Player { feet: [20.5, 4.0, 10.5], eyes: [20.5, 5.6, 10.5], holding: wheat };
             let mut mobs = pigs(&w)[..1].to_vec();
             mobs[0].spawned = true;
-            let pig = &resume(&mut w, mobs, Some(player), 1, 1.0)[0];
-            assert_eq!(pig.spawned, !keep, "keep: {keep}");
+            let pig = &resume(&mut w, mobs, Some(player), 1, seconds)[0];
+            assert_eq!(pig.spawned, spawned, "keep: {keep}, {seconds} s");
         }
     }
 }

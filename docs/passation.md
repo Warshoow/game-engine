@@ -164,7 +164,8 @@ WSL le rendu est logiciel et rame — normal.
   `EntityData` (règles en donnée). Les essais dérivent de (seed, tick,
   numéro d'essai), **jamais du nombre de mobs**. `Mob::spawned` : apparu
   seul, disparaît au-delà de `despawn` même gelé ; posé (`G`) jamais ;
-  `Follow { keep: true }` le rend gardé (élevage). Un mob à plus de
+  `Follow { keep: Some(s) }` le rend gardé après `s` secondes de suivi
+  (élevage ; compteur `followed`, pas sauvé). Un mob à plus de
   `mob::SIMULATION_M` (128 m) du joueur est gelé : les données d'un chunk
   ne quittent pas la mémoire, sans ce gel les mobs marchaient partout où
   le joueur était passé. `SIMULATION_M` = vue + marge de déchargement et
@@ -653,7 +654,8 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   Règles `spawn` en donnée, essais près du joueur, disparition au loin,
   gel au-delà de 128 m ; rangement par chunk reporté (il ira avec le
   déchargement des données de chunks). Ajout demandé par Warshow
-  (« élevage oui ») : `Follow { keep }`, un cochon attiré au blé reste.
+  (« élevage oui ») : `Follow { keep }`, un cochon qui a suivi le blé
+  10 s reste (une durée : le croiser blé en main ne le garde pas).
   Vu sous WSL (monde neuf, 75 s) : 11 cochons apparus sur l'herbe, sauvés
   avec « apparu seul ». **À essayer sous Windows : #63.**
 - **Tickets de QA** (demandé par Warshow) : label `qa`, une liste de
