@@ -647,7 +647,8 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   si le pas automatique l'a bloqué au tick d'avant (`4a6e6fe`).
 - Commits à pousser par Warshow : `e58c46e`, `5cea975`, `0c31c5c`
   (#32), `4a6e6fe`, `0c89327`, puis le design doc de #60, `acf30aa`
-  (`Closes #60`) et celui de cette passation. #32 et #60 se ferment au
+  (`Closes #60`), `707c651`, `901c1cd` (`keep` en durée) et celui de
+  cette passation. #32 et #60 se ferment au
   push.
 - #60 apparition des mobs, exploré puis tranché avec Warshow (reco B
   suivie ; design doc §3.6 « Apparition des mobs » ; options : #62).
