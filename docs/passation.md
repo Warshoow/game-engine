@@ -669,6 +669,12 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   ou par machine (#64 : tout ce qui attend la RTX 4060, mesures et rendu).
   Écrire la liste de test dans un ticket `qa` plutôt que seulement dans la
   conversation. Convention : `docs/agents/triage-labels.md`.
+- **Labels des tickets** (2026-10-30, demandé par Warshow) : les labels
+  d'état de mattpocock (`needs-triage`, `needs-info`, `ready-for-agent`,
+  `ready-for-human`) sont créés et posés sur tous les tickets ouverts.
+  **Tout ticket créé reçoit ses labels** selon la table de
+  `docs/agents/triage-labels.md` (ticket d'options : `documentation` ;
+  QA : `qa` + `ready-for-human` ; fonctionnalité : `enhancement` + un état).
 
 ## Prochaines étapes
 
