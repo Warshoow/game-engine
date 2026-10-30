@@ -263,7 +263,9 @@ impl Mob {
             let (dx, dz) = (c[0] - feet[0], c[2] - feet[2]);
             let len = dx.hypot(dz).max(1e-6);
             wish = [dx / len * speed, dz / len * speed];
-            jump = self.body.grounded && next.feet_y - feet[1] > STEP_HEIGHT_M;
+            // Saute seulement si la marche ne suffit pas (bloqué au tick d'avant) :
+            // un escalier se monte marche par marche, même si la case est à 1 m.
+            jump = self.body.grounded && self.stuck > 0 && next.feet_y - feet[1] > STEP_HEIGHT_M;
             self.turn_to(dx.atan2(dz), dt);
         } else if let Some(target) = self.look_at {
             let (dx, dz) = (target[0] - feet[0], target[2] - feet[2]);
@@ -376,6 +378,10 @@ mod tests {
                 (identifier: "t:air", kind: Block((solid: false, color: (0.0, 0.0, 0.0)))),
                 (identifier: "t:stone", kind: Block((solid: true, color: (0.5, 0.5, 0.5)))),
                 (identifier: "t:wheat", kind: Item),
+                (identifier: "t:slab", kind: Block((solid: true, color: (0.5, 0.5, 0.5),
+                    shape: Some([((0, 0, 0), (16, 8, 16))])))),
+                (identifier: "t:stairs", kind: Block((solid: true, color: (0.5, 0.5, 0.5),
+                    shape: Some([((0, 0, 0), (16, 8, 16)), ((0, 8, 8), (16, 16, 16))])))),
                 (identifier: "t:pig", kind: EntityType((size: (0.9, 0.9),
                     model: [(name: "body", boxes: [((-5, 0, -8), (5, 14, 8), "t")])],
                     behaviors: [{behaviors}]))),
@@ -457,5 +463,30 @@ mod tests {
         assert_eq!(mobs[0].look_at, None, "au bout de 2 s, repos");
         mobs = resume(&mut w, mobs, Some(player), 1, 2.0);
         assert_eq!(mobs[0].look_at, Some(player.eyes), "puis regarde de nouveau");
+    }
+
+    #[test]
+    fn a_pig_walks_up_a_slab_or_a_stair_and_jumps_a_full_block() {
+        for (step, jumps) in [("t:slab", false), ("t:stairs", false), ("t:stone", true)] {
+            let mut w = world(r#"Follow(holding: "t:wheat", range: 16.0, speed: 2.0)"#);
+            let (step_id, stone) = (w.registry.lookup(step).unwrap(), w.registry.lookup("t:stone").unwrap());
+            // Une marche en z = 13 sur toute la largeur, puis un plateau d'1 m.
+            for x in 0..32 {
+                w.set_voxel([x, 4, 13], step_id);
+                for z in 14..32 {
+                    w.set_voxel([x, 4, z], stone);
+                }
+            }
+            let wheat = w.registry.lookup("t:wheat");
+            let player = Player { feet: [10.5, 5.0, 20.5], eyes: [10.5, 6.6, 20.5], holding: wheat };
+            let mut mobs = run(&mut w, 1, Some(player), 1, 0.0);
+            let mut rise = 0.0f32;
+            for _ in 0..ticks(10.0) {
+                mobs = resume(&mut w, mobs, Some(player), 1, DT);
+                rise = rise.max(mobs[0].body.velocity[1]);
+            }
+            assert!((mobs[0].body.feet[1] - 5.0).abs() < 0.01, "{step} : monté sur le plateau, {:?}", mobs[0].body.feet);
+            assert_eq!(rise > 0.1, jumps, "{step} : vitesse verticale {rise}");
+        }
     }
 }
