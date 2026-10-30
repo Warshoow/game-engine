@@ -220,7 +220,9 @@ quand une mesure la réclame.
    éclairage. #7 fait le 2026-10-25 (ombrage par sommet, options écartées
    dans #50) ; #23 fait le 2026-10-26 (propagation ciel + blocs, options
    écartées dans #52) ; #51 codé le 2026-10-30 (ombres, brouillards,
-   bloom ; options reportées dans #56), à voir et mesurer sur la 4060.
+   bloom ; options reportées dans #56), à voir et mesurer sur la 4060 ;
+   #30 codé le 2026-10-30 (heure de l'horloge du monde, ciel par shader à
+   nous, `sky.ron` ; options reportées dans #57), à voir sur la 4060.
 7. **#14 / #15 → #32 → #33** — formes non cubiques et modèles, puis mobs,
    puis vie et survie. #33 est un choix de jeu : du contenu que `core.ron`
    active, pas une règle du moteur.

@@ -1,0 +1,43 @@
+// Jour et nuit (#30) : durée du jour, ciel et lumières de quelques moments
+// de la journée, interpolés entre eux. Une modification s'applique aussi
+// aux mondes existants, au prochain lancement. La save en garde une copie,
+// qui ne sert qu'à un monde dont le jeu n'a pas de `sky.ron`.
+//
+// Le moteur fait lever le soleil à 6 h et coucher à 18 h ; entre 18 h et
+// 6 h, la même lumière vient de la lune. Garder `light` faible autour de
+// 6 h et 18 h : la lumière y passe d'un côté du ciel à l'autre.
+//
+// Couleurs en sRGB. `horizon` est aussi la couleur du brouillard.
+// `light` en lux (10 000 = plein jour), `ambient` en cd/m² (80 = défaut
+// de Bevy). Réglé à l'estime, à revoir sur la 4060.
+(
+    // Une journée de 24 h dure 20 minutes, comme dans Minecraft.
+    day_length: 1200.0,
+    // Un monde neuf commence le matin.
+    start_hour: 8.0,
+    moments: [
+        // Nuit : lune bleutée, ciel presque noir.
+        (hour: 0.0,  zenith: (0.01, 0.015, 0.04), horizon: (0.04, 0.05, 0.10),
+            light_color: (0.60, 0.70, 1.00), light: 400.0,   ambient: 15.0),
+        (hour: 5.0,  zenith: (0.01, 0.015, 0.04), horizon: (0.04, 0.05, 0.10),
+            light_color: (0.60, 0.70, 1.00), light: 400.0,   ambient: 15.0),
+        // Aube : la lune s'efface, l'horizon rougit.
+        (hour: 6.0,  zenith: (0.12, 0.16, 0.32), horizon: (0.85, 0.45, 0.30),
+            light_color: (1.00, 0.55, 0.30), light: 100.0,   ambient: 25.0),
+        // Lever : soleil bas et orangé.
+        (hour: 7.0,  zenith: (0.30, 0.45, 0.75), horizon: (0.95, 0.70, 0.50),
+            light_color: (1.00, 0.75, 0.50), light: 4000.0,  ambient: 50.0),
+        (hour: 9.0,  zenith: (0.30, 0.50, 0.90), horizon: (0.62, 0.76, 0.92),
+            light_color: (1.00, 0.97, 0.92), light: 10000.0, ambient: 80.0),
+        (hour: 16.0, zenith: (0.30, 0.50, 0.90), horizon: (0.62, 0.76, 0.92),
+            light_color: (1.00, 0.97, 0.92), light: 10000.0, ambient: 80.0),
+        // Coucher.
+        (hour: 17.0, zenith: (0.30, 0.42, 0.72), horizon: (0.98, 0.62, 0.40),
+            light_color: (1.00, 0.70, 0.45), light: 4000.0,  ambient: 50.0),
+        (hour: 18.0, zenith: (0.12, 0.14, 0.30), horizon: (0.80, 0.38, 0.28),
+            light_color: (1.00, 0.50, 0.30), light: 100.0,   ambient: 25.0),
+        // Crépuscule : la lune prend le relais.
+        (hour: 19.0, zenith: (0.01, 0.015, 0.04), horizon: (0.04, 0.05, 0.10),
+            light_color: (0.60, 0.70, 1.00), light: 400.0,   ambient: 15.0),
+    ],
+)

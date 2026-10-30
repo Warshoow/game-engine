@@ -1130,3 +1130,37 @@ rendu des packs de shaders.
 
 **Limite.** Rien n'a été vu en vrai : en rendu logiciel le jeu tombe à
 1 FPS avec les effets. Réglages et coûts restent à voir sur la 4060.
+
+## 2026-10-30 — Jour et nuit (#30)
+
+**Décision.** Exploration présentée, validée par Warshow telle quelle :
+l'heure tirée de l'horloge du monde (déterministe, une règle pourra la
+lire), une seule lumière pour le soleil et la lune, un ciel dessiné par
+un shader à nous, ciel et lumières en donnée (`sky.ron`). Écartés : le
+ciel physique `Atmosphere` de Bevy (réaliste mais pas stylisé, brouillard
+qui ne raccorde pas à son dégradé, lux réels à refaire partout) et l'heure
+de l'horloge murale (non déterministe). La météo sort de #30 : Warshow y
+voit peut-être un cas d'événements du monde plus larges (#57).
+
+**Pourquoi rien n'est re-meshé.** Depuis #23, chaque sommet porte la
+lumière du ciel à part de celle des blocs, et le shader s'en sert pour
+multiplier le soleil et l'ambiance. Baisser ces deux lumières suffit à
+faire la nuit dehors, sans toucher aux grottes. Seul ajout au shader des
+chunks : la lumière des blocs était masquée là où le ciel éclaire ;
+elle l'est maintenant selon la force du jour, sinon une lampe n'aurait
+rien éclairé dehors la nuit.
+
+**Le fichier du jeu prime.** D'abord copié dans la save comme le
+worldgen, `sky.ron` suit finalement la règle du registre : le fichier du
+jeu gagne, la copie de la save ne sert que s'il manque. Une note d'un
+agent annexe a pointé le piège : en réglant les couleurs sur la 4060, une
+retouche n'aurait rien changé au monde existant. Le worldgen a besoin de
+sa copie (un chunk doit se régénérer à l'identique) ; le ciel non.
+
+**Ce qui a été vu.** Trois captures sous WSL, effets coupés : matin,
+crépuscule, minuit. Le rendu suit `sky.ron`. Les étoiles, tirées par case
+d'une grille, sortaient en éclats anguleux : la case découpée par la
+sphère n'est pas un point. Un point rond au centre de la case règle ça.
+
+**Limite.** Rien n'est vu avec les effets : réglages et tremblement des
+ombres à voir sur la 4060.

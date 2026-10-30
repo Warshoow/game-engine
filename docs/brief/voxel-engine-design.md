@@ -194,7 +194,7 @@ Le hasard des règles (condition `Chance`) dérive de la seed, du numéro de tic
 - **Blocs** : un bloc qui déclare `emits_light` (portée en mètres) éclaire autour de lui, la lumière baisse jusqu'à zéro à cette distance.
 - **Ce qui arrête la lumière** : un bloc solide et opaque, comme pour l'ombrage des coins. Un bloc peut déclarer `light_loss` : la distance traversée en lui compte en plus (1,0 = un mètre d'eau coûte deux mètres de portée) ; c'est ce qui assombrit la mer avec la profondeur.
 - Les niveaux sont gardés en quarts de case (portée en mètres convertie à la résolution du monde, §3.5), un octet par lumière et par case, une seule valeur pour un chunk uniforme (air au soleil, roche pleine). **Jamais sauvés** : recalculés à l'arrivée d'un chunk et à chaque voxel modifié, dans la même frame (pas au tick suivant : une torche posée s'allume tout de suite). La lumière est une fonction des voxels, donc déterministe : une règle pourra la lire.
-- **Rendu** : le mesher lit la lumière des mêmes cases que l'ombrage des coins (moyenne des cases non opaques autour du coin) et la met dans chaque sommet, ciel et blocs séparés. Le shader multiplie l'éclairage du soleil et de l'ambiance par la lumière du ciel et ajoute celle des blocs, d'une teinte chaude unique. Le jour/nuit (#30) n'aura qu'à baisser la lumière du ciel dans le shader, sans re-mesher. Deux faces ne fusionnent que si leurs coins ont la même lumière.
+- **Rendu** : le mesher lit la lumière des mêmes cases que l'ombrage des coins (moyenne des cases non opaques autour du coin) et la met dans chaque sommet, ciel et blocs séparés. Le shader multiplie l'éclairage du soleil et de l'ambiance par la lumière du ciel et ajoute celle des blocs, d'une teinte chaude unique. Le jour/nuit (#30) baisse le soleil et l'ambiance que multiplie la lumière du ciel, sans re-mesher. Deux faces ne fusionnent que si leurs coins ont la même lumière.
 
 Écartés ou reportés : lumière lue par pixel (texture 3D par chunk), vraies lumières de Bevy (gardées pour le soleil, #51), ciel par hauteur seule, couleur par bloc, éclairage par lancer de rayons, lumière sauvée avec le chunk. Détail et coûts : #52.
 
@@ -207,6 +207,8 @@ Le hasard des règles (condition `Chance`) dérive de la seed, du numéro de tic
 - Ce n'est pas du code en plus, c'est **où on range quoi** — mais ça se décide avant d'écrire la simu.
 
 **Coût de changement :** Day-1 (discipline gratuite maintenant, cauchemar à rétrofitter).
+
+**Heure du jour** (ajout 2026-10-30, #30). L'heure n'est pas un état de plus : elle se calcule depuis l'horloge du monde (§3.10, point 7), l'heure de départ et la durée d'une journée, données de `sky.ron` (§3.10, point 9). Elle est donc déterministe : une règle pourra la lire. Pour avancer ou reculer l'heure (dormir, commande de console), un décalage sauvé s'ajoutera ; aujourd'hui seule une touche de debug la décale, sans la sauver. Reportés : #57.
 
 ### 3.10 Persistance (structure logique)
 
@@ -221,6 +223,7 @@ Contenu logique d'une save :
 6. **Réglages du worldgen** (ajout 2026-10-08, #27) : relief, biomes, minerais, features, en donnée (`assets/content/worldgen.ron`). Copiés dans la save à la création du monde, puis la copie de la save prime : un chunk jamais modifié n'est pas sauvé mais régénéré, et il doit se régénérer à l'identique — comme la seed. Changer le worldgen du jeu ne touche que les mondes neufs.
 7. **Horloge du monde et minuteurs** (ajout 2026-10-22, #34) : le numéro du tick fixe courant, et pour chaque chunk ses minuteurs en attente (position, échéance en ticks, règle). Le tick fixe vaut 1/64 s, constante du moteur : changer ce pas change le sens des échéances sauvées.
 8. **Liquides** (ajout 2026-10-25, #28) : par chunk, le niveau des cases qui coulent et les réexamens programmés (position, échéance). Sans eux, une eau sauvée en plein écoulement resterait figée au rechargement.
+9. **Ciel et jour** (ajout 2026-10-30, #30) : durée d'une journée, heure de départ, et pour quelques moments de la journée les couleurs du ciel et la force des lumières, en donnée (`assets/content/sky.ron`). Comme pour le registre, le fichier du jeu prime : une retouche s'applique aux mondes existants (changer la durée du jour ne fait que décaler l'heure, rien n'a à se régénérer à l'identique). La save en garde une copie, utilisée seulement si le jeu n'a pas de `sky.ron` : un monde garde son ciel. Un autre jeu (deux soleils, un ciel rouge) se fait sans toucher au Rust.
 
 **Coût de changement :** Day-1 pour la structure. Le moteur (region-files vs `redb`/`sled`) est un choix ultérieur.
 
@@ -328,7 +331,14 @@ flowchart TB
 - **Brouillard en volume et rayons de lumière** (`VolumetricFog`) : un léger voile dans un volume qui suit la caméra, éclairé par le soleil à travers sa carte d'ombre. Le plus cher des effets (64 pas par pixel) ; gardé parce que la cible est la 4060 (7 ms par image, passe opaque à 0,2–0,75 ms) et qu'il mène au rendu des packs de shaders.
 - **Bloom** (halo des lumières fortes), qui demande le rendu HDR. Les faces d'un bloc à `emits_light` sont en pleine lumière de bloc : le halo part de la lampe, pas du mur voisin.
 - **Une touche par effet**, l'état dans le HUD de debug : sert à la mesure avant/après. Défaut : tout activé, sauf sur un rendu logiciel (pas de carte graphique).
-- **Reportés ou écartés** : SSAO et ombres de contact (doublons de l'ombrage des coins), reflets sur l'eau, ciel (avec #30), ombres par rayons, réglages sauvés, brouillard sous l'eau. Détail : #56.
+- **Reportés ou écartés** : SSAO et ombres de contact (doublons de l'ombrage des coins), reflets sur l'eau, ciel physique `Atmosphere` (voir #30 ci-dessous), ombres par rayons, réglages sauvés, brouillard sous l'eau. Détail : #56.
+
+**Jour et nuit** (ajout 2026-10-30, #30). L'heure vient de l'horloge du monde (§3.9) ; tout le reste se lit dans `sky.ron`, interpolé entre deux moments de la journée.
+- **Soleil et lune** : une seule `DirectionalLight`. Elle suit le soleil de 6 h à 18 h, la lune (à l'opposé) le reste du temps : une seule carte d'ombre, la lune a ses ombres. Sa couleur et sa force, et celle de l'ambiance, viennent du moment de la journée. Rien n'est re-meshé : le ciel du sommet (§3.8) multiplie déjà ces lumières.
+- **Lampes la nuit** : la lumière des blocs n'est ajoutée que là où le ciel n'éclaire pas déjà, en tenant compte de la force du jour (un uniform du matériau des chunks). Une lampe éclaire donc dehors la nuit, et son halo (bloom) s'y voit.
+- **Ciel** : un shader à nous sur une grande sphère qui suit la caméra. Dégradé de l'horizon au zénith, disque du soleil (assez fort pour le bloom), lune, étoiles qui apparaissent quand le jour baisse. Le brouillard prend la couleur de l'horizon : pas de raccord visible au bord du monde chargé.
+- **Debug** : une touche avance l'heure, l'heure s'affiche dans le HUD.
+- **Écartés ou reportés** : heure de l'horloge murale (non déterministe), ciel `Atmosphere` de Bevy (physique, brouillard qui ne raccorde pas, lux réels), météo (peut-être un cas d'événements du monde lisibles par les règles), phases de la lune, condition de règle sur la lumière ou l'heure, soleil tourné par pas. Détail : #57.
 
 ---
 
@@ -385,6 +395,7 @@ Ces non-goals sont *prévus par le data model* (§3) mais *pas implémentés* da
 | Algo éclairage | Différé, full-bright pour la slice | **Ouvert** | — |
 | Meshing | Tâches en parallèle sur une copie avec bordure ; un chunk meshé quand ses voisins sont chargés (#53) | Mou (2026-10-29) | faible |
 | Effets de rendu | Ombres du soleil, brouillard de distance et en volume, bloom ; une touche par effet (#51) | Mou (2026-10-30) | faible |
+| Jour et nuit | Heure tirée de l'horloge du monde ; ciel et lumières en donnée (le fichier du jeu prime, copie dans la save) ; soleil et lune sur une lumière ; ciel par shader à nous (#30) | Mou (2026-10-30) | faible (rendu) ; `sky.ron` dans la save |
 | Dims chunk | 32³ (reco) | **Ouvert** | faible (format porte ses dims) |
 | Index palette | `u16` (reco), adaptatif plus tard | **Ouvert** | faible |
 | Internals UI / API mod / worldgen / backend / multi | Laissés mous | **Mou** | — |

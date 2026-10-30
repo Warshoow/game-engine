@@ -55,6 +55,7 @@ cargo run
 | R | reload the content (`core.ron`, textures) without restarting |
 | G | debug: one of every solid block |
 | F1 – F4 | render effects on/off: sun shadows, distance fog, volumetric fog (light shafts), bloom; off by default on software rendering |
+| F5 | debug: one hour later (not saved); the hour shows in the debug HUD |
 | Esc | release the mouse |
 
 On WSL2, rendering goes through llvmpipe (CPU) and the mouse has its quirks
@@ -170,8 +171,9 @@ src/                  Bevy binary: plugs the core into the ECS
   generate.rs         block generation window (I), Generator trait, claude CLI
   ui.rs               game windows: one at a time, frees the mouse, item slot, text field
   effects.rs          render effects: sun shadows, fog, volumetric fog, bloom (F1–F4)
+  sky.rs              day and night: sun or moon, ambient light, sky dome, fog colour
   save.rs             save writes and player/items restore
-assets/               content (core.ron), textures (PNG), shaders (voxel.wgsl)
+assets/               content (core.ron, worldgen.ron, sky.ron), textures (PNG), shaders (voxel.wgsl, sky.wgsl)
 crates/voxel_core/    the WHOLE voxel core: pure, no Bevy dependency
   registry.rs         append-only content registry
   chunk.rs            palette chunk
@@ -186,6 +188,7 @@ crates/voxel_core/    the WHOLE voxel core: pure, no Bevy dependency
   crafting.rs         recipe lookup (station or inventory)
   texgen.rs           textures computed from a pattern, a colour and a seed
   generate.rs         what is sent to the generator, validation of its answer
+  sky.rs              hour from the world clock, sky and lights of the moment (sky.ron)
   save.rs             world folder, binary chunk format
 docs/                 in French
   jalons.md                      milestones, in order

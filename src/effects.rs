@@ -13,10 +13,6 @@ use bevy::render::renderer::RenderAdapterInfo;
 use crate::player::PlayerCamera;
 use crate::streaming::{VERTICAL_VIEW_M, VIEW_DISTANCE_M};
 
-/// Couleur du ciel : fond de l'image et brouillard (le vrai ciel attend
-/// #30).
-const SKY: Color = Color::srgb(0.62, 0.76, 0.92);
-
 /// Densité du brouillard en volume : un léger voile, ~80 % de la lumière
 /// passe à la distance de vue (Bevy : absorption + diffusion = 0,6 par
 /// unité de densité et par mètre). Le ciel n'a rien derrière lui : chaque
@@ -57,8 +53,7 @@ pub struct EffectsPlugin;
 
 impl Plugin for EffectsPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(ClearColor(SKY))
-            .init_resource::<Effects>()
+        app.init_resource::<Effects>()
             .add_systems(Startup, (spawn_sun, off_without_gpu))
             .add_systems(
                 Update,
@@ -69,7 +64,8 @@ impl Plugin for EffectsPlugin {
 
 /// Le soleil : sa lumière passe par celle du ciel de chaque sommet (#23,
 /// `voxel.wgsl`), même au-delà de la carte d'ombre. Cascades jusqu'à la
-/// distance de vue.
+/// distance de vue. Direction, couleur et force suivent l'heure (`sky`) ;
+/// la nuit, c'est la lune. Le brouillard prend la couleur de l'horizon.
 fn spawn_sun(mut commands: Commands) {
     commands.spawn((
         DirectionalLight::default(),
@@ -83,7 +79,7 @@ fn spawn_sun(mut commands: Commands) {
         .build(),
         Transform::from_xyz(50.0, 80.0, 30.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
-    commands.spawn(FogVolume { fog_color: SKY, density_factor: HAZE_DENSITY, ..default() });
+    commands.spawn(FogVolume { density_factor: HAZE_DENSITY, ..default() });
 }
 
 /// Rendu logiciel (llvmpipe sous WSL, PC sans carte graphique) : tout
@@ -119,6 +115,7 @@ fn apply_effects(
     cameras: Query<Entity, With<PlayerCamera>>,
     added: Query<(), Added<PlayerCamera>>,
     mut sun: Query<&mut DirectionalLight>,
+    sky: Res<ClearColor>,
 ) {
     if !effects.is_changed() && added.is_empty() {
         return;
@@ -131,7 +128,7 @@ fn apply_effects(
         if effects.fog {
             // Finit à la distance de vue : cache le bord du monde chargé.
             camera.insert(DistanceFog {
-                color: SKY,
+                color: sky.0,
                 falloff: FogFalloff::Linear { start: VIEW_DISTANCE_M * 0.5, end: VIEW_DISTANCE_M },
                 ..default()
             });

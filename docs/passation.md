@@ -117,6 +117,15 @@ WSL le rendu est logiciel et rame — normal.
   logiciel (llvmpipe sous WSL : 1 FPS avec, 6 sans). L'eau (`BlendMesh`)
   est `NotShadowCaster`. Les faces d'un bloc à `emits_light` sont en
   pleine lumière de bloc (mesher) : c'est d'elles que part le halo.
+- **Jour et nuit** (#30, `src/sky.rs`, `voxel_core::sky`, `sky.ron`) :
+  l'heure se calcule depuis l'horloge du monde, jamais stockée à part.
+  `update_sky` règle chaque image la `DirectionalLight` (soleil de 6 h à
+  18 h, lune sinon), l'ambiance (`GlobalAmbientLight`), `ClearColor` et la
+  couleur des deux brouillards (= horizon), le matériau du ciel, et
+  `BlockTextures::daylight` (uniform 102 de `voxel.wgsl`, renvoyé au GPU
+  seulement quand il bouge de plus de 0,01). La sphère du ciel suit la
+  caméra (rayon 400 m). `sky.ron` : le fichier du jeu prime, la save en
+  garde une copie (au contraire de `worldgen.ron`). F5 : +1 h, non sauvé.
 - **Liquides** (#28) : le voxel reste l'ID du liquide, son niveau est dans
   `VoxelWorld::levels` (absent = source, `Some(0)` = chute, sinon distance
   à plat en voxels). `set_voxel` efface le niveau : écrire le niveau
@@ -510,12 +519,26 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
 - Les exe du dossier `Downloads\voxel_engine_rtx` datent d'avant #53, #54
   et #51 : à refaire (`cargo windows`, `cargo windows-profile`) quand
   Warshow prévoit le passage sur la 4060, avec au `LISEZMOI.txt` le
-  scénario « chargement » (monde neuf) et les touches F1 à F4 (effets).
+  scénario « chargement » (monde neuf), les touches F1 à F4 (effets) et
+  F5 (+1 h, #30) : juger la nuit, lampe dehors comprise.
 - Bevy 0.20.1 existe (signalé par Warshow le 2026-10-30) : rien dans
   #51 n'en avait besoin ; montée de version à faire en ticket à part si
   un besoin apparaît.
 - Commits jusqu'à `df33ae9` (plus celui de cette passation), à pousser
   par Warshow.
+- #30 jour/nuit codé (exploration présentée et validée le même jour ;
+  options reportées : #57, dont l'idée de Warshow : la météo comme un cas
+  d'événements du monde lisibles par les règles, une lune rouge qui
+  change les mobs). Vu sous WSL, effets coupés : 8 h, 17 h 30, minuit
+  rendent comme voulu. Les étoiles étaient des éclats anguleux (case de
+  grille découpée par la sphère) : points ronds au centre des cases.
+  **À voir sur la 4060**, avec les effets : raccord du brouillard avec
+  l'horizon, halo du soleil et des lampes la nuit (bloom), tremblement
+  des bords d'ombre quand le soleil tourne (sinon : le tourner par pas,
+  #57), brouillard en volume la nuit (sa lumière ambiante, réglage de
+  Bevy, pourrait le faire luire), couleurs et forces de `sky.ron`
+  (réglées à l'estime ; une retouche s'applique au monde existant).
+  Captures WSL : la souris de Warshow sur la fenêtre tourne la caméra.
 
 ## Prochaines étapes
 
@@ -544,8 +567,8 @@ de `remesh_dirty` → **#53**, fait le 2026-10-29, à re-mesurer sur la
 #41. Ensuite,
 choisi avec Warshow le 2026-10-25 : **#51 effets de rendu** (codé le
 2026-10-30, à voir et mesurer sur la 4060 ; options reportées : #56),
-puis #30 jour/nuit (le ciel est déjà séparé dans les sommets : se fera
-dans le shader, sans re-mesher). Ce qui a été reporté (#18, #27, #28) est listé
+puis #30 jour/nuit (codé le 2026-10-30, à voir sur la 4060 ; options
+reportées : #57). Ce qui a été reporté (#18, #27, #28) est listé
 dans `docs/jalons.md`, « Plus tard », et dans #49.
 Principe (design doc §2) : le moteur fournit des mécanismes, `core.ron`
 n'est qu'un jeu d'exemple. Mipmaps si les textures scintillent au loin.

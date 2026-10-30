@@ -10,6 +10,7 @@ mod inventory;
 mod items;
 mod player;
 mod save;
+mod sky;
 mod streaming;
 mod ui;
 
@@ -33,6 +34,7 @@ use voxel_core::chunk::{ChunkPos, CHUNK_SIZE};
 use voxel_core::mesher::{MeshData, Region, NO_TEXTURE};
 use voxel_core::registry::{ContentId, Registry};
 use voxel_core::save::{Save, WorldMeta, FORMAT_VERSION};
+use voxel_core::sky::Sky;
 use voxel_core::world::{VoxelWorld, TICKS_PER_SECOND};
 use voxel_core::worldgen::Worldgen;
 
@@ -66,6 +68,10 @@ pub struct BlockTextures {
     #[texture(100, dimension = "2d_array")]
     #[sampler(101)]
     array: Handle<Image>,
+    /// Force du jour dans [0, 1] (#30) : la lumière des blocs ne compte que
+    /// là où le ciel n'éclaire pas déjà autant. Tenue à jour par `sky`.
+    #[uniform(102)]
+    daylight: f32,
 }
 
 /// Lumière d'un sommet (#23) : `[ciel, blocs]` dans [0, 1]. Id au hasard,
@@ -183,6 +189,7 @@ fn main() {
         .add_plugins((
             player::PlayerPlugin,
             effects::EffectsPlugin,
+            sky::SkyPlugin,
             FrameTimeDiagnosticsPlugin::default(),
             MaterialPlugin::<VoxelMaterial>::default(),
         ))
@@ -277,17 +284,32 @@ fn setup_world(
     save.write_world(&meta, &registry).unwrap_or_else(|e| refuse(e));
     // Worldgen en donnée (#27), world-owned (§3.10) : celui de la save s'il
     // y est, sinon celui du jeu, copié dans la save. Aucun bloc nommé ici.
-    let worldgen_text = match save.read_worldgen().unwrap_or_else(|e| refuse(e)) {
+    let worldgen_text = match save.read_copy("worldgen.ron").unwrap_or_else(|e| refuse(e)) {
         Some(text) => text,
         None => {
             let path = assets_dir().join("content/worldgen.ron");
             let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{} : {e}", path.display()));
-            save.write_worldgen(&text).unwrap_or_else(|e| refuse(e));
+            save.write_copy("worldgen.ron", &text).unwrap_or_else(|e| refuse(e));
             text
         }
     };
     let generator = Worldgen::from_ron(&worldgen_text, meta.seed, &registry)
         .unwrap_or_else(|e| panic!("worldgen invalide : {e}"));
+    // Ciel (#30) : comme le registre, le fichier du jeu prime (une retouche
+    // s'applique aux mondes existants) et la save en garde une copie ; elle
+    // ne sert qu'à un monde dont le jeu n'a pas de ciel.
+    let sky_path = assets_dir().join("content/sky.ron");
+    let sky_text = match std::fs::read_to_string(&sky_path) {
+        Ok(text) => {
+            save.write_copy("sky.ron", &text).unwrap_or_else(|e| refuse(e));
+            text
+        }
+        Err(e) => save
+            .read_copy("sky.ron")
+            .unwrap_or_else(|e| refuse(e))
+            .unwrap_or_else(|| panic!("{} : {e}", sky_path.display())),
+    };
+    let sky = Sky::from_ron(&sky_text).unwrap_or_else(|e| panic!("ciel invalide : {e}"));
     let air = generator.terrain.air;
 
     // --- Le monde démarre VIDE : c'est le streaming (Update) qui génère et
@@ -303,12 +325,13 @@ fn setup_world(
     let mut chunk_material = |alpha_mode| {
         materials.add(ExtendedMaterial {
             base: StandardMaterial { alpha_mode, ..StandardMaterial::from(Color::WHITE) },
-            extension: BlockTextures { array: array.clone() },
+            extension: BlockTextures { array: array.clone(), daylight: 1.0 },
         })
     };
     let material = chunk_material(AlphaMode::Mask(0.5));
     let blend_material = chunk_material(AlphaMode::Blend);
 
+    commands.insert_resource(sky::WorldSky(sky));
     commands.insert_resource(save::ChunkWriter::new(save.clone()));
     commands.insert_resource(save::WorldSave(save));
     commands.insert_resource(GameWorld {
@@ -452,6 +475,7 @@ fn update_debug_text(
     chunks: Query<(), With<ChunkMesh>>,
     reload: Res<content::ReloadStatus>,
     effects: Res<effects::Effects>,
+    hour: Res<sky::Hour>,
     mut text: Query<&mut Text, With<DebugText>>,
 ) {
     let Ok(mut text) = text.single_mut() else { return };
@@ -459,7 +483,13 @@ fn update_debug_text(
         .get(&FrameTimeDiagnosticsPlugin::FPS)
         .and_then(|d| d.smoothed())
         .unwrap_or(0.0);
-    text.0 = format!("{fps:.0} FPS · {} chunks\n{}\n{}", chunks.iter().count(), effects.summary(), reload.0);
+    let (h, min) = (hour.0 as u32, (hour.0.fract() * 60.0) as u32);
+    text.0 = format!(
+        "{fps:.0} FPS · {} chunks · {h:02} h {min:02} (F5 : +1 h)\n{}\n{}",
+        chunks.iter().count(),
+        effects.summary(),
+        reload.0
+    );
 }
 
 /// Dossier du jeu : celui du `Cargo.toml` sous `cargo run`, celui de

@@ -95,10 +95,11 @@ impl Save {
         self.write("registry.ron", registry.to_snapshot().as_bytes())
     }
 
-    /// Réglages du worldgen du monde (§3.10), tels qu'écrits à sa création ;
-    /// `None` pour un monde créé avant qu'ils soient sauvés.
-    pub fn read_worldgen(&self) -> Result<Option<String>, String> {
-        let path = self.dir.join("worldgen.ron");
+    /// Copie d'un fichier de contenu du jeu (§3.10 : `worldgen.ron`,
+    /// `sky.ron`), telle qu'écrite à la création du monde ; `None` pour un
+    /// monde créé avant qu'elle soit sauvée.
+    pub fn read_copy(&self, name: &str) -> Result<Option<String>, String> {
+        let path = self.dir.join(name);
         match fs::read_to_string(&path) {
             Ok(text) => Ok(Some(text)),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -107,8 +108,8 @@ impl Save {
     }
 
     /// Gardé tel quel (commentaires compris) : c'est le fichier du jeu.
-    pub fn write_worldgen(&self, text: &str) -> Result<(), String> {
-        self.write("worldgen.ron", text.as_bytes())
+    pub fn write_copy(&self, name: &str, text: &str) -> Result<(), String> {
+        self.write(name, text.as_bytes())
     }
 
     pub fn read_player(&self) -> Result<Option<PlayerSave>, String> {
