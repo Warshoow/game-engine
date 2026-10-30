@@ -629,8 +629,13 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   stable par mob, animation `Swing` et `Look`. Le cochon suit le joueur
   qui tient du blé, le regarde, erre. Vu sous WSL (effets coupés) : les
   cochons tombent, errent, montent des blocs, l'un vient regarder la
-  caméra ; l'ancien `mobs.ron` sans id se relit. **À essayer sous
-  Windows** (balancement des pattes, tête, suivi au blé, fluidité).
+  caméra ; l'ancien `mobs.ron` sans id se relit. Essayé et validé sous
+  Windows par Warshow (pattes, tête, suivi au blé, eau, sauvegarde, dix
+  cochons fluides). Seul défaut trouvé : il sautait sur un escalier (la
+  case d'escalier vue par A* est à 1 m) ; corrigé, il ne saute plus que
+  si le pas automatique l'a bloqué au tick d'avant (`4a6e6fe`).
+- Commits `e58c46e`, `5cea975`, `0c31c5c`, `4a6e6fe` et celui de cette
+  passation, à pousser par Warshow.
 
 ## Prochaines étapes
 
@@ -664,8 +669,10 @@ reportées : #57). Puis #14 blocs à forme (fait le 2026-10-30, à essayer
 en jeu ; options écartées : #58). #15 modèles d'entités (fait le
 2026-10-30, boîtes en parties ; options écartées : #59). #32 mobs
 (fait le 2026-10-30 : physique partagée, `Wander`/`Follow`/`LookAt`, A*
-par tranches, `Swing`/`Look` ; **à essayer en jeu** ; options : #61).
-**Suite** : #60 (apparition, disparition, rangement par chunk).
+par tranches, `Swing`/`Look` ; validé sous Windows ; options : #61).
+**Suite** : #60 (apparition, disparition, rangement par chunk) ; y
+revoir le plafond de 64 cases par tick (avec beaucoup de mobs, chacun
+attend son tour avant de partir), mesuré sur la 4060.
 Ce qui a été reporté (#18, #27, #28) est listé
 dans `docs/jalons.md`, « Plus tard », et dans #49.
 Principe (design doc §2) : le moteur fournit des mécanismes, `core.ron`

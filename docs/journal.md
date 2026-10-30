@@ -1308,3 +1308,9 @@ suggéré (« A* incrémental »), c'est la mesure qui a tranché.
 la seed, du tick, de son id et de l'usage ; les mobs passent dans l'ordre
 de leur id (l'ordre des requêtes Bevy n'est pas stable). Un test rejoue
 30 s de deux cochons et retrouve les mêmes positions.
+
+**Essai Windows (Warshow) : tout bon, sauf l'escalier.** Le cochon y
+sautait : A* le place au centre de la case, donc sur la marche haute, à
+1 m, plus haut qu'un pas. Le pas automatique du corps savait déjà monter
+l'escalier ; le mob ne saute plus que si ce pas l'a laissé bloqué au tick
+d'avant. Un bloc plein coûte un tick de retard au saut, invisible.
