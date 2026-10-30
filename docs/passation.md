@@ -1,4 +1,4 @@
-# Passation de session — 2026-10-25
+# Passation de session — 2026-10-30
 
 > Document de reprise pour une session Claude fraîche. Lire ceci, puis
 > `CLAUDE.md` (racine) et `docs/brief/voxel-engine-design.md` (canonique)
@@ -644,8 +644,10 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   cochons fluides). Seul défaut trouvé : il sautait sur un escalier (la
   case d'escalier vue par A* est à 1 m) ; corrigé, il ne saute plus que
   si le pas automatique l'a bloqué au tick d'avant (`4a6e6fe`).
-- Commits `e58c46e`, `5cea975`, `0c31c5c`, `4a6e6fe` et celui de cette
-  passation, à pousser par Warshow.
+- Commits à pousser par Warshow : `e58c46e`, `5cea975`, `0c31c5c`
+  (#32), `4a6e6fe`, `0c89327`, puis le design doc de #60, `acf30aa`
+  (`Closes #60`) et celui de cette passation. #32 et #60 se ferment au
+  push.
 - #60 apparition des mobs, exploré puis tranché avec Warshow (reco B
   suivie ; design doc §3.6 « Apparition des mobs » ; options : #62).
   Règles `spawn` en donnée, essais près du joueur, disparition au loin,
@@ -653,7 +655,12 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   déchargement des données de chunks). Ajout demandé par Warshow
   (« élevage oui ») : `Follow { keep }`, un cochon attiré au blé reste.
   Vu sous WSL (monde neuf, 75 s) : 11 cochons apparus sur l'herbe, sauvés
-  avec « apparu seul ». **À essayer sous Windows.**
+  avec « apparu seul ». **À essayer sous Windows : #63.**
+- **Tickets de QA** (demandé par Warshow) : label `qa`, une liste de
+  points à cocher par fonctionnalité après un build Windows (#63, mobs),
+  ou par machine (#64 : tout ce qui attend la RTX 4060, mesures et rendu).
+  Écrire la liste de test dans un ticket `qa` plutôt que seulement dans la
+  conversation. Convention : `docs/agents/triage-labels.md`.
 
 ## Prochaines étapes
 
@@ -683,15 +690,14 @@ de `remesh_dirty` → **#53**, fait le 2026-10-29, à re-mesurer sur la
 choisi avec Warshow le 2026-10-25 : **#51 effets de rendu** (codé le
 2026-10-30, à voir et mesurer sur la 4060 ; options reportées : #56),
 puis #30 jour/nuit (codé le 2026-10-30, à voir sur la 4060 ; options
-reportées : #57). Puis #14 blocs à forme (fait le 2026-10-30, à essayer
+reportées : #57). Puis #14 blocs à forme (fait le 2026-10-30, validé
 en jeu ; options écartées : #58). #15 modèles d'entités (fait le
 2026-10-30, boîtes en parties ; options écartées : #59). #32 mobs
 (fait le 2026-10-30 : physique partagée, `Wander`/`Follow`/`LookAt`, A*
 par tranches, `Swing`/`Look` ; validé sous Windows ; options : #61).
-#60 apparition des mobs (fait le 2026-10-30, **à essayer en jeu** ;
-options : #62). **À mesurer sur la 4060** : le plafond de 64 cases par
-tick avec une dizaine de cochons (chacun attend son tour avant de
-partir), et un mesh par mob (`shortcut:` dans `add_mob_models`).
+#60 apparition des mobs (fait le 2026-10-30, **à essayer en jeu : #63** ;
+options : #62). **Tout ce qui attend la 4060** (#53, #51, #30, #23, la
+mer, le coût des mobs) est rassemblé dans **#64** (label `qa`).
 Ce qui a été reporté (#18, #27, #28) est listé
 dans `docs/jalons.md`, « Plus tard », et dans #49.
 Principe (design doc §2) : le moteur fournit des mécanismes, `core.ron`
