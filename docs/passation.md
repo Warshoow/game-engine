@@ -502,6 +502,10 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   (`HAZE_DENSITY`). **À voir et mesurer sur la 4060** avant de fermer #51 :
   rendu de chaque effet (F1 à F4), réglages (densité du voile, biais
   d'ombre, force du bloom), temps GPU par passe (`elapsed_gpu`).
+  **Juger le bloom dans une grotte avec une lampe, pas en surface** : la
+  lumière propre d'un bloc est multipliée par « 1 − lumière du ciel »
+  (`voxel.wgsl`), donc une lampe ou de la lave en plein air ne brille pas
+  et n'a pas de halo (voulu, comme Minecraft ; la nuit viendra avec #30).
 - #39 fermé : fait par #53.
 - Les exe du dossier `Downloads\voxel_engine_rtx` datent d'avant #53, #54
   et #51 : à refaire (`cargo windows`, `cargo windows-profile`) quand
