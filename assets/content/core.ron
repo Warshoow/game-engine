@@ -163,10 +163,15 @@
             (name: "leg_back_right", parent: "body", pivot: (-3, 6, -5), boxes: [((-5, 0, -7), (-1, 6, -3), "pig_skin")]),
         ],
         behaviors: [
-            Follow(holding: "core:wheat", range: 10.0, speed: 1.6),
+            // `keep` : un cochon apparu seul qui a suivi le blé reste (élevage).
+            Follow(holding: "core:wheat", range: 10.0, speed: 1.6, keep: true),
             LookAt(range: 6.0, time: 3.0),
             Wander(speed: 1.0, range: 8.0, pause: 6.0),
         ],
+        // Apparition (#60) : sur l'herbe, en plein jour, ~3 au plus dans
+        // 64 m autour d'un point (π × 64² × 0,0003), par 2 ou 3 ; disparaît
+        // au-delà de 128 m.
+        spawn: [(on: ["core:grass"], light: (0.5, 1.0), density: 0.0003, group: (2, 3), despawn: 128.0)],
         animation: [
             Swing(part: "leg_front_left", angle: 35.0, stride: 1.2, phase: 0.0),
             Swing(part: "leg_back_right", angle: 35.0, stride: 1.2, phase: 0.0),

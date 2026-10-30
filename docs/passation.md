@@ -160,6 +160,15 @@ WSL le rendu est logiciel et rame — normal.
   de la physique (`path::stand`) : changer la physique, c'est changer les
   chemins. Affichage : `show_mobs` interpole et tourne les parties
   (`Parts`), rien de visuel dans la simulation sauf `walked` et `swing`.
+- **Apparition des mobs** (#60, `voxel_core::spawn`) : `spawn` dans
+  `EntityData` (règles en donnée). Les essais dérivent de (seed, tick,
+  numéro d'essai), **jamais du nombre de mobs**. `Mob::spawned` : apparu
+  seul, disparaît au-delà de `despawn` même gelé ; posé (`G`) jamais ;
+  `Follow { keep: true }` le rend gardé (élevage). Un mob à plus de
+  `mob::SIMULATION_M` (128 m) du joueur est gelé : les données d'un chunk
+  ne quittent pas la mémoire, sans ce gel les mobs marchaient partout où
+  le joueur était passé. `SIMULATION_M` = vue + marge de déchargement et
+  `SPAWN_MAX_M` = vue : vérifié à la compilation dans `streaming.rs`.
 - **Liquides** (#28) : le voxel reste l'ID du liquide, son niveau est dans
   `VoxelWorld::levels` (absent = source, `Some(0)` = chute, sinon distance
   à plat en voxels). `set_voxel` efface le niveau : écrire le niveau
@@ -296,6 +305,7 @@ crates/voxel_core/    TOUT le cœur voxel, PUR (zéro dépendance Bevy, testable
   physics.rs          AABB vs grille, région balayée (anti-tunneling), Body (joueur et mobs)
   mob.rs              comportements des mobs, un tick pour tous (triés par id)
   path.rs             A* sur les cases, par tranches (Search)
+  spawn.rs            apparition des mobs près du joueur, disparition au loin
   raycast.rs          DDA Amanatides & Woo (visée voxel + face d'entrée)
   rules.rs            règles hook → condition → effet (évaluation pure)
   ticks.rs            tick aléatoire : quels voxels reçoivent le hook Tick
@@ -636,6 +646,14 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   si le pas automatique l'a bloqué au tick d'avant (`4a6e6fe`).
 - Commits `e58c46e`, `5cea975`, `0c31c5c`, `4a6e6fe` et celui de cette
   passation, à pousser par Warshow.
+- #60 apparition des mobs, exploré puis tranché avec Warshow (reco B
+  suivie ; design doc §3.6 « Apparition des mobs » ; options : #62).
+  Règles `spawn` en donnée, essais près du joueur, disparition au loin,
+  gel au-delà de 128 m ; rangement par chunk reporté (il ira avec le
+  déchargement des données de chunks). Ajout demandé par Warshow
+  (« élevage oui ») : `Follow { keep }`, un cochon attiré au blé reste.
+  Vu sous WSL (monde neuf, 75 s) : 11 cochons apparus sur l'herbe, sauvés
+  avec « apparu seul ». **À essayer sous Windows.**
 
 ## Prochaines étapes
 
@@ -670,9 +688,10 @@ en jeu ; options écartées : #58). #15 modèles d'entités (fait le
 2026-10-30, boîtes en parties ; options écartées : #59). #32 mobs
 (fait le 2026-10-30 : physique partagée, `Wander`/`Follow`/`LookAt`, A*
 par tranches, `Swing`/`Look` ; validé sous Windows ; options : #61).
-**Suite** : #60 (apparition, disparition, rangement par chunk) ; y
-revoir le plafond de 64 cases par tick (avec beaucoup de mobs, chacun
-attend son tour avant de partir), mesuré sur la 4060.
+#60 apparition des mobs (fait le 2026-10-30, **à essayer en jeu** ;
+options : #62). **À mesurer sur la 4060** : le plafond de 64 cases par
+tick avec une dizaine de cochons (chacun attend son tour avant de
+partir), et un mesh par mob (`shortcut:` dans `add_mob_models`).
 Ce qui a été reporté (#18, #27, #28) est listé
 dans `docs/jalons.md`, « Plus tard », et dans #49.
 Principe (design doc §2) : le moteur fournit des mécanismes, `core.ron`

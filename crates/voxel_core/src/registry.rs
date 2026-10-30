@@ -320,11 +320,12 @@ impl Registry {
             let drops = block.into_iter().flat_map(|b| b.drops.iter().flatten());
             let rules = block.into_iter().flat_map(|b| b.rules.iter().flat_map(Rule::references));
             let behaviors = entry.entity().into_iter().flat_map(|e| e.behaviors.iter().filter_map(|b| b.references()));
+            let spawns = entry.entity().into_iter().flat_map(|e| e.spawn.iter().flat_map(|r| &r.on));
             let recipes = entry
                 .recipes
                 .iter()
                 .flat_map(|r| r.inputs.iter().chain(&r.station));
-            for target in drops.chain(rules).chain(behaviors).chain(recipes) {
+            for target in drops.chain(rules).chain(behaviors).chain(spawns).chain(recipes) {
                 if registry.lookup(target).is_none() {
                     return Err(LoadError::UnknownReference {
                         from: entry.identifier.clone(),

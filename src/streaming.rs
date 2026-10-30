@@ -51,6 +51,9 @@ use crate::{ChunkMesh, DirtyChunks, GameWorld, Meshing};
 pub const VIEW_DISTANCE_M: f32 = 96.0;
 /// Hystérésis de déchargement, en mètres.
 const UNLOAD_MARGIN_M: f32 = 32.0;
+// Les mobs gèlent là où l'affichage des chunks se décharge : aucun mob figé en vue.
+const _: () = assert!(VIEW_DISTANCE_M + UNLOAD_MARGIN_M == voxel_core::mob::SIMULATION_M);
+const _: () = assert!(VIEW_DISTANCE_M == voxel_core::spawn::SPAWN_MAX_M);
 /// Demi-hauteur de la zone chargée, en mètres (distance verticale max entre
 /// le joueur et le centre d'un chunk).
 pub const VERTICAL_VIEW_M: f32 = 48.0;

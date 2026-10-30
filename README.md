@@ -194,6 +194,7 @@ crates/voxel_core/    the WHOLE voxel core: pure, no Bevy dependency
   model.rs            entity models: parts with a pivot, boxes in sixteenths of a metre, animation
   mob.rs              mob behaviours (Wander, Follow, LookAt), one tick for all mobs
   path.rs             A* over the grid's cells, run in slices across ticks
+  spawn.rs            mob spawning rules near the player, despawning far from it
   save.rs             world folder, binary chunk format
 docs/                 in French
   jalons.md                      milestones, in order

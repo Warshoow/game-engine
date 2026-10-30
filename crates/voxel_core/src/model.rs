@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::mesher::{push_box, MeshData, NO_TEXTURE};
 use crate::mob::Behavior;
 use crate::registry::Registry;
+use crate::spawn::SpawnRule;
 use crate::texgen::GeneratedTexture;
 
 /// Parties au plus par modèle.
@@ -28,7 +29,8 @@ pub const UNIT_M: f32 = 1.0 / 16.0;
 const MAX_COORD: i16 = 256;
 /// Côté ou hauteur de la boîte de collision au plus, en mètres.
 const MAX_SIZE_M: f32 = 16.0;
-/// Comportements, ou mouvements d'animation, au plus par entrée.
+/// Comportements, mouvements d'animation ou règles d'apparition, au plus
+/// par entrée.
 const MAX_BEHAVIORS: usize = 16;
 
 /// Données d'une entrée `EntityType`.
@@ -48,6 +50,9 @@ pub struct EntityData {
     /// Les mouvements de ses parties, à l'affichage seulement (#32).
     #[serde(default)]
     pub animation: Vec<Motion>,
+    /// Où et combien il apparaît seul (§3.6, #60) ; vide : jamais.
+    #[serde(default)]
+    pub spawn: Vec<SpawnRule>,
 }
 
 /// Un mouvement d'animation : il tourne une partie autour de son pivot.
@@ -122,10 +127,13 @@ impl EntityData {
                 return Some(format!("partie {} : boîte {b:?} vide ou hors de ±{MAX_COORD}", part.name));
             }
         }
-        if self.behaviors.len() > MAX_BEHAVIORS || self.animation.len() > MAX_BEHAVIORS {
-            return Some(format!("au plus {MAX_BEHAVIORS} comportements et {MAX_BEHAVIORS} mouvements"));
+        if [self.behaviors.len(), self.animation.len(), self.spawn.len()].iter().any(|&n| n > MAX_BEHAVIORS) {
+            return Some(format!("au plus {MAX_BEHAVIORS} comportements, mouvements et règles d'apparition"));
         }
         if let Some(reason) = self.behaviors.iter().find_map(Behavior::invalid) {
+            return Some(reason);
+        }
+        if let Some(reason) = self.spawn.iter().find_map(SpawnRule::invalid) {
             return Some(reason);
         }
         for motion in &self.animation {

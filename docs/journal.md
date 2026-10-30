@@ -1314,3 +1314,37 @@ sautait : A* le place au centre de la case, donc sur la marche haute, à
 1 m, plus haut qu'un pas. Le pas automatique du corps savait déjà monter
 l'escalier ; le mob ne saute plus que si ce pas l'a laissé bloqué au tick
 d'avant. Un bloc plein coûte un tick de retard au saut, invisible.
+
+## 2026-10-30 — Les mobs apparaissent seuls (#60)
+
+Exploration d'abord (Minecraft, règles dans l'entrée, génération du
+chunk, population recalculée depuis la seed, effet `Spawn` de bloc),
+reco suivie par Warshow : des règles `spawn` dans l'entrée du mob (bloc
+sous les pieds, lumière, densité par m², groupe, distance de
+disparition), essayées quelques fois par tick près du joueur. Options :
+#62.
+
+**La lecture du code a changé le plan.** Le ticket prévoyait de ranger
+les mobs par chunk. Mais le streaming ne décharge que l'affichage : les
+données d'un chunk restent en mémoire, donc un mob n'était jamais gelé,
+il marchait partout où le joueur était passé. Le vrai besoin était une
+distance de simulation (128 m, là où l'affichage se décharge : pas de
+cochon figé en vue). Et comme un mob apparu disparaît au loin, seuls les
+mobs posés restent : `mobs.ron` reste petit, le rangement par chunk
+attendra que les données de chunks quittent la mémoire.
+
+**Élevage.** Un agent annexe a relevé qu'un cochon attiré dans un enclos
+disparaîtrait dès qu'on s'éloigne. Warshow : « élevage oui ». `Follow` a
+gagné `keep` : suivre le joueur rend le mob gardé. C'est le contenu qui
+le choisit, pas une règle propre au cochon. La reproduction est reportée.
+
+**Hauteur tirée.** Un essai tire aussi la hauteur, puis descend jusqu'au
+premier sol où le corps tient : sans ça, rien n'apparaîtrait jamais en
+grotte (avis de DeepSeek, retenu). La lumière (ciel × force du jour, ou
+blocs) sépare surface et grotte, jour et nuit.
+
+**Réglage.** Premier essai sous WSL : 30 cochons en 75 s, trop. La
+densité compte autour du point d'apparition, et la zone d'apparition
+(24 à 96 m) en couvre plusieurs. Densité baissée à 0,0003 (environ 3 dans
+64 m) : 11 cochons.
+

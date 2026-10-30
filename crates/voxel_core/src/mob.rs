@@ -52,7 +52,15 @@ pub enum Behavior {
     /// s'arrête jusqu'à `pause` secondes. Toujours applicable.
     Wander { speed: f32, range: f32, pause: f32 },
     /// Suivre le joueur qui tient l'entrée `holding`, à moins de `range`.
-    Follow { holding: String, range: f32, speed: f32 },
+    /// `keep` : un mob apparu seul qui a suivi le joueur ne disparaît plus
+    /// (élevage, #60).
+    Follow {
+        holding: String,
+        range: f32,
+        speed: f32,
+        #[serde(default)]
+        keep: bool,
+    },
     /// S'arrêter et regarder le joueur à moins de `range`, pendant `time`
     /// secondes ; pas avant `time` secondes de nouveau après.
     LookAt { range: f32, time: f32 },
@@ -112,6 +120,8 @@ pub struct Mob {
     pub swing: f32,
     /// Ce que regarde la tête, s'il y a une cible.
     pub look_at: Option<[f32; 3]>,
+    /// Apparu seul (#60) : il disparaît loin du joueur ; posé : jamais.
+    pub spawned: bool,
     doing: Option<Doing>,
     /// Pas avant ce tick pour `LookAt`.
     look_rest_until: u64,
@@ -132,6 +142,7 @@ impl Mob {
             walked: 0.0,
             swing: 0.0,
             look_at: None,
+            spawned: false,
             doing: None,
             look_rest_until: 0,
             path: Vec::new(),
@@ -202,8 +213,9 @@ impl Mob {
                 }
                 *speed
             }
-            Behavior::Follow { speed, .. } => {
+            Behavior::Follow { speed, keep, .. } => {
                 let p = player.expect("Follow ne s'applique qu'avec un joueur");
+                self.spawned &= !keep;
                 self.look_at = Some(p.eyes);
                 if dist(p.feet, self.body.feet) <= FOLLOW_STOP_M {
                     self.path.clear();
@@ -300,6 +312,12 @@ impl Mob {
     }
 }
 
+/// Au-delà de cette distance du joueur (à l'horizontale), un mob est gelé :
+/// celle où l'affichage des chunks se décharge (`streaming.rs`), donc
+/// aucun mob figé en vue. Les données d'un chunk restent en mémoire : sans
+/// elle, les mobs marcheraient partout où le joueur est passé (#60).
+pub const SIMULATION_M: f32 = 128.0;
+
 /// Un tick pour tous les mobs, `mobs` triés par id. `turn` : l'id après
 /// lequel la recherche de chemin reprend au tick suivant (tour à tour, pour
 /// qu'aucun mob n'attende toujours) ; à garder d'un tick à l'autre.
@@ -308,7 +326,7 @@ pub fn step_all(world: &VoxelWorld, mobs: &mut [&mut Mob], player: Option<&Playe
     let mut speeds = vec![0.0; mobs.len()];
     for (mob, speed) in mobs.iter_mut().zip(&mut speeds) {
         mob.prev_feet = mob.body.feet;
-        if !loaded(world, mob.body.feet) {
+        if !active(world, mob.body.feet, player) {
             continue;
         }
         let Some(data) = world.registry.get(mob.content).and_then(|e| e.entity()) else { continue };
@@ -334,7 +352,7 @@ pub fn step_all(world: &VoxelWorld, mobs: &mut [&mut Mob], player: Option<&Playe
         }
     }
     for (mob, speed) in mobs.iter_mut().zip(speeds) {
-        if !loaded(world, mob.body.feet) {
+        if !active(world, mob.body.feet, player) {
             continue;
         }
         let Some(data) = world.registry.get(mob.content).and_then(|e| e.entity()) else { continue };
@@ -343,9 +361,10 @@ pub fn step_all(world: &VoxelWorld, mobs: &mut [&mut Mob], player: Option<&Playe
 }
 
 /// On ne simule pas dans un chunk absent, comme le joueur : il tomberait
-/// à travers un monde pas encore chargé.
-fn loaded(world: &VoxelWorld, feet: [f32; 3]) -> bool {
-    world.chunk(world.split(world.voxel_at_m(feet)).0).is_some()
+/// à travers un monde pas encore chargé ; ni loin du joueur ([`SIMULATION_M`]).
+fn active(world: &VoxelWorld, feet: [f32; 3], player: Option<&Player>) -> bool {
+    let near = player.is_none_or(|p| (p.feet[0] - feet[0]).hypot(p.feet[2] - feet[2]) <= SIMULATION_M);
+    near && world.chunk(world.split(world.voxel_at_m(feet)).0).is_some()
 }
 
 fn ticks(seconds: f32) -> u64 {
@@ -487,6 +506,27 @@ mod tests {
             }
             assert!((mobs[0].body.feet[1] - 5.0).abs() < 0.01, "{step} : monté sur le plateau, {:?}", mobs[0].body.feet);
             assert_eq!(rise > 0.1, jumps, "{step} : vitesse verticale {rise}");
+        }
+    }
+
+    #[test]
+    fn a_pig_far_from_the_player_is_frozen() {
+        let mut w = world("Wander(speed: 1.0, range: 6.0, pause: 1.0)");
+        let far = Player { feet: [10.5 + SIMULATION_M + 1.0, 4.0, 10.5], eyes: [0.0; 3], holding: None };
+        let pig = &run(&mut w, 1, Some(far), 1, 5.0)[0];
+        assert_eq!(pig.body.feet, [10.5, 6.0, 10.5], "ni chute ni marche");
+    }
+
+    #[test]
+    fn a_spawned_pig_that_followed_is_kept_only_with_keep() {
+        for keep in [false, true] {
+            let mut w = world(&format!(r#"Follow(holding: "t:wheat", range: 16.0, speed: 2.0, keep: {keep})"#));
+            let wheat = w.registry.lookup("t:wheat");
+            let player = Player { feet: [20.5, 4.0, 10.5], eyes: [20.5, 5.6, 10.5], holding: wheat };
+            let mut mobs = pigs(&w)[..1].to_vec();
+            mobs[0].spawned = true;
+            let pig = &resume(&mut w, mobs, Some(player), 1, 1.0)[0];
+            assert_eq!(pig.spawned, !keep, "keep: {keep}");
         }
     }
 }

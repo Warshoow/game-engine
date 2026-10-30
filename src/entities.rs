@@ -6,12 +6,13 @@
 use bevy::mesh::MeshTag;
 use bevy::prelude::*;
 
-use voxel_core::mob;
+use voxel_core::{mob, spawn};
 use voxel_core::model::Motion;
 use voxel_core::registry::ContentId;
 
 use crate::inventory::Inventory;
 use crate::player::{Player, EYE_HEIGHT_M};
+use crate::sky::WorldSky;
 use crate::{to_bevy_mesh, GameWorld};
 
 /// Un mob : son état simulé (`voxel_core`). Ses parties sont ses enfants.
@@ -31,13 +32,16 @@ pub struct MobIds {
     turn: u64,
 }
 
-/// Fait naître un mob, avec un id neuf.
-pub fn spawn_mob(commands: &mut Commands, content: ContentId, feet: Vec3, yaw: f32) {
+/// Fait naître un mob, avec un id neuf. `spawned` : apparu seul (il
+/// disparaîtra loin du joueur), pas posé.
+pub fn spawn_mob(commands: &mut Commands, content: ContentId, feet: Vec3, yaw: f32, spawned: bool) {
     commands.queue(move |world: &mut World| {
         let mut ids = world.resource_mut::<MobIds>();
         let id = ids.next;
         ids.next += 1;
-        world.spawn(Mob(mob::Mob::new(id, content, feet.to_array(), yaw)));
+        let mut mob = mob::Mob::new(id, content, feet.to_array(), yaw);
+        mob.spawned = spawned;
+        world.spawn(Mob(mob));
     });
 }
 
@@ -87,14 +91,18 @@ pub fn add_mob_models(
     }
 }
 
-/// Un tick de tous les mobs, dans l'ordre de leur id (§2).
+/// Un tick de tous les mobs, dans l'ordre de leur id (§2) ; puis ceux
+/// qui disparaissent et ceux qui apparaissent (#60).
+#[allow(clippy::too_many_arguments)]
 pub fn simulate_mobs(
+    mut commands: Commands,
     time: Res<Time>,
     game: Res<GameWorld>,
+    sky: Option<Res<WorldSky>>,
     inventory: Res<Inventory>,
     mut ids: ResMut<MobIds>,
     player: Query<&Player>,
-    mut mobs: Query<&mut Mob>,
+    mut mobs: Query<(Entity, &mut Mob)>,
 ) {
     let player = player.single().ok().map(|p| {
         let feet = p.feet();
@@ -104,11 +112,23 @@ pub fn simulate_mobs(
             holding: inventory.selected(),
         }
     });
-    let mut list: Vec<_> = mobs.iter_mut().map(|m| m.into_inner()).collect();
-    list.sort_by_key(|m| m.id);
-    let mut list: Vec<&mut mob::Mob> = list.into_iter().map(|m| &mut m.0).collect();
+    let mut list: Vec<_> = mobs.iter_mut().map(|(e, m)| (e, m.into_inner())).collect();
+    list.sort_by_key(|(_, m)| m.id);
+    let (entities, mut list): (Vec<Entity>, Vec<&mut mob::Mob>) = list.into_iter().map(|(e, m)| (e, &mut m.0)).unzip();
     let seed = game.generator.terrain.seed;
-    mob::step_all(&game.world, &mut list, player.as_ref(), seed, time.delta_secs(), &mut ids.turn);
+    let world = &game.world;
+    mob::step_all(world, &mut list, player.as_ref(), seed, time.delta_secs(), &mut ids.turn);
+    let Some(player) = player else { return };
+    for (entity, mob) in entities.iter().zip(&list) {
+        if spawn::gone(world, mob, player.feet) {
+            commands.entity(*entity).despawn();
+        }
+    }
+    let daylight = sky.map_or(1.0, |s| s.0.daylight(&s.0.at(s.0.hour(world.tick()))));
+    let all: Vec<&mob::Mob> = list.iter().map(|m| &**m).collect();
+    for born in spawn::spawn(world, &all, player.feet, seed, daylight) {
+        spawn_mob(&mut commands, born.content, Vec3::from_array(born.feet), born.yaw, true);
+    }
 }
 
 /// Position interpolée entre les deux derniers ticks (comme le joueur),

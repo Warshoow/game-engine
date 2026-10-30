@@ -21,6 +21,7 @@ pub mod rules;
 pub mod save;
 pub mod shape;
 pub mod sky;
+pub mod spawn;
 pub mod texgen;
 pub mod ticks;
 pub mod worldgen;

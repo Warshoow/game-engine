@@ -117,7 +117,7 @@ pub fn save_player_and_items(
         error!("sauvegarde de l'horloge impossible : {err}");
     }
     let dropped = items.iter().map(|i| (i.content, i.feet().to_array())).collect();
-    let placed = mobs.iter().map(|m| (m.id, m.content, m.body.feet, m.yaw)).collect();
+    let placed = mobs.iter().map(|m| (m.id, m.content, m.body.feet, m.yaw, m.spawned)).collect();
     if let Err(err) = save.0.write_mobs(&placed) {
         error!("sauvegarde des entités impossible : {err}");
     }
@@ -174,14 +174,16 @@ pub fn restore_items(mut commands: Commands, save: Option<Res<WorldSave>>) {
     }
 }
 
-/// Refait apparaître les entités posées sauvées (#15).
+/// Refait apparaître les mobs sauvés (#15).
 pub fn restore_mobs(mut commands: Commands, mut ids: ResMut<MobIds>, save: Option<Res<WorldSave>>) {
     let Some(save) = save else { return };
     match save.0.read_mobs() {
         Ok(mobs) => {
-            for (id, content, feet, yaw) in mobs {
+            for (id, content, feet, yaw, spawned) in mobs {
                 ids.next = ids.next.max(id + 1);
-                commands.spawn(Mob(voxel_core::mob::Mob::new(id, content, feet, yaw)));
+                let mut mob = voxel_core::mob::Mob::new(id, content, feet, yaw);
+                mob.spawned = spawned;
+                commands.spawn(Mob(mob));
             }
         }
         // Comme les items : illisibles, on les perd plutôt que le monde.

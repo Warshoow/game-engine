@@ -167,7 +167,7 @@ pub fn interact(
         );
         let feet = (cell + Vec3::new(0.5, 0.0, 0.5)) * size_m;
         let look = cam.forward().as_vec3();
-        entities::spawn_mob(edit.commands, id, feet, (-look.x).atan2(-look.z));
+        entities::spawn_mob(edit.commands, id, feet, (-look.x).atan2(-look.z), false);
         edit.inventory.as_deref_mut().map(Inventory::take_selected);
         return;
     }
