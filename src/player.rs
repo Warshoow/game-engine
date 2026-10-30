@@ -17,26 +17,15 @@ use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, MonitorSelection, PrimaryWindow, WindowMode};
 
-use voxel_core::physics::{move_and_collide, move_and_step, Aabb};
+use voxel_core::physics::Body;
 
 use crate::GameWorld;
 
 // Gabarit et dynamique du joueur — en mètres et mètres/seconde.
 pub const PLAYER_WIDTH_M: f32 = 0.6;
 pub const PLAYER_HEIGHT_M: f32 = 1.8;
-const EYE_HEIGHT_M: f32 = 1.62;
+pub const EYE_HEIGHT_M: f32 = 1.62;
 const WALK_SPEED_M_S: f32 = 5.0;
-/// Plus fort que 9,81 : la gravité « réaliste » donne un saut flottant en
-/// jeu — la quasi-totalité des jeux la gonflent.
-pub const GRAVITY_M_S2: f32 = 22.0;
-const JUMP_SPEED_M_S: f32 = 7.5;
-/// Dans un liquide (#28) : vitesse de remontée en nageant, et de chute
-/// maximale (on coule doucement).
-const SWIM_UP_M_S: f32 = 3.0;
-const SINK_M_S: f32 = 2.0;
-/// Marche montée sans sauter (#14) : une dalle ou un escalier, pas un
-/// bloc plein d'un mètre.
-const STEP_HEIGHT_M: f32 = 0.6;
 const MOUSE_SENSITIVITY: f32 = 0.002;
 
 pub struct PlayerPlugin;
@@ -73,23 +62,21 @@ impl Plugin for PlayerPlugin {
 /// `prev_feet` et `feet` par [`smooth_transform`] : la simu ne le lit pas.
 #[derive(Component, Default)]
 pub struct Player {
-    feet: Vec3,
-    /// `feet` au tick précédent.
+    body: Body,
+    /// Les pieds au tick précédent.
     prev_feet: Vec3,
-    velocity: Vec3,
     yaw: f32,
     pitch: f32,
-    grounded: bool,
 }
 
 impl Player {
     pub fn at(feet: Vec3) -> Self {
-        Self { feet, prev_feet: feet, ..default() }
+        Self { body: Body::at(feet.to_array()), prev_feet: feet, ..default() }
     }
 
     /// Position simulée des pieds (≠ `Transform`, qui est interpolé).
     pub fn feet(&self) -> Vec3 {
-        self.feet
+        Vec3::from_array(self.body.feet)
     }
 
     /// Joueur relu dans une save.
@@ -149,13 +136,13 @@ pub fn physics_step(
     let keys_on = |key| captured.0 && keys.pressed(key);
     let dt = time.delta_secs(); // dans FixedUpdate : le pas fixe
     for mut player in &mut query {
-        player.prev_feet = player.feet;
+        player.prev_feet = player.feet();
         // Streaming : on ne simule PAS dans du non-chargé. `is_solid` traite
         // un chunk absent comme de l'air — sans cette garde, le joueur
         // tomberait à travers un monde pas encore généré (premières frames,
         // ou si la génération ne suit pas). Figé ≠ cassé : la simu reprend
         // dès que le sol existe.
-        let feet_voxel = game.world.voxel_at_m(player.feet.to_array());
+        let feet_voxel = game.world.voxel_at_m(player.body.feet);
         let (chunk_pos, _) = game.world.split(feet_voxel);
         if game.world.chunk(chunk_pos).is_none() {
             continue;
@@ -175,51 +162,9 @@ pub fn physics_step(
             wish.x += 1.0;
         }
         // Tournée par le yaw seul : regarder le sol ne ralentit pas la marche.
-        let dir = (Quat::from_rotation_y(player.yaw) * wish).normalize_or_zero();
-
-        // Liquide aux pieds (#28) : freiné de son `drag`, la gravité aussi.
-        // Saut tenu : on nage vers le haut ; tête hors du liquide, on saute
-        // (c'est ce qui permet de remonter sur la berge).
-        let feet = player.feet;
-        let liquid_at = |height_m: f32| {
-            let v = game.world.voxel_at_m((feet + Vec3::Y * height_m).to_array());
-            game.world.voxel(v).and_then(|id| game.world.liquid(id))
-        };
-        let wet = liquid_at(0.1);
-        let slow = 1.0 - wet.map_or(0.0, |l| l.drag);
-
-        // Vitesse horizontale directe (pas d'inertie — style Minecraft),
-        // verticale intégrée (gravité + saut).
-        player.velocity.x = dir.x * WALK_SPEED_M_S * slow;
-        player.velocity.z = dir.z * WALK_SPEED_M_S * slow;
-        player.velocity.y -= GRAVITY_M_S2 * slow * dt;
-        if wet.is_some() {
-            player.velocity.y = player.velocity.y.max(-SINK_M_S);
-        }
-        if wet.is_some() && keys_on(KeyCode::Space) {
-            player.velocity.y = if liquid_at(EYE_HEIGHT_M).is_some() { SWIM_UP_M_S } else { JUMP_SPEED_M_S };
-        } else if player.grounded && keys_on(KeyCode::Space) {
-            player.velocity.y = JUMP_SPEED_M_S;
-        }
-
-        let aabb = Aabb::from_feet(player.feet.to_array(), PLAYER_WIDTH_M, PLAYER_HEIGHT_M);
-        let delta = (player.velocity * dt).to_array();
-        let moved = if player.grounded && player.velocity.y <= 0.0 && wet.is_none() {
-            move_and_step(&game.world, aabb, delta, STEP_HEIGHT_M)
-        } else {
-            move_and_collide(&game.world, aabb, delta)
-        };
-
-        // Un impact vertical annule la vitesse verticale ; vers le bas, il
-        // signifie « au sol » (le saut ne s'arme que là).
-        if moved.collided[1] {
-            player.grounded = player.velocity.y < 0.0;
-            player.velocity.y = 0.0;
-        } else {
-            player.grounded = false;
-        }
-
-        player.feet = Vec3::from_array(moved.aabb.feet());
+        let walk = (Quat::from_rotation_y(player.yaw) * wish).normalize_or_zero() * WALK_SPEED_M_S;
+        let size = [PLAYER_WIDTH_M, PLAYER_HEIGHT_M];
+        player.body.step(&game.world, size, EYE_HEIGHT_M, [walk.x, walk.z], keys_on(KeyCode::Space), dt);
     }
 }
 
@@ -238,7 +183,7 @@ pub fn physics_step(
 fn smooth_transform(fixed: Res<Time<Fixed>>, mut query: Query<(&mut Transform, &Player)>) {
     let t = fixed.overstep_fraction();
     for (mut transform, player) in &mut query {
-        transform.translation = player.prev_feet.lerp(player.feet, t);
+        transform.translation = player.prev_feet.lerp(player.feet(), t);
         transform.rotation = Quat::from_rotation_y(player.yaw);
     }
 }

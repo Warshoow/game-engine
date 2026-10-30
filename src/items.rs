@@ -9,12 +9,12 @@ use std::collections::{HashMap, HashSet};
 use bevy::prelude::*;
 
 use voxel_core::mesher::mesh_block_item;
-use voxel_core::physics::{move_and_collide, Aabb};
+use voxel_core::physics::{move_and_collide, Aabb, GRAVITY_M_S2};
 use voxel_core::registry::ContentId;
 
 use crate::entities::GridLit;
 use crate::inventory::{self, Inventory};
-use crate::player::{Player, GRAVITY_M_S2};
+use crate::player::Player;
 use crate::{to_bevy_mesh, GameWorld, VoxelMaterial};
 
 /// Côté du cube affiché et de sa boîte de collision, en mètres.

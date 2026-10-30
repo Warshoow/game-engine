@@ -54,6 +54,96 @@ impl Aabb {
     }
 }
 
+/// Gravité, en m/s². Plus forte que 9,81 : la gravité « réaliste » donne
+/// un saut flottant en jeu, la quasi-totalité des jeux la gonflent.
+pub const GRAVITY_M_S2: f32 = 22.0;
+/// Vitesse donnée par un saut.
+const JUMP_SPEED_M_S: f32 = 7.5;
+/// Hauteur d'un saut, en mètres : v² / 2g (≈ 1,28 m).
+pub const JUMP_HEIGHT_M: f32 = JUMP_SPEED_M_S * JUMP_SPEED_M_S / (2.0 * GRAVITY_M_S2);
+/// Dans un liquide (#28) : vitesse de remontée à la nage, et de chute
+/// maximale (on coule doucement).
+const SWIM_UP_M_S: f32 = 3.0;
+const SINK_M_S: f32 = 2.0;
+/// Marche montée sans sauter (#14) : une dalle ou un escalier, pas un
+/// bloc plein d'un mètre.
+pub const STEP_HEIGHT_M: f32 = 0.6;
+
+/// Un corps qui marche, saute, nage et tombe : le joueur et les mobs
+/// (#32). En mètres, au tick fixe.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Body {
+    /// Point au sol, au centre de la boîte.
+    pub feet: [f32; 3],
+    pub velocity: [f32; 3],
+    pub grounded: bool,
+}
+
+impl Body {
+    pub fn at(feet: [f32; 3]) -> Self {
+        Self { feet, ..Self::default() }
+    }
+
+    /// Un pas de `dt` secondes. `walk` : vitesse horizontale voulue (x, z),
+    /// en m/s, sans inertie (à la Minecraft) ; `jump` : sauter, ou nager
+    /// vers le haut dans un liquide ; `size` : (largeur, hauteur) ;
+    /// `eyes_m` : hauteur des yeux, tête hors du liquide on saute (c'est ce
+    /// qui fait remonter sur la berge).
+    pub fn step(&mut self, world: &VoxelWorld, size: [f32; 2], eyes_m: f32, walk: [f32; 2], jump: bool, dt: f32) {
+        let feet = self.feet;
+        let liquid_at = |height_m: f32| {
+            let v = world.voxel_at_m([feet[0], feet[1] + height_m, feet[2]]);
+            world.voxel(v).and_then(|id| world.liquid(id))
+        };
+        // Liquide aux pieds : freiné de son `drag`, la gravité aussi.
+        let wet = liquid_at(0.1);
+        let slow = 1.0 - wet.map_or(0.0, |l| l.drag);
+        let v = &mut self.velocity;
+        v[0] = walk[0] * slow;
+        v[2] = walk[1] * slow;
+        v[1] -= GRAVITY_M_S2 * slow * dt;
+        if wet.is_some() {
+            v[1] = v[1].max(-SINK_M_S);
+        }
+        if wet.is_some() && jump {
+            v[1] = if liquid_at(eyes_m).is_some() { SWIM_UP_M_S } else { JUMP_SPEED_M_S };
+        } else if self.grounded && jump {
+            v[1] = JUMP_SPEED_M_S;
+        }
+
+        let aabb = Aabb::from_feet(feet, size[0], size[1]);
+        let delta = v.map(|c| c * dt);
+        let moved = if self.grounded && v[1] <= 0.0 && wet.is_none() {
+            move_and_step(world, aabb, delta, STEP_HEIGHT_M)
+        } else {
+            move_and_collide(world, aabb, delta)
+        };
+        // Un impact vertical annule la vitesse verticale ; vers le bas, il
+        // veut dire « au sol » (le saut ne s'arme que là).
+        self.grounded = moved.collided[1] && v[1] < 0.0;
+        if moved.collided[1] {
+            v[1] = 0.0;
+        }
+        self.feet = moved.aabb.feet();
+    }
+}
+
+/// Vrai si `aabb` chevauche une boîte de collision du monde.
+pub fn overlaps(world: &VoxelWorld, aabb: &Aabb) -> bool {
+    let vpm = world.voxels_per_meter();
+    let lo = |v: f32| (v * vpm).floor() as i64;
+    let hi = |v: f32| ((v * vpm) - 1e-6).floor() as i64;
+    (lo(aabb.min[0])..=hi(aabb.max[0])).any(|x| {
+        (lo(aabb.min[1])..=hi(aabb.max[1])).any(|y| {
+            (lo(aabb.min[2])..=hi(aabb.max[2])).any(|z| {
+                world.boxes([x, y, z], true).into_iter().any(|[min, max]| {
+                    (0..3).all(|a| min[a] / vpm < aabb.max[a] && max[a] / vpm > aabb.min[a])
+                })
+            })
+        })
+    })
+}
+
 /// Résultat d'un déplacement : la boîte arrivée et, par axe, si elle a tapé.
 /// `collided[1]` avec un mouvement descendant = « au sol » (pour le saut).
 #[derive(Debug, Clone, Copy)]
