@@ -60,9 +60,12 @@
 //! voxel_size_m`, dans le repère local du chunk (l'origine du chunk est
 //! placée par l'ECS, pas par le mesher).
 
+use std::collections::HashMap;
+
 use crate::chunk::{Chunk, ChunkPos};
 use crate::liquids;
 use crate::registry::{Alpha, ContentId, Registry};
+use crate::shape::{Cuboid, Rotation, CELL};
 use crate::world::VoxelWorld;
 
 /// Hauteur d'une face pleine dans la clé de fusion (sur 255).
@@ -158,6 +161,8 @@ pub struct Region {
     /// Hauteur de la surface d'un liquide sous de l'air (sur 255), `FULL`
     /// pour le reste.
     heights: Vec<u8>,
+    /// Rotation des blocs à forme tournés (#14), par index de case.
+    rotations: HashMap<usize, Rotation>,
     /// Niveau du ciel ouvert.
     full: u8,
 }
@@ -173,6 +178,7 @@ impl Region {
             blocks: resolve_palette(chunk, registry),
             lights: vec![[1, 0]; side.pow(3)],
             heights: vec![FULL; side.pow(3)],
+            rotations: HashMap::new(),
             full: 1,
         };
         for_each_local(size, |p| {
@@ -225,7 +231,13 @@ impl Region {
                 for x in -1..=size {
                     let p = [x, y, z];
                     let Some(block) = region.block(p) else { continue };
-                    if let Some(l) = block.liquid.then(|| world.liquid(block.id)).flatten() {
+                    let (shaped, liquid) = (!block.shape.is_empty(), block.liquid.then(|| world.liquid(block.id)).flatten());
+                    let r = if shaped { world.rotation(at(p)) } else { Rotation::IDENTITY };
+                    if r != Rotation::IDENTITY {
+                        let i = region.index(p);
+                        region.rotations.insert(i, r);
+                    }
+                    if let Some(l) = liquid {
                         let h = liquids::height(world.liquid_level(at(p)), liquids::reach(&l, vpm));
                         let i = region.index(p);
                         region.heights[i] = (h * f32::from(FULL)).round() as u8;
@@ -250,6 +262,63 @@ impl Region {
     fn block(&self, p: [i32; 3]) -> Option<&Resolved> {
         let k = self.cells[self.index(p)];
         (k != NOTHING).then(|| &self.blocks[k as usize])
+    }
+
+    fn rotation(&self, p: [i32; 3]) -> Rotation {
+        self.rotations.get(&self.index(p)).copied().unwrap_or_default()
+    }
+
+    /// `neighbor`, en `q`, cache-t-il la face de `block` tournée vers lui ?
+    /// `toward` : de `q` vers `block`. Un bloc à forme ne cache que si une
+    /// de ses boîtes, tournée, couvre toute la face commune.
+    fn hides_at(&self, neighbor: &Resolved, q: [i32; 3], block: &Resolved, toward: [i32; 3]) -> bool {
+        if neighbor.shape.is_empty() {
+            return hides(neighbor, block);
+        }
+        let r = self.rotation(q);
+        neighbor.opaque && neighbor.shape.iter().any(|c| c.rotated(r).covers(toward))
+    }
+
+    /// Les faces des blocs à forme (#14) de la passe `blend` : chaque boîte,
+    /// tournée, sans fusion. Une face au bord de la case disparaît derrière
+    /// un voisin qui la cache. Lumière de la case elle-même, sans ombrage.
+    // shortcut: pas de greedy, 2 quads par dalle de sol ; fusionner si un
+    // sol de dalles se voit au profilage (#58).
+    fn mesh_shapes(&self, mesh: &mut MeshData, voxel_size_m: f32, blend: bool) {
+        let full = f32::from(self.full);
+        for_each_local(self.size, |p| {
+            let Some(block) = self.block(p).filter(|b| !b.shape.is_empty() && b.blend == blend) else { return };
+            let r = self.rotation(p);
+            let [sky, lit] = self.lights[self.index(p)];
+            let lights = [f32::from(sky) / full, if block.emits { 1.0 } else { f32::from(lit) / full }];
+            for c in &block.shape {
+                let Cuboid(lo, hi) = c.rotated(r);
+                for face in &FACES {
+                    let dir = face.neighbor;
+                    let d = dir.iter().position(|&c| c != 0).unwrap();
+                    let on_side = if dir[d] > 0 { hi[d] == CELL } else { lo[d] == 0 };
+                    let q = [0, 1, 2].map(|a| p[a] + dir[a]);
+                    if on_side && self.block(q).is_some_and(|o| self.hides_at(o, q, block, dir.map(|c| -c))) {
+                        continue;
+                    }
+                    // Dessus, dessous ou côté : choisi sur le modèle avant rotation.
+                    let layer = match r.model_dir(dir) {
+                        [0, 1, 0] => block.layers[1],
+                        [0, -1, 0] => block.layers[2],
+                        _ => block.layers[0],
+                    };
+                    let base = mesh.positions.len() as u32;
+                    for corner in face.corners {
+                        let pos: [f32; 3] = std::array::from_fn(|a| {
+                            let sixteenths = if corner[a] == 1 { hi[a] } else { lo[a] };
+                            (p[a] as f32 + f32::from(sixteenths) / f32::from(CELL)) * voxel_size_m
+                        });
+                        push_vertex(mesh, pos, face.normal, block, layer, 1.0, lights);
+                    }
+                    push_quad_indices(mesh, base, [3; 4]);
+                }
+            }
+        });
     }
 
     /// Cœur du greedy. `blend` : la passe semi-transparente, sinon le reste.
@@ -277,7 +346,7 @@ impl Region {
         let visible_face = |p: [i32; 3], q: [i32; 3], axes: [usize; 3]| -> Option<Key> {
             let idx = self.cells[self.index(p)];
             let block = &resolved[idx as usize];
-            if !block.drawn || block.blend != blend {
+            if !block.drawn || block.blend != blend || !block.shape.is_empty() {
                 return None;
             }
             let height = if block.liquid { height_at(p, block.id) } else { FULL };
@@ -296,7 +365,8 @@ impl Region {
                 let theirs = height_at(q, block.id);
                 return (theirs < height).then(|| (idx, height, theirs, NO_SHADE, lights(q)));
             }
-            let hidden = neighbor.is_some_and(|other| hides(other, block));
+            let toward = [0, 1, 2].map(|a| p[a] - q[a]);
+            let hidden = neighbor.is_some_and(|other| self.hides_at(other, q, block, toward));
             // Surface abaissée : un bloc posé dessus ne la touche pas.
             let lowered_top = height < FULL && q[1] > p[1];
             if hidden && !lowered_top {
@@ -384,6 +454,7 @@ impl Region {
                 }
             }
         }
+        self.mesh_shapes(&mut mesh, voxel_size_m, blend);
         mesh
     }
 }
@@ -459,7 +530,7 @@ fn emit_rect(mesh: &mut MeshData, quad: &SliceQuad, normal: [f32; 3], block: &Re
             y += lift;
         }
         let pos = [p[0] as f32 * scale, y * scale, p[2] as f32 * scale];
-        push_vertex(mesh, pos, normal, block, AO_LIGHT[shades[i] as usize], light);
+        push_vertex(mesh, pos, normal, block, face_layer(block, normal), AO_LIGHT[shades[i] as usize], light);
     }
     push_quad_indices(mesh, base, shades);
 }
@@ -541,20 +612,29 @@ fn push_quad_indices(mesh: &mut MeshData, base: u32, shades: [u8; 4]) {
     mesh.indices.extend(tris.map(|i| base + i));
 }
 
+/// La couche du côté, du dessus ou du dessous, selon la normale.
+fn face_layer(block: &Resolved, normal: [f32; 3]) -> u32 {
+    if normal[1] > 0.0 {
+        block.layers[1]
+    } else if normal[1] < 0.0 {
+        block.layers[2]
+    } else {
+        block.layers[0]
+    }
+}
+
 /// Un sommet : position, normale, couleur, et sa texture (couche +
 /// coordonnées en mètres, prises dans le plan de la face).
-fn push_vertex(mesh: &mut MeshData, pos: [f32; 3], normal: [f32; 3], block: &Resolved, light: f32, sky_block: [f32; 2]) {
+fn push_vertex(mesh: &mut MeshData, pos: [f32; 3], normal: [f32; 3], block: &Resolved, layer: u32, light: f32, sky_block: [f32; 2]) {
     let [x, y, z] = pos;
     // Sur les côtés, v descend avec y : l'image est à l'endroit (le haut du
     // PNG en haut du bloc).
-    let (uv, layer) = if normal[1] > 0.0 {
-        ([x, z], block.layers[1])
-    } else if normal[1] < 0.0 {
-        ([x, z], block.layers[2])
+    let uv = if normal[1] != 0.0 {
+        [x, z]
     } else if normal[0] != 0.0 {
-        ([z, -y], block.layers[0])
+        [z, -y]
     } else {
-        ([x, -y], block.layers[0])
+        [x, -y]
     };
     mesh.positions.push(pos);
     mesh.normals.push(normal);
@@ -582,12 +662,14 @@ struct Resolved {
     color: [f32; 4],
     /// Couche du côté, du dessus, du dessous.
     layers: [u32; 3],
+    /// Boîtes d'un bloc à forme (#14) ; vide : le cube.
+    shape: Vec<Cuboid>,
 }
 
 impl Resolved {
     /// Assombrit les coins des faces voisines : il cache tout derrière lui.
     fn casts_shadow(&self) -> bool {
-        self.solid && self.opaque
+        self.solid && self.opaque && self.shape.is_empty()
     }
 }
 
@@ -609,6 +691,7 @@ fn resolve(registry: &Registry, id: ContentId) -> Resolved {
             emits: false,
             color: [1.0, 0.0, 1.0, 1.0],
             layers: [NO_TEXTURE; 3],
+            shape: Vec::new(),
         };
     };
     // Texture absente ou non chargée : couleur seule.
@@ -635,6 +718,7 @@ fn resolve(registry: &Registry, id: ContentId) -> Resolved {
         emits: b.emits_light.is_some(),
         color,
         layers,
+        shape: b.shape.clone().unwrap_or_default(),
     }
 }
 
@@ -726,7 +810,7 @@ fn emit_quad(mesh: &mut MeshData, voxel: [u32; 3], face: &Face, block: &Resolved
             (voxel[1] + corner[1]) as f32 * scale,
             (voxel[2] + corner[2]) as f32 * scale,
         ];
-        push_vertex(mesh, pos, face.normal, block, AO_LIGHT[shade as usize], [1.0, 0.0]); // l'oracle ignore la lumière
+        push_vertex(mesh, pos, face.normal, block, face_layer(block, face.normal), AO_LIGHT[shade as usize], [1.0, 0.0]); // l'oracle ignore la lumière
     }
     push_quad_indices(mesh, base, shades);
 }

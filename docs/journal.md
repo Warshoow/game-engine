@@ -1164,3 +1164,41 @@ sphère n'est pas un point. Un point rond au centre de la case règle ça.
 
 **Limite.** Rien n'est vu avec les effets : réglages et tremblement des
 ombres à voir sur la 4060.
+
+## 2026-10-30 — Blocs à forme (#14)
+
+**Décision.** Exploration présentée, Warshow a délégué (« je te fais
+confiance »). Un bloc non cubique déclare des boîtes (`shape`), une
+seconde liste pour la collision, et sa façon de se tourner à la pose
+(`orient`). La rotation vit dans une table creuse, comme le niveau des
+liquides. Écartés : un ID par orientation (à la Minecraft), un octet de
+plus par voxel (à la Luanti), monter la résolution du monde, une grille
+de voxels par entrée (#58).
+
+**Pourquoi des seizièmes de case entiers.** Savoir si une boîte cache
+la face voisine est une égalité exacte, et une boîte tournée d'un quart
+de tour reste entière. En mètres, une forme déborderait sur plusieurs
+cases dès 2 vox/m. La forme suit la case comme le cube la suit : à
+2 vox/m, une dalle est une demi-brique d'un Lego plus fin. Ce qui est du
+gameplay reste en mètres (hauteur de marche, portée, lumière).
+
+**Pourquoi les 24 rotations plutôt que le sens.** Un octet dans les deux
+cas. Les 24 se composent : tourner une construction entière (plus tard)
+envoie chaque rotation sur une autre, sans cas propre à « escalier » ou
+« bûche ».
+
+**Avis extérieur.** Sur proposition de Warshow, la conception a été
+soumise à DeepSeek V4.1 Flash (opencode). Retenu : boîtes en entiers,
+nombre de boîtes borné, viser la forme et non la collision (une torche
+qu'on traverse doit se casser). Écarté : borner la montée de marche en
+cases, ce qui contredirait §2.
+
+**Ce qui a été vu.** Tests headless : rotations (24 distinctes, sans
+miroir), save, faces cachées, marche, visée. Une capture sous WSL, effets
+coupés, avec un worldgen modifié hors du dépôt (colonnes d'escaliers et
+boules de torches dans le désert) : formes et torches allumées rendent.
+
+**Limites.** Pas de fusion des faces des blocs à forme (2 quads par dalle
+de sol). Une dalle dans l'eau y fait un trou. La texture ne tourne pas
+avec le bloc. La fusion de deux dalles attend un effet qui consomme
+l'objet tenu (#58).

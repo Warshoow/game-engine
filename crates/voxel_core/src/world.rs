@@ -16,6 +16,7 @@ use crate::light::{self, Light};
 use crate::liquids;
 use crate::registry::{ContentId, Liquid, Registry};
 use crate::rules;
+use crate::shape::{Cuboid, Rotation};
 
 /// Ticks fixes par seconde (§3.9). Les échéances des minuteurs sont sauvées
 /// en ticks : changer ce pas change leur sens (§3.10).
@@ -49,6 +50,8 @@ pub struct ChunkState {
     pub levels: Vec<([u32; 3], u8)>,
     /// Réexamens programmés : position, échéance (#28).
     pub updates: Vec<([u32; 3], u64)>,
+    /// Blocs tournés (#14).
+    pub rotations: Vec<([u32; 3], Rotation)>,
 }
 
 /// Minuteur d'un bloc (#34) : sa règle `After` n° `rule` se déclenche au
@@ -95,6 +98,8 @@ pub struct VoxelWorld {
     /// Vérité ; `updates` ne sert qu'à trouver les échus, comme `queue`.
     pending: HashMap<[i64; 3], u64>,
     updates: BinaryHeap<Reverse<(u64, [i64; 3])>>,
+    /// Blocs tournés (#14, §3.2) : absent = le modèle tel que dessiné.
+    rotations: HashMap<[i64; 3], Rotation>,
     /// Lumière (#23, §3.8) : dérivée des voxels, jamais sauvée.
     light: Light,
 }
@@ -114,6 +119,7 @@ impl VoxelWorld {
             levels: HashMap::new(),
             pending: HashMap::new(),
             updates: BinaryHeap::new(),
+            rotations: HashMap::new(),
             light: Light::default(),
         }
     }
@@ -132,6 +138,9 @@ impl VoxelWorld {
         for (local, due) in state.updates {
             self.schedule_at(self.to_world(pos, local), due);
         }
+        for (local, r) in state.rotations {
+            self.rotations.insert(self.to_world(pos, local), r);
+        }
         self.insert_chunk(pos, chunk);
     }
 
@@ -144,6 +153,7 @@ impl VoxelWorld {
             timers: self.chunk_timers(pos),
             levels: self.in_chunk(&self.levels, pos),
             updates: self.in_chunk(&self.pending, pos),
+            rotations: self.in_chunk(&self.rotations, pos),
         }
     }
 
@@ -281,6 +291,40 @@ impl VoxelWorld {
         self.edited.insert(self.split(v).0);
     }
 
+    /// La rotation du bloc en `v` (#14).
+    pub fn rotation(&self, v: [i64; 3]) -> Rotation {
+        self.rotations.get(&v).copied().unwrap_or_default()
+    }
+
+    /// Tourne le bloc en `v`, après [`Self::set_voxel`] (qui l'efface).
+    pub fn set_rotation(&mut self, v: [i64; 3], r: Rotation) {
+        if r == Rotation::IDENTITY {
+            self.rotations.remove(&v);
+        } else {
+            self.rotations.insert(v, r);
+        }
+        self.edited.insert(self.split(v).0);
+    }
+
+    /// Les boîtes du voxel `v`, en coordonnées voxel monde (coins bas et
+    /// haut) : sa forme tournée, la case entière pour un cube solide, rien
+    /// pour le reste. `collision` : celles qui arrêtent ce qui bouge, sinon
+    /// celles qu'on voit (et qu'on vise).
+    pub fn boxes(&self, v: [i64; 3], collision: bool) -> Vec<[[f32; 3]; 2]> {
+        let Some(b) = self.voxel(v).and_then(|id| self.registry.get(id)).and_then(|e| e.block()) else { return Vec::new() };
+        if !b.solid {
+            return Vec::new();
+        }
+        let boxes = if collision { b.collision_boxes() } else { b.shape.as_deref() };
+        let r = self.rotation(v);
+        let origin = v.map(|c| c as f32);
+        boxes
+            .unwrap_or(&[Cuboid::FULL])
+            .iter()
+            .map(|c| c.rotated(r).to_cells().map(|p| std::array::from_fn(|a| origin[a] + p[a])))
+            .collect()
+    }
+
     /// Les block-entities du chunk `pos`, en positions locales.
     pub fn chunk_block_entities(&self, pos: ChunkPos) -> Vec<([u32; 3], Vec<ContentId>)> {
         self.block_entities
@@ -412,6 +456,7 @@ impl VoxelWorld {
         chunk.set(l[0], l[1], l[2], material);
         self.block_entities.remove(&v);
         self.levels.remove(&v);
+        self.rotations.remove(&v);
         // Le voxel et ses voisins sont à réexaminer (#28) : un liquide qui
         // arrive ou part les touche après son pas, le reste au tick suivant.
         let ticks = self.liquid(material).or(self.liquid(old)).map_or(1, |l| liquids::step_ticks(&l));

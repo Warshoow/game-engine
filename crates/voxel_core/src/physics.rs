@@ -7,7 +7,8 @@
 //! clampe, les autres continuent.
 //!
 //! Tout est en **mètres** (§2). La grille voxel n'apparaît qu'à travers
-//! `VoxelWorld::is_solid`, converti via `voxels_per_meter`.
+//! `VoxelWorld::boxes`, converti via `voxels_per_meter` : la case entière
+//! pour un cube, les boîtes de `collision` pour un bloc à forme (#14).
 //!
 //! Chaque passe teste la **région balayée** (de la position de départ à
 //! l'arrivée), pas seulement la destination — sinon un objet rapide
@@ -103,7 +104,27 @@ pub fn move_and_collide(world: &VoxelWorld, aabb: Aabb, delta: [f32; 3]) -> Move
     result
 }
 
-/// Parmi les voxels solides de la région balayée, trouve la face la plus
+/// Comme [`move_and_collide`], et monte seul une marche d'au plus `step_m`
+/// mètres (dalle, escalier, #14) quand le mouvement horizontal bute :
+/// monter, avancer, redescendre, gardé s'il va plus loin et retombe sur
+/// la marche. À n'appeler qu'au sol.
+pub fn move_and_step(world: &VoxelWorld, aabb: Aabb, delta: [f32; 3], step_m: f32) -> MoveResult {
+    let flat = move_and_collide(world, aabb, delta);
+    if !(flat.collided[0] || flat.collided[2]) {
+        return flat;
+    }
+    let up = move_and_collide(world, aabb, [0.0, step_m, 0.0]);
+    let forward = move_and_collide(world, up.aabb, [delta[0], 0.0, delta[2]]);
+    let climbed = up.aabb.min[1] - aabb.min[1];
+    let down = move_and_collide(world, forward.aabb, [0.0, -climbed, 0.0]);
+    let travel = |b: &Aabb| (b.min[0] - aabb.min[0]).hypot(b.min[2] - aabb.min[2]);
+    if !down.collided[1] || travel(&down.aabb) <= travel(&flat.aabb) + 1e-4 {
+        return flat;
+    }
+    MoveResult { aabb: down.aabb, collided: [forward.collided[0], true, forward.collided[2]] }
+}
+
+/// Parmi les boîtes solides de la région balayée, trouve la face la plus
 /// proche **devant** la boîte dans le sens du mouvement. Retourne sa
 /// position en mètres.
 fn first_blocking_face(
@@ -129,22 +150,26 @@ fn first_blocking_face(
     for x in l[0]..=h[0] {
         for y in l[1]..=h[1] {
             for z in l[2]..=h[2] {
-                if !world.is_solid([x, y, z]) {
-                    continue;
-                }
-                let c = [x, y, z][axis];
-                if d > 0.0 {
-                    let face = c as f32 / vpm; // face « min » du voxel
-                    // Seuls les voxels DEVANT la boîte bloquent ; ceux déjà
-                    // au niveau de la boîte (marge de peau) sont ignorés,
-                    // sinon on resterait collé définitivement.
-                    if face >= orig.max[axis] - 2.0 * SKIN {
-                        best = Some(best.map_or(face, |b: f32| b.min(face)));
+                for [min, max] in world.boxes([x, y, z], true) {
+                    let (min, max) = (min.map(|c| c / vpm), max.map(|c| c / vpm));
+                    // Une boîte plus petite que la case peut manquer la
+                    // région balayée, sur les autres axes ou sur le chemin.
+                    if (0..3).any(|a| min[a] >= swept.max[a] || max[a] <= swept.min[a]) {
+                        continue;
                     }
-                } else {
-                    let face = (c + 1) as f32 / vpm; // face « max » du voxel
-                    if face <= orig.min[axis] + 2.0 * SKIN {
-                        best = Some(best.map_or(face, |b: f32| b.max(face)));
+                    if d > 0.0 {
+                        let face = min[axis];
+                        // Seules les boîtes DEVANT la boîte bloquent ; celles
+                        // déjà à son niveau (marge de peau) sont ignorées,
+                        // sinon on resterait collé définitivement.
+                        if face >= orig.max[axis] - 2.0 * SKIN {
+                            best = Some(best.map_or(face, |b: f32| b.min(face)));
+                        }
+                    } else {
+                        let face = max[axis];
+                        if face <= orig.min[axis] + 2.0 * SKIN {
+                            best = Some(best.map_or(face, |b: f32| b.max(face)));
+                        }
                     }
                 }
             }

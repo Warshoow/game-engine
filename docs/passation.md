@@ -126,6 +126,16 @@ WSL le rendu est logiciel et rame — normal.
   seulement quand il bouge de plus de 0,01). La sphère du ciel suit la
   caméra (rayon 400 m). `sky.ron` : le fichier du jeu prime, la save en
   garde une copie (au contraire de `worldgen.ron`). F5 : +1 h, non sauvé.
+- **Blocs à forme** (#14, `voxel_core::shape`) : `shape` et `collision`
+  en seizièmes de case (`Cuboid`, entiers 0 à 16), `orient` à la pose.
+  La rotation (une des 24, `Rotation`) est dans `VoxelWorld::rotations`
+  (absent = identité). `set_voxel` l'efface : écrire la rotation
+  **après** (`set_rotation`), comme le niveau d'un liquide. Physique et
+  visée lisent `VoxelWorld::boxes` (`collision` pour la physique, `shape`
+  pour la visée : une torche se casse sans arrêter le joueur). Le mesher
+  émet les blocs à forme hors du greedy (`Region::mesh_shapes`), lumière
+  de leur propre case, sans ombrage ; ils n'arrêtent pas la lumière. Le
+  joueur au sol monte seul 0,6 m (`move_and_step`).
 - **Liquides** (#28) : le voxel reste l'ID du liquide, son niveau est dans
   `VoxelWorld::levels` (absent = source, `Some(0)` = chute, sinon distance
   à plat en voxels). `set_voxel` efface le niveau : écrire le niveau
@@ -541,6 +551,17 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   Captures WSL : la souris de Warshow sur la fenêtre tourne la caméra.
 - Commits jusqu'à `2407296` (plus celui de cette passation), à pousser
   par Warshow.
+- #14 blocs à forme fait (exploration présentée, Warshow a délégué ;
+  avis extérieur de DeepSeek V4.1 Flash via opencode, ce qui en est
+  retenu ou écarté est dans #58). Boîtes en seizièmes de case, rotation
+  dans une table creuse, montée de marche. Contenu d'exemple : dalle et
+  escalier en planches, torche, bûche qui se couche. Vu sous WSL (effets
+  coupés, worldgen modifié hors du dépôt pour en poser) : torches et
+  escaliers rendent. **À essayer en jeu par Warshow** : pose orientée
+  (escalier selon le regard, dalle haute, torche et bûche sur un mur),
+  marche sur dalles et escaliers, visée d'une torche.
+  Pas fait : deux dalles qui fusionnent en un bloc. Aucun effet de règle
+  ne consomme l'objet tenu, la fusion dupliquerait des planches (#58).
 
 ## Prochaines étapes
 

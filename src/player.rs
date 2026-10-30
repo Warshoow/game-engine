@@ -17,7 +17,7 @@ use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, MonitorSelection, PrimaryWindow, WindowMode};
 
-use voxel_core::physics::{move_and_collide, Aabb};
+use voxel_core::physics::{move_and_collide, move_and_step, Aabb};
 
 use crate::GameWorld;
 
@@ -34,6 +34,9 @@ const JUMP_SPEED_M_S: f32 = 7.5;
 /// maximale (on coule doucement).
 const SWIM_UP_M_S: f32 = 3.0;
 const SINK_M_S: f32 = 2.0;
+/// Marche montée sans sauter (#14) : une dalle ou un escalier, pas un
+/// bloc plein d'un mètre.
+const STEP_HEIGHT_M: f32 = 0.6;
 const MOUSE_SENSITIVITY: f32 = 0.002;
 
 pub struct PlayerPlugin;
@@ -200,7 +203,12 @@ pub fn physics_step(
         }
 
         let aabb = Aabb::from_feet(player.feet.to_array(), PLAYER_WIDTH_M, PLAYER_HEIGHT_M);
-        let moved = move_and_collide(&game.world, aabb, (player.velocity * dt).to_array());
+        let delta = (player.velocity * dt).to_array();
+        let moved = if player.grounded && player.velocity.y <= 0.0 && wet.is_none() {
+            move_and_step(&game.world, aabb, delta, STEP_HEIGHT_M)
+        } else {
+            move_and_collide(&game.world, aabb, delta)
+        };
 
         // Un impact vertical annule la vitesse verticale ; vers le bas, il
         // signifie « au sol » (le saut ne s'arme que là).

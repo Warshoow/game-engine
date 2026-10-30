@@ -36,6 +36,9 @@ Format (les champs optionnels peuvent être omis) :
         alpha: Mask,                   // optionnel : bloc à trous (verre, feuillage), avec holes > 0 ;
                                        // ou Blend(0.6) : semi-transparent (eau), opacité dans [0, 1]
         liquid: Some((spread: 7.0, delay: 0.25, renewable: true, drag: 0.5)),  // optionnel : le bloc coule
+        shape: Some([((0, 0, 0), (16, 8, 16))]),  // optionnel : bloc non cubique (dalle ici)
+        collision: Some([]),           // optionnel : ce qui arrête le joueur, absent = shape ; [] : on le traverse
+        orient: Face,                  // optionnel : Fixed, Facing, Half ou Face
     )),
     recipes: [(inputs: ["core:stone", "core:dirt"], count: 1)],  // optionnel ; station: "core:workbench" possible
 )
@@ -49,6 +52,11 @@ Règles :
 - Un liquide a solid: false. spread : distance d'écoulement à plat en mètres ; delay : secondes
   par pas (lent = visqueux) ; renewable (optionnel) : deux sources voisines en font une ; drag
   (optionnel, [0, 1)) : freinage du joueur dedans.
+- shape : 1 à 16 boîtes (coin bas, coin haut) en seizièmes de case, entiers de 0 à 16 ; la
+  case entière est ((0, 0, 0), (16, 16, 16)). Un bloc à forme a solid: true. Le modèle se dessine
+  pour un joueur qui regarde vers +Z. orient : Facing (tourné selon le regard : escalier), Half
+  (à l'envers contre le haut d'une face : dalle), Face (le dessus vers l'extérieur de la face
+  visée : bûche, torche), Fixed (défaut).
 - Hooks (on) : Used, Placed, Broken, After(60.0) (secondes après l'apparition du bloc, exact :
   culture, feu), Tick (au hasard, une fois par minute en moyenne : évolution lente de fond),
   NeighborChanged (le bloc ou un voisin vient de changer).

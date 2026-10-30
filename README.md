@@ -177,7 +177,7 @@ assets/               content (core.ron, worldgen.ron, sky.ron), textures (PNG),
 crates/voxel_core/    the WHOLE voxel core: pure, no Bevy dependency
   registry.rs         append-only content registry
   chunk.rs            palette chunk
-  world.rs            VoxelWorld (registry + chunks + voxel↔metre conversions, clock, timers, liquid levels, scheduled updates)
+  world.rs            VoxelWorld (registry + chunks + voxel↔metre conversions, clock, timers, liquid levels, scheduled updates, rotations)
   worldgen.rs         procedural generation (trait + fBm heightmap)
   mesher.rs           greedy meshing → plain buffers
   physics.rs          AABB collision against the grid
@@ -189,6 +189,7 @@ crates/voxel_core/    the WHOLE voxel core: pure, no Bevy dependency
   texgen.rs           textures computed from a pattern, a colour and a seed
   generate.rs         what is sent to the generator, validation of its answer
   sky.rs              hour from the world clock, sky and lights of the moment (sky.ron)
+  shape.rs            non-cubic blocks: boxes in sixteenths of a cell, the 24 rotations
   save.rs             world folder, binary chunk format
 docs/                 in French
   jalons.md                      milestones, in order

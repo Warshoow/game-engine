@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::chunk::{Chunk, ChunkPos};
 use crate::registry::{ContentId, Registry};
+use crate::shape::Rotation;
 use crate::world::{ChunkState, Timer, VoxelWorld};
 
 /// Version du format de save. À incrémenter à tout changement de format ;
@@ -200,10 +201,11 @@ fn chunk_file(pos: ChunkPos) -> String {
 ///        | n minuteurs u32 | par minuteur : x y z u32, échéance u64, règle u32, retard u8
 ///        | n niveaux u32 | par niveau : x y z u32, niveau u8
 ///        | n réexamens u32 | par réexamen : x y z u32, échéance u64
+///        | n rotations u32 | par rotation : x y z u32, rotation u8
 /// ```
 ///
 /// Les sections des minuteurs (#34) et des liquides (#28, niveaux et
-/// réexamens) sont optionnelles à la lecture : un chunk sauvé avant elles
+/// réexamens) et des rotations (#14) sont optionnelles à la lecture : un chunk sauvé avant elles
 /// se relit sans. Pas de `FORMAT_VERSION` à incrémenter, comme pour un
 /// fichier optionnel.
 ///
@@ -245,6 +247,11 @@ pub fn encode_chunk(chunk: &Chunk, state: &ChunkState) -> Vec<u8> {
         local.iter().for_each(|&c| u32_(&mut out, c));
         out.extend_from_slice(&due.to_le_bytes());
     }
+    u32_(&mut out, state.rotations.len() as u32);
+    for (local, r) in &state.rotations {
+        local.iter().for_each(|&c| u32_(&mut out, c));
+        out.push(r.index());
+    }
     out
 }
 
@@ -284,6 +291,13 @@ pub fn decode_chunk(bytes: &[u8]) -> Result<(Chunk, ChunkState), String> {
         }
         for _ in 0..r.u32()? {
             state.updates.push((r.local()?, r.u64()?));
+        }
+    }
+    if !r.0.is_empty() {
+        for _ in 0..r.u32()? {
+            let local = r.local()?;
+            let rotation = Rotation::from_index(r.take(1)?[0]).ok_or("rotation hors des 24")?;
+            state.rotations.push((local, rotation));
         }
     }
     if !r.0.is_empty() {
@@ -374,13 +388,19 @@ mod tests {
             timers: vec![([1, 2, 3], Timer { due: 1 << 40, rule: 2, late: 3 })],
             levels: vec![([3, 0, 0], 2)],
             updates: vec![([0, 3, 0], 1 << 33)],
+            rotations: vec![([1, 1, 1], Rotation::from_index(23).unwrap())],
         };
         let bytes = encode_chunk(&Chunk::filled(4, air), &state);
         assert_eq!(decode_chunk(&bytes).unwrap().1, state);
-        // Chunk sauvé avant les liquides, puis avant les minuteurs : relu sans.
+        // Chunk sauvé avant les rotations, les liquides, puis les minuteurs :
+        // relu sans.
         let empty = encode_chunk(&Chunk::filled(4, air), &ChunkState::default());
-        assert_eq!(decode_chunk(&empty[..empty.len() - 8]).unwrap().1, ChunkState::default());
-        assert_eq!(decode_chunk(&empty[..empty.len() - 12]).unwrap().1, ChunkState::default());
+        for cut in [4, 12, 16] {
+            assert_eq!(decode_chunk(&empty[..empty.len() - cut]).unwrap().1, ChunkState::default());
+        }
+        let mut rotated = bytes.clone();
+        *rotated.last_mut().unwrap() = 24;
+        assert!(decode_chunk(&rotated).is_err(), "rotation hors des 24");
         assert!(decode_chunk(&bytes[..bytes.len() - 1]).is_err(), "tronqué");
         let mut bad = bytes.clone();
         bad[16] = 9; // premier voxel → index hors palette

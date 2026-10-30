@@ -51,7 +51,9 @@
 
     // Worldgen (#27) : posés par `worldgen.ron`. Textures calculées par le
     // moteur (`generated_textures`, #44) : motif, couleur, bruit, graine.
-    (identifier: "core:log", kind: Block((solid: true, color: (0.40, 0.28, 0.15),
+    // Une bûche posée se couche contre la face visée (#14) ; le worldgen
+    // la pose debout.
+    (identifier: "core:log", kind: Block((solid: true, color: (0.40, 0.28, 0.15), orient: Face,
         texture: Some((side: "log_side", top: Some("log_top"))),
         generated_textures: [
             (name: "log_side", pattern: Cracks, color: (0.40, 0.28, 0.15), noise: 0.25, seed: 1),
@@ -65,6 +67,27 @@
     (identifier: "core:planks", kind: Block((solid: true, color: (0.62, 0.45, 0.25),
         texture: Some((side: "planks")))),
         recipes: [(inputs: ["core:log"], count: 4)]),
+
+    // Formes (#14) : boîtes en seizièmes de case, (coin bas), (coin haut).
+    // Un modèle se dessine pour un joueur qui regarde vers +Z ; `orient`
+    // dit comment il se tourne à la pose.
+    // Dalle : à l'envers posée contre le haut d'une face ou sous un bloc.
+    (identifier: "core:planks_slab", kind: Block((solid: true, color: (0.62, 0.45, 0.25),
+        texture: Some((side: "planks")),
+        shape: Some([((0, 0, 0), (16, 8, 16))]), orient: Half)),
+        recipes: [(inputs: ["core:planks", "core:planks", "core:planks"], count: 6)]),
+    // Escalier : la marche haute au fond (+Z), tourné selon le regard.
+    (identifier: "core:planks_stairs", kind: Block((solid: true, color: (0.62, 0.45, 0.25),
+        texture: Some((side: "planks")),
+        shape: Some([((0, 0, 0), (16, 8, 16)), ((0, 8, 8), (16, 16, 16))]), orient: Facing)),
+        recipes: [(inputs: ["core:planks", "core:planks", "core:planks", "core:planks"], count: 4)]),
+    // Torche : on la traverse (`collision: []`), elle se pose sur toutes
+    // les faces (couchée contre un mur), éclaire à 10 m.
+    (identifier: "core:torch", kind: Block((solid: true, color: (1.0, 0.80, 0.35), emits_light: Some(10.0),
+        texture: Some((side: "torch")),
+        generated_textures: [(name: "torch", pattern: Plain, color: (1.0, 0.80, 0.35), noise: 0.15, seed: 14)],
+        shape: Some([((7, 0, 7), (9, 10, 9))]), collision: Some([]), orient: Face)),
+        recipes: [(inputs: ["core:planks", "core:coal_ore"], count: 4)]),
     (identifier: "core:cactus", kind: Block((solid: true, color: (0.30, 0.55, 0.25),
         texture: Some((side: "cactus_side", top: Some("cactus_top"))),
         generated_textures: [

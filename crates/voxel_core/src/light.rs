@@ -90,7 +90,8 @@ impl Channel {
 /// Ce que la lumière lit d'un bloc.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 struct Props {
-    /// Solide et opaque : arrête la lumière (comme l'ombrage des coins).
+    /// Cube solide et opaque : arrête la lumière (comme l'ombrage des
+    /// coins). Un bloc à forme la laisse passer (#14).
     stops: bool,
     /// Niveaux perdus en plus en entrant dans la case.
     loss: u8,
@@ -101,7 +102,7 @@ struct Props {
 fn props(registry: &Registry, id: ContentId, vpm: f32) -> Props {
     let Some(b) = registry.get(id).and_then(|e| e.block()) else { return Props::default() };
     Props {
-        stops: b.solid && b.alpha == Alpha::Opaque,
+        stops: b.solid && b.alpha == Alpha::Opaque && b.shape.is_none(),
         loss: (b.light_loss * STEPS_PER_VOXEL).round() as u8,
         emits: b.emits_light.map_or(0, |r| level_of(r, vpm)),
     }

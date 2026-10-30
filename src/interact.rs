@@ -4,7 +4,9 @@
 //! (`Registry::drops`) en items au sol. Clic droit : *utiliser* le bloc visé
 //! s'il a une règle `Used` (§3.6), sinon poser le bloc en main (pris dans
 //! l'[`Inventory`]) sur la face visée ; Maj + clic droit pose toujours. Les
-//! hooks `Placed` et `Broken` déclenchent les règles du bloc concerné. Tout est **data-driven** :
+//! hooks `Placed` et `Broken` déclenchent les règles du bloc concerné. Un
+//! bloc qui déclare `orient` (#14) se tourne selon le regard et la face
+//! visée. Tout est **data-driven** :
 //! des `ContentId` du registre, jamais un type en dur — le système ne sait
 //! pas ce qu'il casse ni ce qu'il pose.
 //!
@@ -35,6 +37,7 @@ use voxel_core::ticks;
 use voxel_core::physics::Aabb;
 use voxel_core::raycast::{raycast, RayHit};
 use voxel_core::liquids;
+use voxel_core::shape::{Cuboid, Rotation};
 use voxel_core::world::{neighbors, VoxelWorld, MAX_UPDATES_PER_TICK, TICKS_PER_SECOND};
 
 use crate::player::{CursorCaptured, Player, PLAYER_HEIGHT_M, PLAYER_WIDTH_M, PlayerCamera};
@@ -59,7 +62,8 @@ fn aim(world: &VoxelWorld, cam: &GlobalTransform) -> Option<RayHit> {
     )
 }
 
-/// Contour du voxel visé (gizmo, redessiné à chaque frame). Rien hors mode
+/// Contour du voxel visé (gizmo, redessiné à chaque frame) : ses boîtes
+/// pour un bloc à forme (#14). Rien hors mode
 /// FPS — on ne peut pas interagir — ni quand le regard ne touche rien.
 pub fn highlight_target(
     captured: Res<CursorCaptured>,
@@ -73,13 +77,15 @@ pub fn highlight_target(
     let Ok(cam) = camera.single() else { return };
     let Some(hit) = aim(&game.world, cam) else { return };
     let size_m = 1.0 / game.world.voxels_per_meter();
-    let center = (Vec3::from_array(hit.voxel.map(|v| v as f32)) + 0.5) * size_m;
-    // Un poil plus grand que le voxel : sinon les lignes se confondent avec
-    // les faces et clignotent (z-fighting).
-    gizmos.cube(
-        Transform::from_translation(center).with_scale(Vec3::splat(size_m * 1.01)),
-        Color::BLACK,
-    );
+    for [min, max] in game.world.boxes(hit.voxel, false) {
+        let (min, max) = (Vec3::from_array(min) * size_m, Vec3::from_array(max) * size_m);
+        // Un poil plus grand que la boîte : sinon les lignes se confondent
+        // avec les faces et clignotent (z-fighting).
+        gizmos.cube(
+            Transform::from_translation((min + max) / 2.0).with_scale((max - min) + size_m * 0.01),
+            Color::BLACK,
+        );
+    }
 }
 
 // Un système Bevy prend ses ressources en paramètres : 10 ici (entrée,
@@ -163,14 +169,23 @@ pub fn interact(
         hit.voxel[1] + hit.normal[1] as i64,
         hit.voxel[2] + hit.normal[2] as i64,
     ];
+    // Tourné selon le regard et le point visé sur la face (#14).
+    let world = &edit.game.world;
+    let orient = world.registry.get(held).and_then(|e| e.block()).map(|b| b.orient).unwrap_or_default();
+    let look = cam.forward().as_vec3();
+    let point_y = (cam.translation().y + look.y * hit.distance_m) * world.voxels_per_meter();
+    let rotation = Rotation::placed(orient, look.to_array(), hit.normal, point_y - hit.voxel[1] as f32 > 0.5);
     // Refuse de poser un bloc dans le volume du joueur.
     if player
         .single()
-        .is_ok_and(|p| voxel_overlaps_player(&edit.game.world, target, p.feet()))
+        .is_ok_and(|p| block_overlaps_player(world, target, held, rotation, p.feet()))
     {
         return;
     }
     if edit.set(target, held) {
+        if rotation != Rotation::IDENTITY {
+            edit.game.world.set_rotation(target, rotation);
+        }
         edit.inventory.as_deref_mut().map(Inventory::take_selected);
         let ctx = context(edit.game, holding, now, target);
         let actions = rules::actions(&edit.game.world.registry, held, Hook::Placed, ctx);
@@ -274,20 +289,23 @@ impl Edit<'_, '_, '_> {
     }
 }
 
-fn voxel_overlaps_player(
+/// Le bloc `id` posé en `voxel`, tourné de `rotation`, arrêterait-il le
+/// joueur ? Seules ses boîtes de collision comptent : une torche se pose
+/// à ses pieds.
+fn block_overlaps_player(
     world: &VoxelWorld,
     voxel: [i64; 3],
+    id: ContentId,
+    rotation: Rotation,
     player_feet: Vec3,
 ) -> bool {
     let vpm = world.voxels_per_meter();
-    let vmin = [
-        voxel[0] as f32 / vpm,
-        voxel[1] as f32 / vpm,
-        voxel[2] as f32 / vpm,
-    ];
-    let vmax = [vmin[0] + 1.0 / vpm, vmin[1] + 1.0 / vpm, vmin[2] + 1.0 / vpm];
+    let boxes = world.registry.get(id).and_then(|e| e.block()).and_then(|b| b.collision_boxes()).unwrap_or(&[Cuboid::FULL]);
     let p = Aabb::from_feet(player_feet.to_array(), PLAYER_WIDTH_M, PLAYER_HEIGHT_M);
-    (0..3).all(|a| vmin[a] < p.max[a] && vmax[a] > p.min[a])
+    boxes.iter().any(|c| {
+        let [lo, hi] = c.rotated(rotation).to_cells().map(|q| std::array::from_fn::<f32, 3, _>(|a| (voxel[a] as f32 + q[a]) / vpm));
+        (0..3).all(|a| lo[a] < p.max[a] && hi[a] > p.min[a])
+    })
 }
 
 /// Blocs qui évoluent seuls (#34), au tick fixe : tick aléatoire (`Tick`)

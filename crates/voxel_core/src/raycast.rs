@@ -49,8 +49,10 @@ pub fn raycast(world: &VoxelWorld, origin_m: [f32; 3], dir: [f32; 3], max_m: f32
         origin[1].floor() as i64,
         origin[2].floor() as i64,
     ];
-    if world.is_solid(voxel) {
-        return Some(RayHit { voxel, normal: [0; 3], distance_m: 0.0 });
+    match shape_hit(world, voxel, origin, dir) {
+        Some(Shape::Cube) => return Some(RayHit { voxel, normal: [0; 3], distance_m: 0.0 }),
+        Some(Shape::Hit(t, normal)) if t <= max_t => return Some(RayHit { voxel, normal, distance_m: t / vpm }),
+        _ => {}
     }
 
     // Pour chaque axe : le sens de traversée (step), la distance t jusqu'à
@@ -84,12 +86,65 @@ pub fn raycast(world: &VoxelWorld, origin_m: [f32; 3], dir: [f32; 3], max_m: f32
         voxel[axis] += step[axis];
         t_max[axis] += t_delta[axis];
 
-        if world.is_solid(voxel) {
-            let mut normal = [0i32; 3];
-            normal[axis] = -step[axis] as i32; // on entre par la face opposée au pas
-            return Some(RayHit { voxel, normal, distance_m: t / vpm });
+        match shape_hit(world, voxel, origin, dir) {
+            Some(Shape::Cube) => {
+                let mut normal = [0i32; 3];
+                normal[axis] = -step[axis] as i32; // on entre par la face opposée au pas
+                return Some(RayHit { voxel, normal, distance_m: t / vpm });
+            }
+            Some(Shape::Hit(t, normal)) if t <= max_t => return Some(RayHit { voxel, normal, distance_m: t / vpm }),
+            // Un bloc à forme laisse passer le rayon à côté de ses boîtes.
+            _ => {}
         }
     }
+}
+
+enum Shape {
+    /// La case entière : le DDA sait déjà par où il entre.
+    Cube,
+    /// Un bloc à forme (#14) touché à `t` (en voxels), par la face `normal`
+    /// d'une de ses boîtes ; normale nulle si le rayon part de dedans.
+    Hit(f32, [i32; 3]),
+}
+
+/// Ce que le rayon touche dans le voxel `v` : `None` s'il n'y a rien à
+/// viser, ou s'il passe à côté des boîtes. Les boîtes visées sont la forme,
+/// pas la collision : une torche qu'on traverse se casse quand même.
+fn shape_hit(world: &VoxelWorld, v: [i64; 3], origin: [f32; 3], dir: [f32; 3]) -> Option<Shape> {
+    let boxes = world.boxes(v, false);
+    let cell = [v.map(|c| c as f32), v.map(|c| c as f32 + 1.0)];
+    if boxes.is_empty() || boxes == [cell] {
+        return (!boxes.is_empty()).then_some(Shape::Cube);
+    }
+    let mut best: Option<(f32, [i32; 3])> = None;
+    for [min, max] in boxes {
+        // Méthode des dalles : le rayon est dans la boîte entre la plus
+        // tardive des entrées et la plus précoce des sorties, par axe.
+        let (mut near, mut far, mut normal) = (f32::NEG_INFINITY, f32::INFINITY, [0; 3]);
+        for a in 0..3 {
+            if dir[a] == 0.0 {
+                if origin[a] < min[a] || origin[a] > max[a] {
+                    near = f32::INFINITY;
+                }
+                continue;
+            }
+            let (t1, t2) = ((min[a] - origin[a]) / dir[a], (max[a] - origin[a]) / dir[a]);
+            if t1.min(t2) > near {
+                near = t1.min(t2);
+                normal = [0; 3];
+                normal[a] = if dir[a] > 0.0 { -1 } else { 1 };
+            }
+            far = far.min(t1.max(t2));
+        }
+        if near > far || far < 0.0 {
+            continue;
+        }
+        let hit = if near < 0.0 { (0.0, [0; 3]) } else { (near, normal) };
+        if best.is_none_or(|b| hit.0 < b.0) {
+            best = Some(hit);
+        }
+    }
+    best.map(|(t, n)| Shape::Hit(t, n))
 }
 
 #[cfg(test)]

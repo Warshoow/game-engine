@@ -17,6 +17,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::rules::Rule;
+use crate::shape::{Cuboid, Orient, MAX_BOXES};
 use crate::texgen::{self, GeneratedTexture};
 
 /// ID entier stable d'une entrée du registre.
@@ -87,6 +88,23 @@ pub struct BlockData {
     /// Ce qui assombrit l'eau avec la profondeur.
     #[serde(default)]
     pub light_loss: f32,
+    /// Forme (#14, §3.1) : boîtes en seizièmes de case. Absent : le cube.
+    #[serde(default)]
+    pub shape: Option<Vec<Cuboid>>,
+    /// Ce qui arrête le joueur et les items ; absent : la forme. `[]` : on
+    /// le traverse (torche).
+    #[serde(default)]
+    pub collision: Option<Vec<Cuboid>>,
+    /// Comment il se tourne à la pose (#14).
+    #[serde(default)]
+    pub orient: Orient,
+}
+
+impl BlockData {
+    /// Les boîtes qui arrêtent ce qui bouge ; `None` : la case entière.
+    pub fn collision_boxes(&self) -> Option<&[Cuboid]> {
+        self.collision.as_deref().or(self.shape.as_deref())
+    }
 }
 
 /// Portée maximale d'un bloc lumineux, en mètres : borne le calcul de
@@ -201,6 +219,9 @@ impl ContentEntry {
                 liquid: None,
                 emits_light: None,
                 light_loss: 0.0,
+                shape: None,
+                collision: None,
+                orient: Orient::Fixed,
             }),
             recipes: Vec::new(),
         }
@@ -478,6 +499,18 @@ fn invalid_value(b: &BlockData) -> Option<String> {
     }
     if !(0.0..=16.0).contains(&b.light_loss) {
         return Some(format!("light_loss {} hors de [0, 16]", b.light_loss));
+    }
+    for (name, boxes, min) in [("shape", &b.shape, 1), ("collision", &b.collision, 0)] {
+        let Some(boxes) = boxes else { continue };
+        if !(min..=MAX_BOXES).contains(&boxes.len()) {
+            return Some(format!("{name} : de {min} à {MAX_BOXES} boîtes, pas {}", boxes.len()));
+        }
+        if let Some(c) = boxes.iter().find(|c| c.invalid()) {
+            return Some(format!("{name} : boîte {c:?} vide ou hors de [0, 16]"));
+        }
+    }
+    if b.shape.is_some() && !b.solid {
+        return Some("shape : un bloc à forme est solide (`collision: []` pour le traverser)".into());
     }
     let l = b.liquid?;
     if b.solid {

@@ -224,7 +224,8 @@ quand une mesure la réclame.
    #30 codé le 2026-10-30 (heure de l'horloge du monde, ciel par shader à
    nous, `sky.ron` ; options reportées dans #57), à voir sur la 4060.
 7. **#14 / #15 → #32 → #33** — formes non cubiques et modèles, puis mobs,
-   puis vie et survie. #33 est un choix de jeu : du contenu que `core.ron`
+   puis vie et survie. #14 fait le 2026-10-30 (boîtes en seizièmes de
+   case, rotation dans une table creuse ; options écartées dans #58). #33 est un choix de jeu : du contenu que `core.ron`
    active, pas une règle du moteur.
 
 **Quand le besoin apparaît, pas dans l'ordre :**
