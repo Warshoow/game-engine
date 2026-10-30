@@ -1,6 +1,6 @@
 # Moteur Voxel — Design du Socle
 
-> **Statut :** v0.1 — v0 figé pour le prototypage ; 2026-10-07 : recettes (§3.1), cycle de vie des block-entities (§3.3), forme du comportement (§3.6) ; 2026-10-08 : apparence (§3.1), persistance (§3.10), principe « mécanismes, pas règles de jeu » (§2), textures calculées (§3.1), génération en jeu (§3.6), réglages du worldgen dans la save (§3.10) ; 2026-10-21 : blocs à trous (§3.1) ; 2026-10-22 : blocs qui évoluent seuls (§3.6, §3.10) ; 2026-10-25 : liquides et semi-transparent (§3.1, §3.2, §3.6, §3.10), ombrage des coins (§3.8).
+> **Statut :** v0.1 — v0 figé pour le prototypage ; 2026-10-07 : recettes (§3.1), cycle de vie des block-entities (§3.3), forme du comportement (§3.6) ; 2026-10-08 : apparence (§3.1), persistance (§3.10), principe « mécanismes, pas règles de jeu » (§2), textures calculées (§3.1), génération en jeu (§3.6), réglages du worldgen dans la save (§3.10) ; 2026-10-21 : blocs à trous (§3.1) ; 2026-10-22 : blocs qui évoluent seuls (§3.6, §3.10) ; 2026-10-25 : liquides et semi-transparent (§3.1, §3.2, §3.6, §3.10), ombrage des coins (§3.8) ; 2026-10-30 : formes de blocs, modèles d'entités (§3.1), comportement des mobs (§3.6).
 > **Nature :** ceci est un `intent/` — la source de vérité du socle. On lit **avant** d'écrire. Toute décision qui contredit ce doc doit d'abord **modifier ce doc** (avec sa justification), pas le contourner en douce dans le code.
 > **Portée :** ce document décrit un **socle**, pas un jeu. Aucun système de gameplay (survie, magie, armes, quêtes…) n'est spécifié ici. Le socle est le substrat sur lequel ces systèmes se branchent sans toucher au core.
 
@@ -169,6 +169,14 @@ Le hasard des règles (condition `Chance`) dérive de la seed, du numéro de tic
 
 **Mises à jour de voisinage** (ajout 2026-10-25, #28). Quand un voxel change, lui et ses six voisins sont programmés pour être réexaminés : un liquide recalcule son état, un bloc à règle `NeighborChanged` la déclenche (avec la condition `Touching(bloc)` : lave + eau → pierre s'écrit en donnée). Un liquide programme ses voisins après son `delay` ; le reste au tick suivant. Rien n'est réexaminé là où rien ne change : un océan immobile ne coûte rien. Un nombre maximum de réexamens par tick borne les réactions en chaîne : le surplus attend le tick suivant, dans un ordre fixe (échéance puis position), donc toujours déterministe.
 
+**Comportement des mobs** (ajout 2026-10-30, #32). Une entrée `EntityType` déclare **`behaviors`** : une liste ordonnée de comportements pris dans un vocabulaire append-only (comme les hooks, conditions et effets), réglés en mètres et en secondes. Départ : `Wander` (errer), `Follow` (suivre le joueur qui tient un item), `LookAt` (regarder le joueur). À chaque tick, le premier comportement applicable de la liste gagne ; celui en cours continue tant qu'il reste valable (sinon deux comportements proches s'échangent la main et le mob tremble). Le moteur code chaque comportement une fois, le contenu choisit et règle.
+- **Déplacement** : le même pas de physique que le joueur (gravité, liquides, marches), au tick fixe. Pas de collision entre mobs ni avec le joueur : ils peuvent se chevaucher.
+- **Chemin** : A* (recherche de chemin case par case, vers la cible) borné : nœuds plafonnés par mob et par tick, plafond global, mobs servis tour à tour dans l'ordre de leur id ; recalcul seulement si la cible a bougé ou si le chemin est bloqué. Une case est praticable avec le même test que la physique (largeur du corps, marche), coûts en entiers. L'algorithme reste derrière une seule fonction « demande de chemin » : un autre (flow field pour des hordes) pourra le remplacer.
+- **Déterminisme** (§3.9) : chaque mob a un id stable, sauvé ; son hasard dérive de la seed, du tick, de son id et de l'usage ; les mobs sont traités dans l'ordre de leur id. L'état d'un comportement (cible, chemin) n'est pas sauvé : il repart au chargement.
+- **Animation** (§3.1) : `animation`, une liste de mouvements append-only, à l'affichage seulement. Départ : `Swing` (une partie se balance selon la distance parcourue, avec une phase pour les pattes opposées) et `Look` (une partie se tourne vers la cible du comportement, angle borné).
+
+Apparition, disparition et rangement des mobs par chunk : #60. Options écartées ou reportées (arbres de comportement, utility AI, navmesh, flow field, collision entre mobs, simulation en entiers…) : #61.
+
 **La limite assumée :** un contenu, même scripté, ne fait que combiner ce que le moteur expose. Il invente de la logique, pas un nouveau rendu, un nouveau type de physique ou un nouveau genre de fenêtre. La surface du vocabulaire borne la créativité ; elle s'élargit quand un contenu concret en a besoin (§4).
 
 **Coût de changement :** Day-1 pour le principe (comportement = data/script) et pour le contrat append-only du vocabulaire. Le runtime concret et la surface exacte du vocabulaire sont mous.
@@ -224,7 +232,7 @@ Contenu logique d'une save :
 1. **Données voxel** (chunks : palette + tableau dense).
 2. **Snapshot du registre** (world-owned, append-only — §3.1).
 3. **Block-entities** (canal creux — §3.3).
-4. **Entités** (état ECS persistant).
+4. **Entités** (état ECS persistant). Aujourd'hui les mobs posés (`mobs.ron` : id stable, entrée, pieds, cap) et les items au sol ; rangés par chunk avec #60.
 5. **Métadonnées de monde** : seed, `voxels_per_meter`, taille de monde, version de format.
 6. **Réglages du worldgen** (ajout 2026-10-08, #27) : relief, biomes, minerais, features, en donnée (`assets/content/worldgen.ron`). Copiés dans la save à la création du monde, puis la copie de la save prime : un chunk jamais modifié n'est pas sauvé mais régénéré, et il doit se régénérer à l'identique — comme la seed. Changer le worldgen du jeu ne touche que les mondes neufs.
 7. **Horloge du monde et minuteurs** (ajout 2026-10-22, #34) : le numéro du tick fixe courant, et pour chaque chunk ses minuteurs en attente (position, échéance en ticks, règle). Le tick fixe vaut 1/64 s, constante du moteur : changer ce pas change le sens des échéances sauvées.
@@ -390,6 +398,7 @@ Ces non-goals sont *prévus par le data model* (§3) mais *pas implémentés* da
 | Apparence | Textures nommées par l'entrée, pixels gardés dans le registre (donc dans la save), 1 texture = 1 m | Figé (2026-10-08) | Day-1 |
 | Forme et orientation | `shape` (boîtes en seizièmes de case) et `collision` dans l'entrée ; `orient` à la pose ; rotation (24) dans une table creuse comme les niveaux d'eau (#14) | Figé (2026-10-30) | Day-1 |
 | Modèles d'entités | `model` de l'entrée : parties avec parent et pivot, boîtes en seizièmes de mètre texturées comme les blocs ; collision en mètres à part ; lumière de la grille ; animation par mouvements en donnée avec #32 (#15) | Figé (2026-10-30) | Day-1 |
+| Comportement des mobs | `behaviors` de l'entrée : liste ordonnée d'un vocabulaire append-only, le premier applicable gagne ; physique du joueur ; A* borné par mob et par tick ; id stable par mob pour le hasard et l'ordre (#32) | Figé (2026-10-30) | Day-1 (vocabulaire) |
 | Block-entities (vie) | État initial déclaré par l'entrée ; créé à la pose, supprimé à la casse | Figé (2026-10-07) | Day-1 |
 | Forme du comportement | Propriétés → règles déclencheur/condition/effet → script ; garde-fous script | Figé (2026-10-07) | Day-1 (forme) |
 | Vocabulaire | Append-only ; save à élément inconnu refusée | Figé (2026-10-07) | Day-1 |
