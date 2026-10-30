@@ -220,14 +220,19 @@ quand une mesure la réclame.
    éclairage. #7 fait le 2026-10-25 (ombrage par sommet, options écartées
    dans #50) ; #23 fait le 2026-10-26 (propagation ciel + blocs, options
    écartées dans #52) ; #51 codé le 2026-10-30 (ombres, brouillards,
-   bloom ; options reportées dans #56), à voir et mesurer sur la 4060 ;
+   bloom ; options reportées dans #56), à voir et mesurer sur la 4060 (#64) ;
    #30 codé le 2026-10-30 (heure de l'horloge du monde, ciel par shader à
-   nous, `sky.ron` ; options reportées dans #57), à voir sur la 4060.
+   nous, `sky.ron` ; options reportées dans #57), à voir sur la 4060 (#64).
 7. **#14 / #15 → #32 → #33** — formes non cubiques et modèles, puis mobs,
    puis vie et survie. #14 fait le 2026-10-30 (boîtes en seizièmes de
    case, rotation dans une table creuse ; options écartées dans #58). #15
-   fait le même jour (modèles en parties de boîtes ; options dans #59). #33 est un choix de jeu : du contenu que `core.ron`
-   active, pas une règle du moteur.
+   fait le même jour (modèles en parties de boîtes ; options dans #59).
+   #32 fait le même jour (comportements en donnée, A* par tranches,
+   animation ; validé sous Windows ; options dans #61), puis #60
+   (apparition et disparition en donnée, gel au-delà de 128 m, élevage
+   par `Follow { keep }` ; options dans #62 ; essai en jeu : #63). Reste
+   #33, un choix de jeu : du contenu que `core.ron` active, pas une règle
+   du moteur.
 
 **Quand le besoin apparaît, pas dans l'ordre :**
 - #41 profilage : dès que le build Windows saccade ;
