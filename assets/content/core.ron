@@ -54,7 +54,7 @@
     // Une bûche posée se couche contre la face visée (#14) ; le worldgen
     // la pose debout.
     (identifier: "core:log", kind: Block((solid: true, color: (0.40, 0.28, 0.15), orient: Face,
-        texture: Some((side: "log_side", top: Some("log_top"))),
+        texture: Some((side: "log_side", top: Some("log_top"), bottom: Some("log_top"))),
         generated_textures: [
             (name: "log_side", pattern: Cracks, color: (0.40, 0.28, 0.15), noise: 0.25, seed: 1),
             (name: "log_top", pattern: Frame, color: (0.62, 0.48, 0.30), noise: 0.15, seed: 2),

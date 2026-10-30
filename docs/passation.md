@@ -133,8 +133,10 @@ WSL le rendu est logiciel et rame — normal.
   **après** (`set_rotation`), comme le niveau d'un liquide. Physique et
   visée lisent `VoxelWorld::boxes` (`collision` pour la physique, `shape`
   pour la visée : une torche se casse sans arrêter le joueur). Le mesher
-  émet les blocs à forme hors du greedy (`Region::mesh_shapes`), lumière
-  de leur propre case, sans ombrage ; ils n'arrêtent pas la lumière. Le
+  émet les blocs à forme **et les cubes tournés** (bûche couchée) hors du
+  greedy (`Region::mesh_shapes`), lumière de leur propre case, sans
+  ombrage, texture prise sur le modèle avant rotation ; les blocs à forme
+  n'arrêtent pas la lumière. Le
   joueur au sol monte seul 0,6 m (`move_and_step`).
 - **Liquides** (#28) : le voxel reste l'ID du liquide, son niveau est dans
   `VoxelWorld::levels` (absent = source, `Some(0)` = chute, sinon distance
@@ -563,6 +565,9 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   Pas fait : deux dalles qui fusionnent en un bloc. Aucun effet de règle
   ne consomme l'objet tenu, la fusion dupliquerait des planches (#58).
   Formes en seizièmes de case validées par Warshow (figé).
+  Ensuite : la texture tourne avec le bloc, et correction d'une bûche
+  couchée qui restait dessinée debout (le greedy ignorait sa rotation ;
+  un cube tourné passe maintenant par le chemin des formes).
 - Commits jusqu'à `3423ab0` (plus celui de cette passation), à pousser
   par Warshow. `3423ab0` porte `Closes #14` : pousser après l'essai en
   jeu, ou rouvrir #14 si l'essai montre un souci.

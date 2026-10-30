@@ -65,7 +65,7 @@ use std::collections::HashMap;
 use crate::chunk::{Chunk, ChunkPos};
 use crate::liquids;
 use crate::registry::{Alpha, ContentId, Registry};
-use crate::shape::{Cuboid, Rotation, CELL};
+use crate::shape::{Cuboid, Orient, Rotation, CELL};
 use crate::world::VoxelWorld;
 
 /// Hauteur d'une face pleine dans la clé de fusion (sur 255).
@@ -232,7 +232,7 @@ impl Region {
                     let p = [x, y, z];
                     let Some(block) = region.block(p) else { continue };
                     let (shaped, liquid) = (!block.shape.is_empty(), block.liquid.then(|| world.liquid(block.id)).flatten());
-                    let r = if shaped { world.rotation(at(p)) } else { Rotation::IDENTITY };
+                    let r = if shaped || block.turns { world.rotation(at(p)) } else { Rotation::IDENTITY };
                     if r != Rotation::IDENTITY {
                         let i = region.index(p);
                         region.rotations.insert(i, r);
@@ -279,19 +279,22 @@ impl Region {
         neighbor.opaque && neighbor.shape.iter().any(|c| c.rotated(r).covers(toward))
     }
 
-    /// Les faces des blocs à forme (#14) de la passe `blend` : chaque boîte,
-    /// tournée, sans fusion. Une face au bord de la case disparaît derrière
+    /// Les faces des blocs à forme (#14) et des cubes tournés de la passe
+    /// `blend` : chaque boîte, tournée, sans fusion. Une face au bord de la case disparaît derrière
     /// un voisin qui la cache. Lumière de la case elle-même, sans ombrage.
     // shortcut: pas de greedy, 2 quads par dalle de sol ; fusionner si un
-    // sol de dalles se voit au profilage (#58).
+    // sol de dalles se voit au profilage (#58). Un cube tourné (bûche
+    // couchée) perd aussi l'ombrage de ses coins.
     fn mesh_shapes(&self, mesh: &mut MeshData, voxel_size_m: f32, blend: bool) {
         let full = f32::from(self.full);
         for_each_local(self.size, |p| {
-            let Some(block) = self.block(p).filter(|b| !b.shape.is_empty() && b.blend == blend) else { return };
+            let turned = self.rotations.contains_key(&self.index(p));
+            let Some(block) = self.block(p).filter(|b| (turned || !b.shape.is_empty()) && b.blend == blend) else { return };
             let r = self.rotation(p);
+            let boxes = if block.shape.is_empty() { &[Cuboid::FULL][..] } else { &block.shape };
             let [sky, lit] = self.lights[self.index(p)];
             let lights = [f32::from(sky) / full, if block.emits { 1.0 } else { f32::from(lit) / full }];
-            for c in &block.shape {
+            for c in boxes {
                 let Cuboid(lo, hi) = c.rotated(r);
                 for face in &FACES {
                     let dir = face.neighbor;
@@ -301,19 +304,18 @@ impl Region {
                     if on_side && self.block(q).is_some_and(|o| self.hides_at(o, q, block, dir.map(|c| -c))) {
                         continue;
                     }
-                    // Dessus, dessous ou côté : choisi sur le modèle avant rotation.
-                    let layer = match r.model_dir(dir) {
-                        [0, 1, 0] => block.layers[1],
-                        [0, -1, 0] => block.layers[2],
-                        _ => block.layers[0],
-                    };
+                    // La texture suit le modèle : couche et coordonnées prises
+                    // sur le modèle avant rotation, puis replacées dans la case.
+                    let model_normal = r.model_dir(dir).map(|c| c as f32);
+                    let layer = face_layer(block, model_normal);
                     let base = mesh.positions.len() as u32;
                     for corner in face.corners {
-                        let pos: [f32; 3] = std::array::from_fn(|a| {
-                            let sixteenths = if corner[a] == 1 { hi[a] } else { lo[a] };
-                            (p[a] as f32 + f32::from(sixteenths) / f32::from(CELL)) * voxel_size_m
-                        });
-                        push_vertex(mesh, pos, face.normal, block, layer, 1.0, lights);
+                        let sixteenths: [u8; 3] = std::array::from_fn(|a| if corner[a] == 1 { hi[a] } else { lo[a] });
+                        let model = r.model_dir(sixteenths.map(|c| 2 * i32::from(c) - i32::from(CELL)));
+                        let at_m = |s: [f32; 3]| std::array::from_fn(|a| (p[a] as f32 + s[a] / f32::from(CELL)) * voxel_size_m);
+                        let pos = at_m(sixteenths.map(f32::from));
+                        let uv = face_uv(at_m(model.map(|c| (c + i32::from(CELL)) as f32 / 2.0)), model_normal);
+                        push_vertex(mesh, pos, face.normal, block, layer, uv, 1.0, lights);
                     }
                     push_quad_indices(mesh, base, [3; 4]);
                 }
@@ -346,7 +348,7 @@ impl Region {
         let visible_face = |p: [i32; 3], q: [i32; 3], axes: [usize; 3]| -> Option<Key> {
             let idx = self.cells[self.index(p)];
             let block = &resolved[idx as usize];
-            if !block.drawn || block.blend != blend || !block.shape.is_empty() {
+            if !block.drawn || block.blend != blend || !block.shape.is_empty() || self.rotations.contains_key(&self.index(p)) {
                 return None;
             }
             let height = if block.liquid { height_at(p, block.id) } else { FULL };
@@ -530,7 +532,7 @@ fn emit_rect(mesh: &mut MeshData, quad: &SliceQuad, normal: [f32; 3], block: &Re
             y += lift;
         }
         let pos = [p[0] as f32 * scale, y * scale, p[2] as f32 * scale];
-        push_vertex(mesh, pos, normal, block, face_layer(block, normal), AO_LIGHT[shades[i] as usize], light);
+        push_vertex(mesh, pos, normal, block, face_layer(block, normal), face_uv(pos, normal), AO_LIGHT[shades[i] as usize], light);
     }
     push_quad_indices(mesh, base, shades);
 }
@@ -623,19 +625,23 @@ fn face_layer(block: &Resolved, normal: [f32; 3]) -> u32 {
     }
 }
 
-/// Un sommet : position, normale, couleur, et sa texture (couche +
-/// coordonnées en mètres, prises dans le plan de la face).
-fn push_vertex(mesh: &mut MeshData, pos: [f32; 3], normal: [f32; 3], block: &Resolved, layer: u32, light: f32, sky_block: [f32; 2]) {
-    let [x, y, z] = pos;
-    // Sur les côtés, v descend avec y : l'image est à l'endroit (le haut du
-    // PNG en haut du bloc).
-    let uv = if normal[1] != 0.0 {
+/// Coordonnées de texture en mètres, prises dans le plan de la face. Sur
+/// les côtés, v descend avec y : l'image est à l'endroit (le haut du PNG en
+/// haut du bloc).
+fn face_uv([x, y, z]: [f32; 3], normal: [f32; 3]) -> [f32; 2] {
+    if normal[1] != 0.0 {
         [x, z]
     } else if normal[0] != 0.0 {
         [z, -y]
     } else {
         [x, -y]
-    };
+    }
+}
+
+/// Un sommet : position, normale, couleur, et sa texture (couche +
+/// coordonnées).
+#[allow(clippy::too_many_arguments)]
+fn push_vertex(mesh: &mut MeshData, pos: [f32; 3], normal: [f32; 3], block: &Resolved, layer: u32, uv: [f32; 2], light: f32, sky_block: [f32; 2]) {
     mesh.positions.push(pos);
     mesh.normals.push(normal);
     let [r, g, b, a] = block.color;
@@ -664,6 +670,8 @@ struct Resolved {
     layers: [u32; 3],
     /// Boîtes d'un bloc à forme (#14) ; vide : le cube.
     shape: Vec<Cuboid>,
+    /// Peut être tourné à la pose (`orient`).
+    turns: bool,
 }
 
 impl Resolved {
@@ -692,6 +700,7 @@ fn resolve(registry: &Registry, id: ContentId) -> Resolved {
             color: [1.0, 0.0, 1.0, 1.0],
             layers: [NO_TEXTURE; 3],
             shape: Vec::new(),
+            turns: false,
         };
     };
     // Texture absente ou non chargée : couleur seule.
@@ -719,6 +728,7 @@ fn resolve(registry: &Registry, id: ContentId) -> Resolved {
         color,
         layers,
         shape: b.shape.clone().unwrap_or_default(),
+        turns: b.orient != Orient::Fixed,
     }
 }
 
@@ -810,7 +820,7 @@ fn emit_quad(mesh: &mut MeshData, voxel: [u32; 3], face: &Face, block: &Resolved
             (voxel[1] + corner[1]) as f32 * scale,
             (voxel[2] + corner[2]) as f32 * scale,
         ];
-        push_vertex(mesh, pos, face.normal, block, face_layer(block, face.normal), AO_LIGHT[shade as usize], [1.0, 0.0]); // l'oracle ignore la lumière
+        push_vertex(mesh, pos, face.normal, block, face_layer(block, face.normal), face_uv(pos, face.normal), AO_LIGHT[shade as usize], [1.0, 0.0]); // l'oracle ignore la lumière
     }
     push_quad_indices(mesh, base, shades);
 }

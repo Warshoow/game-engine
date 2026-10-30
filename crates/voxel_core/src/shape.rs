@@ -71,9 +71,6 @@ pub enum Orient {
     Face,
 }
 
-/// Dessus possibles, dans l'ordre des rotations : `index / 4`.
-const UPS: [[i32; 3]; 6] = [[0, 1, 0], [0, -1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]];
-
 /// Une des 24 rotations du cube : `index = dessus × 4 + quart de tour`. Le
 /// quart de tour (autour de +Y) se fait d'abord, puis +Y va sur le dessus.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -105,7 +102,8 @@ impl Rotation {
             2 => [-x, y, -z],
             _ => [-z, y, x],
         };
-        // Puis +Y vers le dessus (une rotation, jamais un miroir).
+        // Puis +Y vers le dessus, dans l'ordre +Y, -Y, +X, -X, +Z, -Z
+        // (une rotation, jamais un miroir).
         match self.0 / 4 {
             0 => [x, y, z],
             1 => [x, -y, -z],
@@ -116,9 +114,13 @@ impl Rotation {
         }
     }
 
-    /// La direction du modèle qui se retrouve vers `world` une fois tourné.
+    /// Le vecteur du modèle qui devient `world` une fois tourné (la rotation
+    /// inverse : sa matrice est la transposée).
     pub fn model_dir(self, world: [i32; 3]) -> [i32; 3] {
-        UPS.into_iter().find(|&d| self.apply(d) == world).expect("une rotation est une bijection")
+        [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map(|e| {
+            let a = self.apply(e);
+            a[0] * world[0] + a[1] * world[1] + a[2] * world[2]
+        })
     }
 
     /// La rotation qui envoie +Y sur `up` et +Z sur `front`.
@@ -200,6 +202,7 @@ mod tests {
         let r = Rotation::placed(Orient::Face, [0.0, 0.0, 1.0], [0, 0, -1], false);
         assert_eq!(r.apply([0, 1, 0]), [0, 0, -1]);
         assert_eq!(r.model_dir([0, 0, -1]), [0, 1, 0]);
+        assert!(Rotation::all().all(|r| r.model_dir(r.apply([1, -2, 3])) == [1, -2, 3]));
         assert_eq!(Rotation::placed(Orient::Fixed, [1.0, 0.0, 0.0], [0, -1, 0], true), Rotation::IDENTITY);
     }
 }

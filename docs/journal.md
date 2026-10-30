@@ -1203,6 +1203,16 @@ coupés, avec un worldgen modifié hors du dépôt (colonnes d'escaliers et
 boules de torches dans le désert) : formes et torches allumées rendent.
 
 **Limites.** Pas de fusion des faces des blocs à forme (2 quads par dalle
-de sol). Une dalle dans l'eau y fait un trou. La texture ne tourne pas
-avec le bloc. La fusion de deux dalles attend un effet qui consomme
-l'objet tenu (#58).
+de sol). Une dalle dans l'eau y fait un trou. La fusion de deux dalles
+attend un effet qui consomme l'objet tenu (#58).
+
+**Suite, même jour : la texture tourne avec le bloc.** En la faisant, un
+bug de #14 est apparu : une bûche couchée restait dessinée debout. Sa
+rotation était sauvée, mais le mesher ne la lisait que pour les blocs à
+forme ; un cube plein passe par le greedy, qui ne connaît pas les
+rotations. Un cube tourné passe maintenant par le chemin des formes (une
+boîte pleine), sans fusion ni ombrage des coins ; un cube non tourné
+(les arbres du worldgen) reste dans le greedy. Les coordonnées de
+texture se prennent sur le modèle avant rotation : les fibres d'une
+bûche couchée suivent son axe. La bûche reçoit `bottom` : couchée, ses
+deux bouts se voient.
