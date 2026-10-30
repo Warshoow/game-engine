@@ -488,7 +488,7 @@ fn update_debug_text(
         .unwrap_or(0.0);
     let (h, min) = (hour.0 as u32, (hour.0.fract() * 60.0) as u32);
     text.0 = format!(
-        "{fps:.0} FPS · {} chunks · {h:02} h {min:02} (F5 : +1 h)\n{}\n{}",
+        "{fps:.0} FPS · {} chunks · {h:02} h {min:02} (F5 : +1 h, non sauvé)\n{}\n{}",
         chunks.iter().count(),
         effects.summary(),
         reload.0
