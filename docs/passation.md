@@ -539,6 +539,8 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   Bevy, pourrait le faire luire), couleurs et forces de `sky.ron`
   (réglées à l'estime ; une retouche s'applique au monde existant).
   Captures WSL : la souris de Warshow sur la fenêtre tourne la caméra.
+- Commits jusqu'à `2407296` (plus celui de cette passation), à pousser
+  par Warshow.
 
 ## Prochaines étapes
 
