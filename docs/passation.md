@@ -562,6 +562,10 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   marche sur dalles et escaliers, visée d'une torche.
   Pas fait : deux dalles qui fusionnent en un bloc. Aucun effet de règle
   ne consomme l'objet tenu, la fusion dupliquerait des planches (#58).
+  Formes en seizièmes de case validées par Warshow (figé).
+- Commits jusqu'à `3423ab0` (plus celui de cette passation), à pousser
+  par Warshow. `3423ab0` porte `Closes #14` : pousser après l'essai en
+  jeu, ou rouvrir #14 si l'essai montre un souci.
 
 ## Prochaines étapes
 
@@ -591,7 +595,11 @@ de `remesh_dirty` → **#53**, fait le 2026-10-29, à re-mesurer sur la
 choisi avec Warshow le 2026-10-25 : **#51 effets de rendu** (codé le
 2026-10-30, à voir et mesurer sur la 4060 ; options reportées : #56),
 puis #30 jour/nuit (codé le 2026-10-30, à voir sur la 4060 ; options
-reportées : #57). Ce qui a été reporté (#18, #27, #28) est listé
+reportées : #57). Puis #14 blocs à forme (fait le 2026-10-30, à essayer
+en jeu ; options écartées : #58). **Suite** : #15 modèles d'entités
+(exploration d'abord ; #15 recommande une petite grille de voxels, #14 a
+pris des boîtes : choisir entre les deux pour les modèles), puis #32 mobs.
+Ce qui a été reporté (#18, #27, #28) est listé
 dans `docs/jalons.md`, « Plus tard », et dans #49.
 Principe (design doc §2) : le moteur fournit des mécanismes, `core.ron`
 n'est qu'un jeu d'exemple. Mipmaps si les textures scintillent au loin.

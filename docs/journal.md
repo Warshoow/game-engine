@@ -1182,6 +1182,10 @@ cases dès 2 vox/m. La forme suit la case comme le cube la suit : à
 2 vox/m, une dalle est une demi-brique d'un Lego plus fin. Ce qui est du
 gameplay reste en mètres (hauteur de marche, portée, lumière).
 
+Warshow a validé ce point après coup (il est figé) : la nuance d'un monde
+à une autre résolution ne se pose pas tant que tous les mondes sont à
+1 vox/m.
+
 **Pourquoi les 24 rotations plutôt que le sens.** Un octet dans les deux
 cas. Les 24 se composent : tourner une construction entière (plus tard)
 envoie chaque rotation sur une autre, sans cas propre à « escalier » ou
