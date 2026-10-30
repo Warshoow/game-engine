@@ -202,6 +202,7 @@ fn main() {
         .init_resource::<content::ReloadStatus>()
         .init_resource::<content::Incoming>()
         .init_resource::<generate::Generation>()
+        .init_resource::<entities::MobIds>()
         .insert_resource(Time::<Fixed>::from_hz(f64::from(TICKS_PER_SECOND)))
         .add_systems(
             Startup,
@@ -217,8 +218,7 @@ fn main() {
                 items::add_item_visuals,
                 items::place_items,
                 items::show_stored.after(interact::interact),
-                entities::add_mob_models,
-                entities::light_grid_lit,
+                (entities::add_mob_models, entities::show_mobs, entities::light_grid_lit).chain(),
                 inventory::scroll_selection,
                 // Raccourcis coupés pendant la saisie d'un texte.
                 (
@@ -246,7 +246,11 @@ fn main() {
         )
         .add_systems(
             FixedUpdate,
-            (items::simulate_items.after(player::physics_step), interact::tick_blocks),
+            (
+                items::simulate_items.after(player::physics_step),
+                entities::simulate_mobs.after(player::physics_step),
+                interact::tick_blocks,
+            ),
         );
     // Diagnostics toutes les 5 s dans la console : images, entités, CPU et
     // mémoire, temps GPU par passe (DX12 et Vulkan seulement).

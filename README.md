@@ -166,7 +166,7 @@ src/                  Bevy binary: plugs the core into the ECS
   interact.rs         place/break/use, applies block rules, block ticks and timers
   streaming.rs        loading/unloading chunks (read from the save, else generated)
   items.rs            items on the ground (block items drawn as their block), items shown on a workbench
-  entities.rs         placed entities: model parts, light from the grid (MeshTag)
+  entities.rs         mobs: simulated in FixedUpdate, model parts, animation, light from the grid (MeshTag)
   inventory.rs        inventory, hotbar, crafting menu (C), G (debug)
   content.rs          loads core.ron + textures, reloads them on R
   generate.rs         block generation window (I), Generator trait, claude CLI
@@ -181,7 +181,7 @@ crates/voxel_core/    the WHOLE voxel core: pure, no Bevy dependency
   world.rs            VoxelWorld (registry + chunks + voxel↔metre conversions, clock, timers, liquid levels, scheduled updates, rotations)
   worldgen.rs         procedural generation (trait + fBm heightmap)
   mesher.rs           greedy meshing → plain buffers
-  physics.rs          AABB collision against the grid
+  physics.rs          AABB collision against the grid, the walking body shared by player and mobs
   raycast.rs          DDA (voxel picking)
   rules.rs            block rules (pure evaluation)
   ticks.rs            random ticks: which voxels get the `Tick` hook
@@ -191,7 +191,9 @@ crates/voxel_core/    the WHOLE voxel core: pure, no Bevy dependency
   generate.rs         what is sent to the generator, validation of its answer
   sky.rs              hour from the world clock, sky and lights of the moment (sky.ron)
   shape.rs            non-cubic blocks: boxes in sixteenths of a cell, the 24 rotations
-  model.rs            entity models: parts with a pivot, boxes in sixteenths of a metre
+  model.rs            entity models: parts with a pivot, boxes in sixteenths of a metre, animation
+  mob.rs              mob behaviours (Wander, Follow, LookAt), one tick for all mobs
+  path.rs             A* over the grid's cells, run in slices across ticks
   save.rs             world folder, binary chunk format
 docs/                 in French
   jalons.md                      milestones, in order

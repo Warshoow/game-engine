@@ -1275,3 +1275,36 @@ du ciel, pas le reflet, et le plancher de 2 % multipliait aussi le
 soleil. Enfin une bûche couchée était noire, éclairée par sa propre case,
 pleine. La leçon : le chemin des formes a hérité d'hypothèses (« la case
 du bloc a de la lumière ») vraies pour une dalle, fausses pour un cube.
+
+## 2026-10-30 — Les mobs marchent (#32)
+
+**Exploration d'abord.** Comparées sur les mêmes critères : les « goals »
+de Minecraft (codés en Java), une liste de comportements en donnée, un
+arbre de comportement, l'utility AI, les règles de bloc étendues aux
+entités ; pour le chemin, A* à la Minecraft, A* borné, avancer tout droit,
+flow field, navmesh. Warshow a suivi la reco : une liste ordonnée de
+comportements dans l'entrée (le premier applicable gagne, celui en cours
+garde la main tant qu'il reste valable) et A* borné. L'apparition part
+dans #60 : c'est elle qui fait grimper le nombre de mobs, elle mérite son
+propre ticket. Tout ce qui a été cité, retenu ou non, est dans #61, pour
+y revenir (le flow field pour des hordes, par exemple).
+
+**La physique du joueur, partagée.** `Body::step` (gravité, nage,
+marches) sert au joueur et aux mobs. Et une case est praticable pour A*
+avec le même test que la physique (poser le corps en haut de la case, le
+lâcher d'une case) : sinon A* proposerait des passages que le mob ne
+peut pas suivre (dalle, plafond bas, corps plus large qu'une case).
+
+**Une mesure a changé le plan.** Une recherche de 512 cases d'un coup
+coûtait 2,4 ms (une lecture de voxel coûte ~58 ns, et une case en
+demande des dizaines). Avec la cible de 7 ms par image, impossible.
+Plutôt que d'optimiser les lectures (gain borné), la recherche avance
+maintenant par tranches : 64 cases par tick pour tous les mobs, servis
+tour à tour. Le coût par tick ne dépend plus du nombre de mobs ; une
+longue recherche arrive quelques ticks plus tard. DeepSeek l'avait
+suggéré (« A* incrémental »), c'est la mesure qui a tranché.
+
+**Déterminisme.** Chaque mob a un id stable, sauvé ; son hasard dérive de
+la seed, du tick, de son id et de l'usage ; les mobs passent dans l'ordre
+de leur id (l'ordre des requêtes Bevy n'est pas stable). Un test rejoue
+30 s de deux cochons et retrouve les mêmes positions.

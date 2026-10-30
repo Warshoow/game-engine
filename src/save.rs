@@ -12,7 +12,7 @@ use voxel_core::chunk::ChunkPos;
 use voxel_core::save::{encode_chunk, PlayerSave, Save};
 
 use crate::inventory::Inventory;
-use crate::entities::Mob;
+use crate::entities::{Mob, MobIds};
 use crate::items::{DroppedItem, ItemVisual};
 use crate::player::{Player, PlayerCamera};
 use crate::GameWorld;
@@ -117,7 +117,7 @@ pub fn save_player_and_items(
         error!("sauvegarde de l'horloge impossible : {err}");
     }
     let dropped = items.iter().map(|i| (i.content, i.feet().to_array())).collect();
-    let placed = mobs.iter().map(|m| (m.content, m.feet.to_array(), m.yaw)).collect();
+    let placed = mobs.iter().map(|m| (m.id, m.content, m.body.feet, m.yaw)).collect();
     if let Err(err) = save.0.write_mobs(&placed) {
         error!("sauvegarde des entités impossible : {err}");
     }
@@ -175,12 +175,13 @@ pub fn restore_items(mut commands: Commands, save: Option<Res<WorldSave>>) {
 }
 
 /// Refait apparaître les entités posées sauvées (#15).
-pub fn restore_mobs(mut commands: Commands, save: Option<Res<WorldSave>>) {
+pub fn restore_mobs(mut commands: Commands, mut ids: ResMut<MobIds>, save: Option<Res<WorldSave>>) {
     let Some(save) = save else { return };
     match save.0.read_mobs() {
         Ok(mobs) => {
-            for (content, feet, yaw) in mobs {
-                commands.spawn(Mob { content, feet: Vec3::from_array(feet), yaw });
+            for (id, content, feet, yaw) in mobs {
+                ids.next = ids.next.max(id + 1);
+                commands.spawn(Mob(voxel_core::mob::Mob::new(id, content, feet, yaw)));
             }
         }
         // Comme les items : illisibles, on les perd plutôt que le monde.

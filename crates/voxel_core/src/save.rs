@@ -9,7 +9,7 @@
 //! - `clock.ron` : le numéro du tick fixe courant (horloge des minuteurs) ;
 //! - `player.ron` : position, regard, inventaire ;
 //! - `items.ron` : les items au sol (entrée + position des pieds, en mètres) ;
-//! - `mobs.ron` : les entités posées (entrée, pieds en mètres, cap).
+//! - `mobs.ron` : les mobs (id, entrée, pieds en mètres, cap).
 //!
 //! Écritures atomiques (fichier temporaire puis renommage) : un arrêt en
 //! pleine écriture laisse l'ancienne version, jamais un fichier tronqué.
@@ -57,7 +57,7 @@ pub type DroppedItems = Vec<(ContentId, [f32; 3])>;
 
 /// Entités posées (#15) : entrée `EntityType`, pieds en mètres, cap en
 /// radians (autour de +Y, 0 : regarde vers +Z).
-pub type Mobs = Vec<(ContentId, [f32; 3], f32)>;
+pub type Mobs = Vec<(u64, ContentId, [f32; 3], f32)>;
 
 /// Le dossier d'un monde.
 #[derive(Debug, Clone)]
@@ -137,7 +137,14 @@ impl Save {
 
     /// Absent : aucune entité.
     pub fn read_mobs(&self) -> Result<Mobs, String> {
-        Ok(self.read_ron("mobs.ron")?.unwrap_or_default())
+        match self.read_ron::<Mobs>("mobs.ron") {
+            Ok(mobs) => Ok(mobs.unwrap_or_default()),
+            // Sauvés avant #32, sans id : numérotés dans l'ordre du fichier.
+            Err(e) => self
+                .read_ron::<Vec<(ContentId, [f32; 3], f32)>>("mobs.ron")
+                .map_err(|_| e)
+                .map(|old| old.unwrap_or_default().into_iter().zip(0..).map(|((c, f, y), id)| (id, c, f, y)).collect()),
+        }
     }
 
     pub fn write_mobs(&self, mobs: &Mobs) -> Result<(), String> {
@@ -442,9 +449,12 @@ mod tests {
         save.write_items(&items).unwrap();
         assert_eq!(save.read_items().unwrap(), items);
         assert_eq!(save.read_mobs().unwrap(), vec![]);
-        let mobs = vec![(bench, [1.5, 4.0, 2.5], 1.25)];
+        let mobs = vec![(3, bench, [1.5, 4.0, 2.5], 1.25)];
         save.write_mobs(&mobs).unwrap();
         assert_eq!(save.read_mobs().unwrap(), mobs);
+        // Un fichier d'avant #32, sans id, se relit.
+        save.write_ron("mobs.ron", &vec![(bench, [1.5, 4.0, 2.5], 1.25), (bench, [0.0; 3], 0.0)]).unwrap();
+        assert_eq!(save.read_mobs().unwrap(), vec![(0, bench, [1.5, 4.0, 2.5], 1.25), (1, bench, [0.0; 3], 0.0)]);
 
         save.write_ron("world.ron", &WorldMeta { format: 99, seed: 0, voxels_per_meter: 1.0, chunk_size: 8 }).unwrap();
         assert!(save.read_meta().is_err(), "autre version refusée");

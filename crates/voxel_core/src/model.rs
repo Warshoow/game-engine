@@ -13,6 +13,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::mesher::{push_box, MeshData, NO_TEXTURE};
+use crate::mob::Behavior;
 use crate::registry::Registry;
 use crate::texgen::GeneratedTexture;
 
@@ -27,6 +28,8 @@ pub const UNIT_M: f32 = 1.0 / 16.0;
 const MAX_COORD: i16 = 256;
 /// Côté ou hauteur de la boîte de collision au plus, en mètres.
 const MAX_SIZE_M: f32 = 16.0;
+/// Comportements, ou mouvements d'animation, au plus par entrée.
+const MAX_BEHAVIORS: usize = 16;
 
 /// Données d'une entrée `EntityType`.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -39,6 +42,33 @@ pub struct EntityData {
     /// Textures calculées par le moteur, comme pour un bloc (§3.1).
     #[serde(default)]
     pub generated_textures: Vec<GeneratedTexture>,
+    /// Ce que fait le mob, le premier applicable gagne (§3.6, #32).
+    #[serde(default)]
+    pub behaviors: Vec<Behavior>,
+    /// Les mouvements de ses parties, à l'affichage seulement (#32).
+    #[serde(default)]
+    pub animation: Vec<Motion>,
+}
+
+/// Un mouvement d'animation : il tourne une partie autour de son pivot.
+/// Angles en degrés. **Vocabulaire append-only** (§3.6).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub enum Motion {
+    /// La partie se balance d'avant en arrière quand le mob marche : `angle`
+    /// au plus, une période tous les `stride` mètres parcourus, décalée de
+    /// `phase` (de 0 à 1 : 0,5 pour la patte opposée).
+    Swing { part: String, angle: f32, stride: f32, phase: f32 },
+    /// La partie se tourne vers ce que regarde le mob, `max` au plus de
+    /// chaque côté et en hauteur.
+    Look { part: String, max: f32 },
+}
+
+impl Motion {
+    pub fn part(&self) -> &str {
+        match self {
+            Motion::Swing { part, .. } | Motion::Look { part, .. } => part,
+        }
+    }
 }
 
 /// Une partie du modèle : elle tourne d'un bloc autour de son pivot.
@@ -92,6 +122,23 @@ impl EntityData {
                 return Some(format!("partie {} : boîte {b:?} vide ou hors de ±{MAX_COORD}", part.name));
             }
         }
+        if self.behaviors.len() > MAX_BEHAVIORS || self.animation.len() > MAX_BEHAVIORS {
+            return Some(format!("au plus {MAX_BEHAVIORS} comportements et {MAX_BEHAVIORS} mouvements"));
+        }
+        if let Some(reason) = self.behaviors.iter().find_map(Behavior::invalid) {
+            return Some(reason);
+        }
+        for motion in &self.animation {
+            let fine = match motion {
+                Motion::Swing { angle, stride, phase, .. } => {
+                    (0.0..=180.0).contains(angle) && *stride > 0.0 && *stride <= 64.0 && (0.0..=1.0).contains(phase)
+                }
+                Motion::Look { max, .. } => (0.0..=180.0).contains(max),
+            };
+            if !fine || !self.model.iter().any(|p| p.name == motion.part()) {
+                return Some(format!("mouvement {motion:?} : partie absente ou réglage hors bornes"));
+            }
+        }
         None
     }
 
@@ -138,18 +185,24 @@ mod tests {
     #[test]
     fn a_model_is_checked() {
         assert_eq!(pig().invalid(), None);
-        let broken = |f: fn(&mut EntityData)| {
+        let broken = |f: &dyn Fn(&mut EntityData)| {
             let mut e = pig();
             f(&mut e);
             e.invalid()
         };
-        assert!(broken(|e| e.size = [0.0, 1.0]).is_some(), "taille nulle");
-        assert!(broken(|e| e.model[1].parent = Some("tail".into())).is_some(), "parent absent");
-        assert!(broken(|e| e.model.swap(0, 1)).is_some(), "parent déclaré après");
-        assert!(broken(|e| e.model[1].name = "body".into()).is_some(), "nom en double");
-        assert!(broken(|e| e.model[0].boxes[0].1[1] = 6).is_some(), "boîte vide");
-        assert!(broken(|e| e.model[0].pivot[0] = 300).is_some(), "pivot trop loin");
-        assert!(broken(|e| e.model.clear()).is_some(), "sans partie");
+        assert!(broken(&|e| e.size = [0.0, 1.0]).is_some(), "taille nulle");
+        assert!(broken(&|e| e.model[1].parent = Some("tail".into())).is_some(), "parent absent");
+        assert!(broken(&|e| e.model.swap(0, 1)).is_some(), "parent déclaré après");
+        assert!(broken(&|e| e.model[1].name = "body".into()).is_some(), "nom en double");
+        assert!(broken(&|e| e.model[0].boxes[0].1[1] = 6).is_some(), "boîte vide");
+        assert!(broken(&|e| e.model[0].pivot[0] = 300).is_some(), "pivot trop loin");
+        assert!(broken(&|e| e.model.clear()).is_some(), "sans partie");
+        let look = |part: &str| Motion::Look { part: part.into(), max: 45.0 };
+        assert!(broken(&|e| e.animation.push(look("tail"))).is_some(), "mouvement d'une partie absente");
+        assert_eq!(broken(&|e| e.animation.push(look("head"))), None);
+        let wander = |speed| Behavior::Wander { speed, range: 8.0, pause: 4.0 };
+        assert!(broken(&|e| e.behaviors.push(wander(-1.0))).is_some(), "vitesse négative");
+        assert_eq!(broken(&|e| e.behaviors.push(wander(1.0))), None);
     }
 
     #[test]

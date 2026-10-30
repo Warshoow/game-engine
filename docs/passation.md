@@ -147,8 +147,19 @@ WSL le rendu est logiciel et rame — normal.
   `MeshTag` la lumière de la grille à sa position (bit 16 = entité, ciel
   et blocs sur 8 bits) ; `voxel.wgsl` la prend à la place de celle des
   sommets. Un chunk n'a pas de `MeshTag` (0). Items de bloc au sol :
-  `mesh_block_item`, même matériau et même lumière. Entités posées dans
-  `mobs.ron` (entrée, pieds, cap).
+  `mesh_block_item`, même matériau et même lumière. Mobs dans
+  `mobs.ron` (id, entrée, pieds, cap ; l'ancien format sans id se relit).
+- **Mobs** (#32, `voxel_core::mob`, `voxel_core::path`) : `behaviors`
+  et `animation` dans `EntityData`, vocabulaire append-only. Le pas de
+  physique est `physics::Body::step`, **le même pour le joueur et les
+  mobs** : un changement de marche, de saut ou de nage touche les deux.
+  `mob::step_all` prend les mobs **triés par id** (déterminisme) ; la
+  recherche de chemin (`path::Search`) avance par tranches, plafond
+  `PATH_NODES_PER_TICK` pour tous les mobs : ne pas la lancer d'une traite
+  dans le jeu (512 cases ≈ 2,4 ms). Une case est praticable avec le test
+  de la physique (`path::stand`) : changer la physique, c'est changer les
+  chemins. Affichage : `show_mobs` interpole et tourne les parties
+  (`Parts`), rien de visuel dans la simulation sauf `walked` et `swing`.
 - **Liquides** (#28) : le voxel reste l'ID du liquide, son niveau est dans
   `VoxelWorld::levels` (absent = source, `Some(0)` = chute, sinon distance
   à plat en voxels). `set_voxel` efface le niveau : écrire le niveau
@@ -282,7 +293,9 @@ crates/voxel_core/    TOUT le cœur voxel, PUR (zéro dépendance Bevy, testable
   world.rs            VoxelWorld : registre + chunks + conversions voxel↔mètres, horloge, minuteurs, niveaux des liquides, réexamens
   worldgen.rs         trait WorldGenerator, HeightmapGenerator (relief, grottes), Worldgen (biomes, minerais, features en donnée)
   mesher.rs           greedy meshing (naïf conservé en oracle) → MeshData (tampons purs)
-  physics.rs          AABB vs grille, région balayée (anti-tunneling)
+  physics.rs          AABB vs grille, région balayée (anti-tunneling), Body (joueur et mobs)
+  mob.rs              comportements des mobs, un tick pour tous (triés par id)
+  path.rs             A* sur les cases, par tranches (Search)
   raycast.rs          DDA Amanatides & Woo (visée voxel + face d'entrée)
   rules.rs            règles hook → condition → effet (évaluation pure)
   ticks.rs            tick aléatoire : quels voxels reçoivent le hook Tick
@@ -608,6 +621,17 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   `93ff582`, `d36ed8c`, `ef14ee6` et le commit de cette passation, à
   pousser par Warshow : l'essai en jeu de #14 et #15 est fait et validé.
 
+- #32 mobs, exploré puis tranché avec Warshow (reco suivie ; design doc
+  §3.6 « Comportement des mobs » ; apparition reportée à #60 ; toutes les
+  options citées dans #61). Physique du joueur sortie dans
+  `physics::Body`, comportements en donnée, A* par tranches (mesuré : 512
+  cases d'un coup = 2,4 ms, d'où le plafond de 64 cases par tick), id
+  stable par mob, animation `Swing` et `Look`. Le cochon suit le joueur
+  qui tient du blé, le regarde, erre. Vu sous WSL (effets coupés) : les
+  cochons tombent, errent, montent des blocs, l'un vient regarder la
+  caméra ; l'ancien `mobs.ron` sans id se relit. **À essayer sous
+  Windows** (balancement des pattes, tête, suivi au blé, fluidité).
+
 ## Prochaines étapes
 
 Ordre décidé avec Warshow (2026-10-08) : **`docs/jalons.md`, « Suite :
@@ -638,9 +662,10 @@ choisi avec Warshow le 2026-10-25 : **#51 effets de rendu** (codé le
 puis #30 jour/nuit (codé le 2026-10-30, à voir sur la 4060 ; options
 reportées : #57). Puis #14 blocs à forme (fait le 2026-10-30, à essayer
 en jeu ; options écartées : #58). #15 modèles d'entités (fait le
-2026-10-30, boîtes en parties ; options écartées : #59). **Suite** : #32
-mobs (déplacement, IA, apparition, et l'animation en mouvements en
-donnée décidée par #15).
+2026-10-30, boîtes en parties ; options écartées : #59). #32 mobs
+(fait le 2026-10-30 : physique partagée, `Wander`/`Follow`/`LookAt`, A*
+par tranches, `Swing`/`Look` ; **à essayer en jeu** ; options : #61).
+**Suite** : #60 (apparition, disparition, rangement par chunk).
 Ce qui a été reporté (#18, #27, #28) est listé
 dans `docs/jalons.md`, « Plus tard », et dans #49.
 Principe (design doc §2) : le moteur fournit des mécanismes, `core.ron`
