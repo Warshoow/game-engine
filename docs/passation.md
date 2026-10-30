@@ -645,9 +645,16 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   cochons fluides). Seul défaut trouvé : il sautait sur un escalier (la
   case d'escalier vue par A* est à 1 m) ; corrigé, il ne saute plus que
   si le pas automatique l'a bloqué au tick d'avant (`4a6e6fe`).
-- Commits à pousser par Warshow : tout depuis `e58c46e` (#32, son
-  correctif d'escalier, #60 et son correctif `keep`, docs et tickets QA).
-  #32 et #60 se ferment au push.
+- Poussé par Warshow jusqu'à `0c89327` (#32 fermé). À pousser : tout
+  depuis `99a1a73` (#60 et son correctif `keep`, docs et tickets QA) ;
+  #60 se ferme au push.
+- Tri des tickets ouverts (2026-10-30) : #30 fermé (essayé sous Windows ;
+  le reste avec effets est dans #64, la météo dans #57), #41 fermé
+  (outillage validé ; mesures restantes dans #64, le ticket garde le
+  protocole). Restent ouverts car pas validés : #51 (jamais vu avec les
+  effets), #53 (à re-mesurer sur la 4060), #47 (conditionnel au
+  profilage). Les tickets d'options (#48 à #62) restent ouverts : ce sont
+  des références, aucun n'a jamais été fermé.
 - #60 apparition des mobs, exploré puis tranché avec Warshow (reco B
   suivie ; design doc §3.6 « Apparition des mobs » ; options : #62).
   Règles `spawn` en donnée, essais près du joueur, disparition au loin,
@@ -670,10 +677,11 @@ ordre des tickets ouverts »**. #45, #46, #17, #18 + #44, #27, #22, #34, #28
 faits et validés sous Windows (reste à voir : la mer, dans un monde neuf).
 #7 coins assombris fait, vu sous Windows par Warshow : rien de
 particulier. Mais le PC de test n'a pas de GPU (rendu logiciel) et le jeu
-y était déjà peu fluide avant #7 : **#41 profilage à faire sur le PC avec
-RTX 4060** (méthode, scénarios et solutions possibles dans le ticket).
+y était déjà peu fluide avant #7 : #41 profilage (outillage fait et
+validé, ticket fermé le 2026-10-30 ; méthode, scénarios et solutions
+possibles y restent ; **mesures qui restent : #64**).
 #23 éclairage fait le 2026-10-26, validé sous Windows sur le PC sans GPU.
-**À faire sur le PC avec RTX 4060** : #41 (profilage, scénarios de la
+**À faire sur le PC avec RTX 4060 (#64)** : les mesures (scénarios de la
 lumière compris) et un coup d'œil au rendu de la lumière (force des
 lampes réglée à l'estime : `BLOCK_LIGHT` dans `voxel.wgsl`). Outillage
 prêt le 2026-10-28 : feature `profile` (`cargo windows-profile`), lanceur
