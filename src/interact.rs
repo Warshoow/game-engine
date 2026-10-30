@@ -141,12 +141,12 @@ pub fn interact(
         return;
     }
 
-    // Clic droit sur un bloc qui a une règle `Used` : on l'utilise. Maj +
-    // clic droit pose quand même (sinon impossible de poser contre lui).
+    // Clic droit sur un bloc dont une règle `Used` s'applique à ce qu'on
+    // tient : on l'utilise. Sinon, ou avec Maj, on pose contre lui.
     let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
     if let Some(target) = edit.game.world.voxel(hit.voxel)
         && !shift
-        && rules::has_rule(&edit.game.world.registry, target, Hook::Used)
+        && rules::usable(&edit.game.world.registry, target, ctx)
     {
         let actions = rules::actions(&edit.game.world.registry, target, Hook::Used, ctx);
         edit.apply(hit.voxel, &actions);
@@ -191,6 +191,12 @@ pub fn interact(
     ];
     // Tourné selon le regard et le point visé sur la face (#14).
     let world = &edit.game.world;
+    // La case peut être occupée : le rayon traverse le vide d'un bloc à
+    // forme (le bas d'une dalle haute, autour d'une torche) jusqu'au bloc
+    // derrière. On ne le remplace pas (fusion de deux dalles : #58).
+    if world.voxel(target).and_then(|v| world.registry.get(v)?.block()).is_some_and(|b| b.solid) {
+        return;
+    }
     let orient = world.registry.get(held).and_then(|e| e.block()).map(|b| b.orient).unwrap_or_default();
     let look = cam.forward().as_vec3();
     let point_y = (cam.translation().y + look.y * hit.distance_m) * world.voxels_per_meter();

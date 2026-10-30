@@ -125,9 +125,19 @@ pub fn event_seed(world_seed: u64, tick: u64, voxel: [i64; 3]) -> u64 {
 }
 
 /// Le bloc `block` a-t-il au moins une règle sur `hook` (conditions mises à
-/// part) ? Sert à décider si le clic droit *utilise* le bloc ou pose.
+/// part) ?
 pub fn has_rule(registry: &Registry, block: ContentId, hook: Hook) -> bool {
     rules(registry, block).any(|r| r.on == hook)
+}
+
+/// Le clic droit sur `block` l'*utilise*-t-il, plutôt que de poser contre
+/// lui ? Oui si une de ses règles `Used` tient pour ce contexte, hasard mis
+/// à part (un `Chance` raté ne doit pas faire poser un bloc). Un bloc qui
+/// ne réagit qu'à la pierre en main laisse poser autre chose contre lui.
+pub fn usable(registry: &Registry, block: ContentId, ctx: Context) -> bool {
+    rules(registry, block)
+        .filter(|r| r.on == Hook::Used)
+        .any(|r| r.when.iter().all(|c| matches!(c, Condition::Chance(_)) || holds(registry, c, ctx, 0.0)))
 }
 
 /// Les actions déclenchées par `hook` sur `block`, dans l'ordre des règles
@@ -162,15 +172,7 @@ fn fire(registry: &Registry, i: usize, r: &Rule, ctx: Context) -> Vec<Action> {
     // Dans [0, 1), propre à la règle : deux règles à `Chance` ne tombent
     // pas ensemble.
     let roll = (hash64(ctx.seed ^ hash64(i as u64)) >> 40) as f32 / (1u64 << 24) as f32;
-    let holds = r.when.iter().all(|c| match c {
-        Condition::Holding(s) => ctx.holding.is_some() && ctx.holding == id(s),
-        Condition::EmptyHand => ctx.holding.is_none(),
-        Condition::HoldingAny => ctx.holding.is_some(),
-        Condition::Chance(p) => roll < *p,
-        Condition::Above(s) => ctx.above.is_some() && ctx.above == id(s),
-        Condition::Touching(s) => ctx.neighbors.iter().any(|n| n.is_some() && *n == id(s)),
-    });
-    if !holds {
+    if !r.when.iter().all(|c| holds(registry, c, ctx, roll)) {
         return Vec::new();
     }
     r.then
@@ -182,6 +184,19 @@ fn fire(registry: &Registry, i: usize, r: &Rule, ctx: Context) -> Vec<Action> {
             Effect::Craft => Some(Action::Craft),
         })
         .collect()
+}
+
+/// La condition `c` tient-elle ? `roll` : le tirage de `Chance`, dans [0, 1).
+fn holds(registry: &Registry, c: &Condition, ctx: Context, roll: f32) -> bool {
+    let id = |s: &String| registry.lookup(s);
+    match c {
+        Condition::Holding(s) => ctx.holding.is_some() && ctx.holding == id(s),
+        Condition::EmptyHand => ctx.holding.is_none(),
+        Condition::HoldingAny => ctx.holding.is_some(),
+        Condition::Chance(p) => roll < *p,
+        Condition::Above(s) => ctx.above.is_some() && ctx.above == id(s),
+        Condition::Touching(s) => ctx.neighbors.iter().any(|n| n.is_some() && *n == id(s)),
+    }
 }
 
 fn rules(registry: &Registry, block: ContentId) -> impl Iterator<Item = &Rule> {
@@ -241,6 +256,28 @@ mod tests {
             vec![Action::SetSelf(id("t:lamp_lit")), Action::Drop(id("t:flint"))]
         );
         assert_eq!(actions(&reg, log, Hook::Broken, Context::default()), vec![Action::Drop(id("t:flint"))]);
+    }
+
+    #[test]
+    fn right_click_uses_only_when_a_used_rule_applies() {
+        let reg = Registry::from_ron(
+            r#"[
+                (identifier: "t:flint", kind: Item),
+                (identifier: "t:log", kind: Block((solid: true, color: (0.5, 0.3, 0.1),
+                    rules: [(on: Used, when: [Holding("t:flint")], then: [Drop("t:flint")])]))),
+                (identifier: "t:dice", kind: Block((solid: true, color: (1.0, 1.0, 1.0),
+                    rules: [(on: Used, when: [Chance(0.0)], then: [Drop("t:flint")])]))),
+            ]"#,
+        )
+        .unwrap();
+        let id = |s| reg.lookup(s).unwrap();
+        let holding = |s| Context { holding: Some(id(s)), ..Context::default() };
+        // Le silex en main : on l'utilise ; un bloc en main : on pose contre.
+        assert!(usable(&reg, id("t:log"), holding("t:flint")));
+        assert!(!usable(&reg, id("t:log"), holding("t:dice")));
+        assert!(!usable(&reg, id("t:log"), Context::default()));
+        // Un `Chance` ne décide pas du clic : même à 0, le dé s'utilise.
+        assert!(usable(&reg, id("t:dice"), Context::default()));
     }
 
     #[test]

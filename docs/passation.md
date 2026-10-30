@@ -63,7 +63,7 @@ l'œil.
    les pieds n'est pas chargé**.
 
 `cargo run` → clic gauche pour jouer, WASD/Espace, clic gauche casse,
-clic droit utilise (bloc à règle `Used`) ou pose, Maj+clic droit pose
+clic droit utilise (bloc dont une règle `Used` s'applique à ce qu'on tient) ou pose, Maj+clic droit pose
 toujours, molette change la case, C ouvre le menu de fabrication
 (recettes sans `station`), I génère un bloc (IA, `claude` dans le PATH),
 R recharge le contenu, G debug, Échap libère la souris, F plein
