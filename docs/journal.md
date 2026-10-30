@@ -1262,3 +1262,16 @@ pivot, chargement des textures d'une entité, item de bloc. Capture sous
 WSL, effets coupés, cochons et items écrits dans la save d'un monde neuf
 hors du dépôt : textures, yeux, groin, pattes et cap rendent. Pas vu : la
 lumière d'une grotte (rendu logiciel, surface seulement).
+
+**Essai sous Windows, même jour.** Warshow a trouvé quatre bugs. Une
+dalle posée en visant le bas d'un flanc, sous une dalle haute, remplaçait
+celle-ci : le rayon traverse la moitié vide de sa case jusqu'au bloc
+derrière ; la pose refuse maintenant une case occupée. Les blocs générés
+par IA réagissent souvent à un seul item en main, mais toute règle `Used`
+faisait du clic droit une utilisation : le clic n'utilise plus que si une
+règle s'applique (hasard mis à part). Au fond d'une grotte, le reflet du
+soleil traversait la roche : le shader réglait la couleur par la lumière
+du ciel, pas le reflet, et le plancher de 2 % multipliait aussi le
+soleil. Enfin une bûche couchée était noire, éclairée par sa propre case,
+pleine. La leçon : le chemin des formes a hérité d'hypothèses (« la case
+du bloc a de la lumière ») vraies pour une dalle, fausses pour un cube.

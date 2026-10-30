@@ -588,6 +588,17 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   poser un cochon, le voir dans une grotte (sombre) et près d'une lampe,
   items de bloc au sol, recharger le monde (les cochons restent).
   Pas fait : animation et déplacement (#32), `model` d'item (#59).
+- Essai Windows de Warshow le 2026-10-30 : chargement, effets, jour et
+  nuit, formes, cochons validés. Corrigé ensuite (`2d86fe7`, `93ff582`) :
+  une dalle posée par le vide d'une autre la remplaçait ; un bloc à règle
+  `Used` empêchait de poser contre lui même quand aucune règle ne
+  s'appliquait (blocs générés) ; le reflet et la lumière du soleil
+  passaient la roche (taches blanches, orangées au coucher, au fond des
+  grottes : la lumière du ciel règle maintenant aussi le reflet, et le
+  plancher d'une grotte est une lueur fixe `DARK` dans `voxel.wgsl`) ;
+  une bûche couchée était noire (lumière de sa propre case, pleine).
+  **À revoir par Warshow** : grotte sans lampe (noire, sans taches, avec
+  un cochon), bûche couchée, pose contre un bloc généré.
 - Commits jusqu'à `3423ab0` (plus celui de cette passation), à pousser
   par Warshow. `3423ab0` porte `Closes #14` : pousser après l'essai en
   jeu, ou rouvrir #14 si l'essai montre un souci.
