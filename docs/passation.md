@@ -700,13 +700,19 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   3,5 m, mort → réapparition au départ, inventaire lâché. Barres en
   `bevy_ui`. Vu sous WSL (monde neuf, 75 s) : barres rouge et orange, la
   chute du départ ne blesse pas, `player.ron` garde les jauges.
-  **À essayer sous Windows : #66** (exe et assets copiés).
+  Essayé et validé sous Windows par Warshow le 2026-11-01 (« cela
+  fonctionne bien ») : #66 et #33 fermés.
 - Vision de Warshow notée dans #65 : des variables d'environnement du
   monde que le joueur fait évoluer (lave partout → la région chauffe →
   d'autres mobs apparaissent). Mécanisme distinct des jauges du joueur,
   pas encore de ticket.
 - DeepSeek lancé sur les options de #33 : rien en une heure, coupé.
 - À pousser : tout depuis `99a1a73` (#60, docs, tickets QA, puis #33).
+- Mod `compact-memory` (hors dépôt, `~/.agents/mods`, demandé par
+  Warshow) : un `/compact` tapé demande d'abord à l'agent principal de
+  mettre à jour tickets, docs et mémoire si besoin, puis compacte à la
+  fin de ce tour. Un tour de mise à jour arrive donc avant chaque
+  compaction : y faire seulement ces mises à jour.
 
 ## Prochaines étapes
 
@@ -744,7 +750,7 @@ en jeu ; options écartées : #58). #15 modèles d'entités (fait le
 par tranches, `Swing`/`Look` ; validé sous Windows ; options : #61).
 #60 apparition des mobs (fait le 2026-10-30, **à essayer en jeu : #63** ;
 options : #62). #33 vie et survie (fait le 2026-11-01 : jauges en
-donnée ; **à essayer en jeu : #66** ; options : #65). **Tout ce qui attend la 4060** (#53, #51, #30, #23, la
+donnée ; validé sous Windows, #33 et #66 fermés ; options : #65). **Tout ce qui attend la 4060** (#53, #51, #30, #23, la
 mer, le coût des mobs) est rassemblé dans **#64** (label `qa`).
 Ce qui a été reporté (#18, #27, #28) est listé
 dans `docs/jalons.md`, « Plus tard », et dans #49.

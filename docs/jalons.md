@@ -233,7 +233,7 @@ quand une mesure la réclame.
    par `Follow { keep }` ; options dans #62 ; essai en jeu : #63). #33
    fait le 2026-11-01 : jauges déclarées en donnée (`survival.ron`), vie,
    faim, souffle, chute, lave et cactus, pain, mort ; le moteur ne connaît
-   aucune jauge par son nom (options dans #65 ; essai en jeu : #66).
+   aucune jauge par son nom (options dans #65 ; validé sous Windows, #66).
 
 **Quand le besoin apparaît, pas dans l'ordre :**
 - #41 profilage : dès que le build Windows saccade ;
