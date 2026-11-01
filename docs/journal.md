@@ -1413,3 +1413,21 @@ changeaient que le ciel : l'apparition des mobs et les règles `Daylight`
 recalculaient la lumière depuis l'horloge seule. Une nuit « à l'écran »
 n'aurait rien fait apparaître pendant l'essai #63. Tout lit maintenant la
 même heure. Le décalage n'est toujours pas sauvé.
+
+## 2026-11-01 — Les entités d'eau restaient après le déchargement (#64)
+
+Warshow voyait les FPS baisser après une longue marche sur la RTX. Le
+log de la marche suivante (8 min, ~1600 m) ne montre pas de vraie
+chute, mais le nombre d'entités double. Chaque chunk affiché a deux
+entités : son mesh opaque (`ChunkMesh`) et celui de son eau
+(`BlendMesh`, ajouté pour l'eau semi-transparente). Le déchargement ne
+parcourait que la première : la seconde et son mesh restaient, chaque
+image les parcourait un peu plus. La piste d'avant (les tables du
+monde parcourues à chaque chunk enregistré) n'est pas confirmée : leur
+taille ne suit pas les FPS.
+
+Rien ne prouve encore que ce soit toute la chute vue par Warshow : sur
+ce log les FPS ont peu baissé (84 → 76). À confirmer par une nouvelle
+marche. Corrigé là où les chunks se déchargent : les deux entités passent par
+la même boucle. Un test marche 500 m et vérifie qu'il reste autant
+d'entités d'eau que de chunks affichés.

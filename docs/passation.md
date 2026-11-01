@@ -735,8 +735,23 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   `profilage.bat longue log` pour une longue marche (#64, point 9). Piste
   non confirmée : `VoxelWorld::in_chunk` parcourt toutes les tables à
   chaque chunk enregistré.
-- Poussé par Warshow jusqu'à `f5a1dc9` (#19 fermé). En attente : le
-  `log-longue.txt` de la RTX (#64, point 9) avant tout correctif.
+- Poussé par Warshow jusqu'à `f5a1dc9` (#19 fermé).
+- `log-longue.txt` de la RTX (#64, point 9) : 8 min, ~1600 m. Pas de
+  vraie chute (moyenne 84 → 76 FPS, image 12,7 → 13,6 ms), mais le
+  nombre d'entités double (844 → 1758). Une fuite trouvée : l'entité
+  de l'eau (`BlendMesh`) d'un chunk n'était jamais supprimée au
+  déchargement. Corrigé dans `stream_chunks` (test
+  `unloading_removes_the_water_entity_too`). **Pas prouvé que ce soit
+  la chute vue par Warshow** : ne pas fermer le point 9 avant une
+  nouvelle longue marche avec des exe refaits (`entity_count` doit
+  rester stable). Autre piste, non traitée : des pics isolés à 20–30 ms ;
+  le pire (30 ms) tombe quand ~1500 niveaux d'eau arrivent d'un coup
+  (1091 réexamens en file), les autres sans lien net avec l'eau. Si les
+  saccades restent, mesurer avec `profilage.bat` sans `log` (temps par
+  système).
+  Restent en mémoire, voulu ou à voir plus tard : les données des
+  chunks (1125 après la marche) et les niveaux de liquide (27 000).
+  Exe RTX pas refaits : à refaire si Warshow refait la longue marche.
 
 ## Prochaines étapes
 

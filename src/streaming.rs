@@ -44,7 +44,7 @@ use voxel_core::worldgen::WorldGenerator;
 use crate::items::StorageChanged;
 use crate::player::Player;
 use crate::save::WorldSave;
-use crate::{ChunkMesh, DirtyChunks, GameWorld, Meshing};
+use crate::{BlendMesh, ChunkMesh, DirtyChunks, GameWorld, Meshing};
 
 /// Rayon de vue, en **mètres** (§2 : le gameplay ne parle jamais « en
 /// chunks » — la conversion se fait ici et nulle part ailleurs).
@@ -94,6 +94,7 @@ pub fn stream_chunks(
     player: Query<&Transform, With<Player>>,
     mut meshes: ResMut<Assets<Mesh>>,
     chunk_meshes: Query<(Entity, &ChunkMesh, Option<&Mesh3d>)>,
+    blend_meshes: Query<(Entity, &BlendMesh, Option<&Mesh3d>)>,
 ) {
     let Ok(player) = player.single() else { return };
     let p = player.translation;
@@ -253,19 +254,21 @@ pub fn stream_chunks(
         budget -= 1;
     }
 
-    // --- 3. Décharger les chunks trop loin (les données restent). ---
-    for (entity, cm, mesh3d) in &chunk_meshes {
-        if horiz_m(cm.0) > VIEW_DISTANCE_M + UNLOAD_MARGIN_M
-            || vert_m(cm.0) > VERTICAL_VIEW_M + UNLOAD_MARGIN_M
+    // --- 3. Décharger les chunks trop loin (les données restent), avec
+    // l'entité de leur eau. ---
+    let solid = chunk_meshes.iter().map(|(e, cm, m)| (e, cm.0, m));
+    for (entity, pos, mesh3d) in solid.chain(blend_meshes.iter().map(|(e, b, m)| (e, b.0, m))) {
+        if horiz_m(pos) > VIEW_DISTANCE_M + UNLOAD_MARGIN_M
+            || vert_m(pos) > VERTICAL_VIEW_M + UNLOAD_MARGIN_M
         {
             if let Some(mesh3d) = mesh3d {
                 meshes.remove(mesh3d.id());
             }
             commands.entity(entity).despawn();
             // Plus d'entité : ne pas le re-mesher (ça la recréerait).
-            dirty.0.remove(&cm.0);
-            meshing.forget(cm.0);
-            stale.remove(&cm.0);
+            dirty.0.remove(&pos);
+            meshing.forget(pos);
+            stale.remove(&pos);
         }
     }
 }
@@ -463,6 +466,21 @@ mod tests {
         let chunks = app.world_mut().query::<&ChunkMesh>().iter(app.world()).count();
         assert!(chunks > 50, "{chunks} chunks");
         assert_eq!(app.world().resource::<Asked>().0, chunks);
+    }
+
+    /// Régression (#64, point 9) : l'entité de l'eau d'un chunk restait
+    /// après son déchargement ; les entités s'accumulaient en marchant.
+    #[test]
+    fn unloading_removes_the_water_entity_too() {
+        let (mut app, _) = stream_all_air(0.0);
+        let mut q = app.world_mut().query_filtered::<&mut Transform, With<Player>>();
+        q.single_mut(app.world_mut()).unwrap().translation.x += 500.0;
+        settle(&mut app);
+        let mut solid: Vec<ChunkPos> = app.world_mut().query::<&ChunkMesh>().iter(app.world()).map(|c| c.0).collect();
+        let mut water: Vec<ChunkPos> = app.world_mut().query::<&BlendMesh>().iter(app.world()).map(|c| c.0).collect();
+        solid.sort_by_key(|p| (p.x, p.y, p.z));
+        water.sort_by_key(|p| (p.x, p.y, p.z));
+        assert_eq!(water, solid);
     }
 
     /// Mesure (#53) : temps de l'image (la part du streaming et du
