@@ -779,8 +779,10 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   ramassables). Ensuite, une entrée `Item` déclare `model` (boîtes en
   seizièmes de mètre, sans parties) et ses `generated_textures`. Au sol,
   le modèle est dessiné à sa vraie taille, posé sur son dessous
-  (Warshow : « un item n'a pas les mêmes dimensions qu'un bloc »), et la
-  collision reste le cube de 25 cm. Icônes : `voxel_core::icon` dessine
+  (Warshow : « un item n'a pas les mêmes dimensions qu'un bloc »), réduit
+  à 0,5 m au plus en gardant ses proportions (Warshow : une taille
+  maximale au sol, comme Minecraft ; `ITEM_MAX_M`), et la collision reste
+  le cube de 25 cm. Icônes : `voxel_core::icon` dessine
   lui-même le mesh de chaque entrée (bloc, item, entité) en 38 × 38 px,
   vue de 3/4, au chargement et à la touche R (ressource `ui::Icons`).
   Porc, pain et épée ont un modèle. Vu sous WSL : barre en icônes 3D,

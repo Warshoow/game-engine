@@ -15,7 +15,7 @@ use crate::registry::{ContentId, Registry, Texture};
 /// L'icône de `id`, RGBA 8 bits de `size` × `size` ligne par ligne depuis
 /// le haut ; `None` sans apparence (item sans `model`).
 pub fn icon(registry: &Registry, id: ContentId, size: u32) -> Option<Vec<u8>> {
-    mesh_item(registry, id, 1.0).map(|mesh| draw(&mesh, registry.textures(), size))
+    mesh_item(registry, id, 1.0, f32::INFINITY).map(|mesh| draw(&mesh, registry.textures(), size))
 }
 
 /// Dessine `mesh` vu d'en haut, de l'avant-droite (on voit les faces +X,
@@ -139,7 +139,7 @@ mod tests {
         let px = |c: [u8; 4]| c.repeat(2);
         let side = Texture { name: "side".into(), size: 2, rgba: [px([255, 0, 0, 255]), px([0, 0, 255, 255])].concat() };
         let top = Texture { name: "top".into(), size: 2, rgba: px([0, 255, 0, 255]).repeat(2) };
-        let mut mesh = mesh_item(&reg, reg.lookup("t:box").unwrap(), 1.0).unwrap();
+        let mut mesh = mesh_item(&reg, reg.lookup("t:box").unwrap(), 1.0, f32::INFINITY).unwrap();
         mesh.layers = mesh.normals.iter().map(|n| u32::from(n[1] > 0.0)).collect();
         let rgba = draw(&mesh, &[side, top], size);
         // Dessus, en haut au centre : vert plein.

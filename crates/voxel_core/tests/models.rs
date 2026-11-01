@@ -41,7 +41,7 @@ fn an_entity_loads_with_its_own_textures() {
 #[test]
 fn a_block_item_is_its_block_in_small() {
     let reg = registry();
-    let mesh = mesh_item(&reg, reg.lookup("t:slab").unwrap(), 0.25).unwrap();
+    let mesh = mesh_item(&reg, reg.lookup("t:slab").unwrap(), 0.25, 0.5).unwrap();
     assert_eq!(mesh.face_count(), 6);
     let ys: Vec<f32> = mesh.positions.iter().map(|p| p[1]).collect();
     assert_eq!(ys.iter().cloned().fold(f32::MAX, f32::min), -0.125);
@@ -50,10 +50,17 @@ fn a_block_item_is_its_block_in_small() {
     let top: Vec<[f32; 2]> = (0..mesh.positions.len()).filter(|&i| mesh.normals[i] == [0.0, 1.0, 0.0]).map(|i| mesh.uvs[i]).collect();
     let span = |a: usize| top.iter().map(|uv| uv[a]).fold(f32::MIN, f32::max) - top.iter().map(|uv| uv[a]).fold(f32::MAX, f32::min);
     assert_eq!((span(0), span(1)), (1.0, 1.0));
-    // Une entité (#70) : toutes ses boîtes à leur vraie taille, centrées en
-    // x et z, posées sur le bas de la boîte de l'item.
-    let pig = mesh_item(&reg, reg.lookup("t:pig").unwrap(), 0.25).unwrap();
-    let range = |a: usize| pig.positions.iter().fold((f32::MAX, f32::MIN), |(lo, hi), p| (lo.min(p[a]), hi.max(p[a])));
-    assert_eq!(range(0), (-0.3125, 0.3125), "10 seizièmes de large");
-    assert_eq!(range(1).0, -0.125);
+    // Une entité (#70) : toutes ses boîtes, centrées en x et z, posées sur
+    // le bas de la boîte de l'item ; vraie taille sous `max_m`, réduite
+    // au-dessus (le cochon fait 22 seizièmes de long).
+    let range = |m: &voxel_core::mesher::MeshData, a: usize| {
+        m.positions.iter().fold((f32::MAX, f32::MIN), |(lo, hi), p| (lo.min(p[a]), hi.max(p[a])))
+    };
+    let pig = mesh_item(&reg, reg.lookup("t:pig").unwrap(), 0.25, 2.0).unwrap();
+    assert_eq!(range(&pig, 0), (-0.3125, 0.3125), "10 seizièmes de large");
+    assert_eq!(range(&pig, 1).0, -0.125);
+    let small = mesh_item(&reg, reg.lookup("t:pig").unwrap(), 0.25, 0.5).unwrap();
+    let (lo, hi) = range(&small, 2);
+    assert!((hi - lo - 0.5).abs() < 1e-5, "réduit à 0,5 m : {}", hi - lo);
+    assert!((range(&small, 1).0 + 0.125).abs() < 1e-6);
 }

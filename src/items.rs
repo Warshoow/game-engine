@@ -19,6 +19,9 @@ use crate::{to_bevy_mesh, GameWorld, VoxelMaterial};
 
 /// Côté du cube affiché et de sa boîte de collision, en mètres.
 const ITEM_SIZE_M: f32 = 0.25;
+/// Plus grand côté d'un item à modèle au sol ou sur un bloc, en mètres
+/// (#70) : sa vraie taille en dessous, ses proportions au-dessus.
+const ITEM_MAX_M: f32 = 0.5;
 /// Distance (mètres) entre l'item et le centre du joueur pour le ramasser.
 const PICKUP_RANGE_M: f32 = 1.5;
 /// Petit saut à l'apparition, pour que l'item « sorte » du bloc cassé.
@@ -96,7 +99,7 @@ pub fn simulate_items(
 
 /// Habille un item fraîchement apparu (ou dont le contenu a été rechargé).
 /// Un item de bloc est son bloc en petit (forme et textures, #15), un item
-/// à `model` ou une entité ses boîtes à leur vraie taille (#70), éclairés par la
+/// à `model` ou une entité ses boîtes à leur vraie taille, 0,5 m au plus (#70), éclairés par la
 /// grille ; un item sans apparence, un cube de la couleur de son entrée
 /// (mesh et matériaux partagés, un matériau par couleur).
 // shortcut: un mesh par item, sans partage ; mettre en cache par
@@ -111,7 +114,7 @@ pub fn add_item_visuals(
     changed: Query<(Entity, &ItemVisual), Changed<ItemVisual>>,
 ) {
     for (entity, &ItemVisual(content)) in &changed {
-        if let Some(look) = mesh_item(&game.world.registry, content, ITEM_SIZE_M) {
+        if let Some(look) = mesh_item(&game.world.registry, content, ITEM_SIZE_M, ITEM_MAX_M) {
             let mesh = Mesh3d(meshes.add(to_bevy_mesh(look)));
             commands.entity(entity).remove::<MeshMaterial3d<StandardMaterial>>().insert((mesh, MeshMaterial3d(game.material.clone()), GridLit));
             continue;

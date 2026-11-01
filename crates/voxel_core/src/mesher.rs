@@ -655,9 +655,10 @@ pub(crate) fn push_box(mesh: &mut MeshData, min: [f32; 3], max: [f32; 3], layers
 /// dessous en y = -`side_m` / 2 (le bas de la boîte de collision d'un
 /// item de `side_m` de côté). Un bloc : sa forme ou le cube, en petit
 /// (`side_m` de côté), chaque face montre toute sa texture. Un item à
-/// `model` (#70) ou une entité (au repos) : ses boîtes à leur vraie taille.
+/// `model` (#70) ou une entité (au repos) : ses boîtes à leur vraie taille,
+/// réduites si leur plus grand côté dépasse `max_m` (proportions gardées).
 /// `None` sans apparence (item sans `model`).
-pub fn mesh_item(registry: &Registry, id: ContentId, side_m: f32) -> Option<MeshData> {
+pub fn mesh_item(registry: &Registry, id: ContentId, side_m: f32, max_m: f32) -> Option<MeshData> {
     let entry = registry.get(id)?;
     let mut mesh = MeshData::default();
     // Les boîtes sont posées en coordonnées positives puis recentrées : les
@@ -671,7 +672,6 @@ pub fn mesh_item(registry: &Registry, id: ContentId, side_m: f32) -> Option<Mesh
         }
         [side_m / 2.0; 3]
     } else {
-        let unit = UNIT_M;
         let boxes: Vec<&ModelBox> = match entry.entity() {
             Some(e) => e.model.iter().flat_map(|p| &p.boxes).collect(),
             None => entry.model.iter().collect(),
@@ -679,10 +679,14 @@ pub fn mesh_item(registry: &Registry, id: ContentId, side_m: f32) -> Option<Mesh
         let lo = boxes.iter().fold([i16::MAX; 3], |m, b| std::array::from_fn(|a| m[a].min(b.0[a])));
         let hi = boxes.iter().fold([i16::MIN; 3], |m, b| std::array::from_fn(|a| m[a].max(b.1[a])));
         (0..3).all(|a| hi[a] > lo[a]).then_some(())?;
+        let largest = (0..3).map(|a| hi[a] - lo[a]).max().unwrap_or(1);
+        // Une unité de modèle en mètres, réduite au besoin ; les textures
+        // gardent un pixel par unité (uv_scale).
+        let unit = UNIT_M.min(max_m / f32::from(largest));
         let at = |p: &[i16; 3]| p.map(|c| f32::from(c) * unit);
         for ModelBox(a, b, texture) in boxes {
             let layer = registry.texture_layer(texture).unwrap_or(NO_TEXTURE);
-            push_box(&mut mesh, at(a), at(b), [layer; 3], [1.0; 4], 1.0);
+            push_box(&mut mesh, at(a), at(b), [layer; 3], [1.0; 4], UNIT_M / unit);
         }
         let middle = |a: usize| f32::from(lo[a] + hi[a]) / 2.0 * unit;
         [middle(0), f32::from(lo[1]) * unit + side_m / 2.0, middle(2)]

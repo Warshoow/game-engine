@@ -1469,8 +1469,9 @@ Un item reçoit des boîtes, la même forme que les modèles d'entités, sans
 parties puisqu'il ne s'anime pas. C'est ce qu'une IA écrit sans peine.
 L'image pixel art plate de Minecraft reste à revoir : Warshow signale
 des modèles d'IA spécialisés. Au sol, j'avais d'abord réduit le modèle
-à 25 cm comme un bloc. Warshow a préféré la vraie taille : la taille
-donnée au modèle doit se voir.
+à 25 cm comme un bloc. Warshow a préféré la vraie taille, pour que la taille
+donnée au modèle se voie, mais avec un maximum au sol comme dans
+Minecraft : 0,5 m, proportions gardées. Une épée de 1 m y fait 50 cm.
 
 Pour les icônes, le moteur dessine lui-même chaque entrée en pixels,
 une fois au chargement. Il projette les triangles, remplit leurs pixels,
