@@ -43,6 +43,7 @@ pub struct Incoming(pub Option<Registry>);
 // Un système Bevy prend ses ressources en paramètres : c'est la forme normale.
 #[allow(clippy::too_many_arguments)]
 pub fn apply_content(
+    mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     mut incoming: ResMut<Incoming>,
     typing: Query<(), With<crate::ui::TextField>>,
@@ -92,7 +93,8 @@ pub fn apply_content(
             material.extension.array = array.clone();
         }
     }
-    // Couleurs et noms : cubes d'items, barre, menu de fabrication.
+    // Icônes (#70), couleurs et noms : cubes d'items, barre, menu de fabrication.
+    commands.insert_resource(crate::ui::icons(&game.world.registry, &mut images));
     visuals.iter_mut().for_each(|mut v| v.set_changed());
     inventory.set_changed();
     status.0 = format!("contenu rechargé ({} entrées)", game.world.registry.iter().count());

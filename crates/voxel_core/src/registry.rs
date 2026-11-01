@@ -16,7 +16,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::EntityData;
+use crate::model::{invalid_item_look, EntityData, ModelBox};
 use crate::rules::Rule;
 use crate::shape::{Cuboid, Orient, MAX_BOXES};
 use crate::survival::Hit;
@@ -218,6 +218,13 @@ pub struct ContentEntry {
     /// main nue.
     #[serde(default)]
     pub hit: Option<Hit>,
+    /// Apparence d'un item (#70) : des boîtes comme un modèle d'entité,
+    /// sans parties. Vide : un cube de sa couleur. Réservé aux `Item`.
+    #[serde(default)]
+    pub model: Vec<ModelBox>,
+    /// Textures calculées citées par `model` (#44). Réservé aux `Item`.
+    #[serde(default)]
+    pub generated_textures: Vec<GeneratedTexture>,
 }
 
 impl ContentEntry {
@@ -245,6 +252,8 @@ impl ContentEntry {
             recipes: Vec::new(),
             eaten: Vec::new(),
             hit: None,
+            model: Vec::new(),
+            generated_textures: Vec::new(),
         }
     }
 
@@ -341,6 +350,7 @@ impl Registry {
                 .or_else(|| entry.entity().and_then(EntityData::invalid))
                 .or(bad_change)
                 .or_else(|| entry.hit.as_ref().and_then(Hit::invalid))
+                .or_else(|| invalid_item_look(entry))
             {
                 return Err(LoadError::Invalid { id: entry.identifier.clone(), reason });
             }
@@ -374,7 +384,8 @@ impl Registry {
         let mut names: Vec<String> = Vec::new();
         for (_, entry) in self.iter() {
             let block = entry.block().and_then(|b| b.texture.as_ref()).into_iter().flat_map(Faces::names);
-            for name in block.chain(entry.entity().into_iter().flat_map(EntityData::texture_names)) {
+            let item = entry.model.iter().map(|b| &b.2);
+            for name in block.chain(entry.entity().into_iter().flat_map(EntityData::texture_names)).chain(item) {
                 if !names.contains(name) {
                     names.push(name.clone());
                 }
@@ -382,7 +393,10 @@ impl Registry {
         }
         let generated: Vec<&GeneratedTexture> = self
             .iter()
-            .flat_map(|(_, e)| e.block().map(|b| &b.generated_textures).into_iter().chain(e.entity().map(|d| &d.generated_textures)))
+            .flat_map(|(_, e)| {
+                let own = e.block().map(|b| &b.generated_textures).into_iter().chain(e.entity().map(|d| &d.generated_textures));
+                own.chain([&e.generated_textures])
+            })
             .flatten()
             .collect();
         let mut textures = Vec::with_capacity(names.len());
@@ -644,6 +658,16 @@ mod tests {
             (identifier: "a:pig", kind: EntityType((size: (0.9, 0.9), model: [(name: "b", boxes: [((0, 0, 0), (1, 1, 1), "t")])],
                 drops: ["a:nothing"])))]"#;
         assert!(Registry::from_ron(bad).is_err(), "drop inconnu");
+        // Apparence d'item (#70) : réservée aux Item, boîtes valides.
+        let item = |kind: &str, model: &str| {
+            Registry::from_ron(&format!(
+                r#"[(identifier: "a:air", kind: Block((solid: false, color: (0.0, 0.0, 0.0)))),
+                    (identifier: "a:x", kind: {kind}, model: [{model}])]"#
+            ))
+        };
+        assert!(item("Item", r#"((0, 0, 0), (2, 1, 1), "t")"#).is_ok());
+        assert!(item("Item", r#"((0, 0, 0), (0, 1, 1), "t")"#).is_err(), "boîte vide");
+        assert!(item("Block((solid: true, color: (1.0, 1.0, 1.0)))", r#"((0, 0, 0), (2, 1, 1), "t")"#).is_err(), "bloc");
     }
 
     #[test]

@@ -312,6 +312,7 @@ fn setup_world(
     };
     let registry = content::load(base).unwrap_or_else(|e| panic!("contenu invalide : {e}"));
     let array = images.add(texture_array(&registry));
+    commands.insert_resource(ui::icons(&registry, &mut images));
     save.write_world(&meta, &registry).unwrap_or_else(|e| refuse(e));
     // Worldgen en donnée (#27), world-owned (§3.10) : celui de la save s'il
     // y est, sinon celui du jeu, copié dans la save. Aucun bloc nommé ici.

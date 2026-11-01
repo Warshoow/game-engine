@@ -206,12 +206,31 @@
     // Nourriture (#33) : `eaten` fait varier les jauges de survival.ron
     // d'un coup, au clic droit. Un item ne se pose pas : il se mange même
     // en visant un bloc. Fait de blé, sans établi.
+    // Apparence d'un item (#70) : des boîtes comme un modèle d'entité, en
+    // seizièmes de mètre, sans parties. Au sol, réduites à la taille d'un
+    // item ; l'icône d'inventaire est calculée par le moteur.
     (identifier: "core:bread", kind: Item, eaten: [("hunger", 300.0)],
+        model: [((-5, 0, -3), (5, 4, 3), "bread_crust")],
+        generated_textures: [(name: "bread_crust", pattern: Spots, color: (0.78, 0.55, 0.28), noise: 0.25, seed: 18)],
         recipes: [(inputs: ["core:wheat", "core:wheat", "core:wheat"])]),
 
     // Combat (#68) : `hit` remplace le coup de la main nue (`hand` dans
     // survival.ron) sur les jauges du mob touché ; `push` : recul en m/s.
-    (identifier: "core:pork", kind: Item, eaten: [("hunger", 200.0)]),
+    (identifier: "core:pork", kind: Item, eaten: [("hunger", 200.0)],
+        model: [((-4, 0, -3), (4, 3, 3), "pork_meat"), ((-4, 3, -3), (4, 4, 3), "pork_fat")],
+        generated_textures: [
+            (name: "pork_meat", pattern: Spots, color: (0.88, 0.45, 0.45), noise: 0.2, seed: 19),
+            (name: "pork_fat", pattern: Plain, color: (0.96, 0.88, 0.84), noise: 0.1, seed: 20),
+        ]),
     (identifier: "core:sword", kind: Item, hit: (change: [("health", -5.0)], push: 5.0),
+        model: [
+            ((0, 0, 0), (1, 4, 1), "sword_handle"),
+            ((-2, 4, 0), (3, 5, 1), "sword_handle"),
+            ((0, 5, 0), (1, 16, 1), "sword_blade"),
+        ],
+        generated_textures: [
+            (name: "sword_handle", pattern: Planks, color: (0.45, 0.30, 0.15), noise: 0.2, seed: 21),
+            (name: "sword_blade", pattern: Plain, color: (0.80, 0.82, 0.85), noise: 0.1, seed: 22),
+        ],
         recipes: [(inputs: ["core:planks", "core:planks", "core:stone"], station: "core:workbench")]),
 ]

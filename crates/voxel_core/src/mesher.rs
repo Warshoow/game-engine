@@ -64,6 +64,7 @@ use std::collections::HashMap;
 
 use crate::chunk::{Chunk, ChunkPos};
 use crate::liquids;
+use crate::model::{ModelBox, UNIT_M};
 use crate::registry::{Alpha, ContentId, Registry};
 use crate::shape::{Cuboid, Orient, Rotation, CELL};
 use crate::world::VoxelWorld;
@@ -650,16 +651,44 @@ pub(crate) fn push_box(mesh: &mut MeshData, min: [f32; 3], max: [f32; 3], layers
     }
 }
 
-/// Le bloc `id` en petit (`side_m` de côté), centré sur l'origine, pour un
-/// item au sol : sa forme ou le cube, chaque face montre toute sa texture.
-/// `None` si `id` n'est pas un bloc.
-pub fn mesh_block_item(registry: &Registry, id: ContentId, side_m: f32) -> Option<MeshData> {
-    let shape = registry.get(id)?.block()?.shape.clone().unwrap_or_else(|| vec![Cuboid::FULL]);
-    let block = resolve(registry, id);
+/// L'entrée `id` pour un item au sol ou son icône, centrée en x et z, son
+/// dessous en y = -`side_m` / 2 (le bas de la boîte de collision d'un
+/// item de `side_m` de côté). Un bloc : sa forme ou le cube, en petit
+/// (`side_m` de côté), chaque face montre toute sa texture. Un item à
+/// `model` (#70) ou une entité (au repos) : ses boîtes à leur vraie taille.
+/// `None` sans apparence (item sans `model`).
+pub fn mesh_item(registry: &Registry, id: ContentId, side_m: f32) -> Option<MeshData> {
+    let entry = registry.get(id)?;
     let mut mesh = MeshData::default();
-    for c in shape {
-        let [lo, hi] = c.to_cells().map(|p| p.map(|c| (c - 0.5) * side_m));
-        push_box(&mut mesh, lo, hi, block.layers, block.color, 1.0 / side_m);
+    // Les boîtes sont posées en coordonnées positives puis recentrées : les
+    // coordonnées de texture partent du coin, l'image n'est pas décalée.
+    let center = if let Some(b) = entry.block() {
+        let shape = b.shape.clone().unwrap_or_else(|| vec![Cuboid::FULL]);
+        let block = resolve(registry, id);
+        for c in shape {
+            let [lo, hi] = c.to_cells().map(|p| p.map(|c| c * side_m));
+            push_box(&mut mesh, lo, hi, block.layers, block.color, 1.0 / side_m);
+        }
+        [side_m / 2.0; 3]
+    } else {
+        let unit = UNIT_M;
+        let boxes: Vec<&ModelBox> = match entry.entity() {
+            Some(e) => e.model.iter().flat_map(|p| &p.boxes).collect(),
+            None => entry.model.iter().collect(),
+        };
+        let lo = boxes.iter().fold([i16::MAX; 3], |m, b| std::array::from_fn(|a| m[a].min(b.0[a])));
+        let hi = boxes.iter().fold([i16::MIN; 3], |m, b| std::array::from_fn(|a| m[a].max(b.1[a])));
+        (0..3).all(|a| hi[a] > lo[a]).then_some(())?;
+        let at = |p: &[i16; 3]| p.map(|c| f32::from(c) * unit);
+        for ModelBox(a, b, texture) in boxes {
+            let layer = registry.texture_layer(texture).unwrap_or(NO_TEXTURE);
+            push_box(&mut mesh, at(a), at(b), [layer; 3], [1.0; 4], 1.0);
+        }
+        let middle = |a: usize| f32::from(lo[a] + hi[a]) / 2.0 * unit;
+        [middle(0), f32::from(lo[1]) * unit + side_m / 2.0, middle(2)]
+    };
+    for p in &mut mesh.positions {
+        *p = std::array::from_fn(|a| p[a] - center[a]);
     }
     Some(mesh)
 }

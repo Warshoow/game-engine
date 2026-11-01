@@ -5,8 +5,8 @@
 //! dans l'ordre de première obtention, sans limite de taille. Après la
 //! dernière pile, une case **main vide** (les règles `EmptyHand`, §3.6).
 //!
-//! La barre est **réflexive du registre** (§3.11) : couleur et nom viennent
-//! de l'entrée, l'UI ne connaît aucun bloc.
+//! La barre est **réflexive du registre** (§3.11) : icône (calculée par le
+//! moteur, #70) et nom viennent de l'entrée, l'UI ne connaît aucun bloc.
 
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
@@ -135,11 +135,12 @@ pub fn fill_craft_menu(
     mut commands: Commands,
     game: Res<GameWorld>,
     inventory: Res<Inventory>,
+    icons: Res<ui::Icons>,
     menu: Query<(Entity, Ref<CraftMenu>)>,
     rows: Query<Entity, With<RecipeButton>>,
 ) {
     let Ok((menu, added)) = menu.single() else { return };
-    if !added.is_added() && !inventory.is_changed() {
+    if !added.is_added() && !inventory.is_changed() && !icons.is_changed() {
         return;
     }
     for row in &rows {
@@ -161,7 +162,7 @@ pub fn fill_craft_menu(
                 BackgroundColor(if makeable { Color::srgb(0.25, 0.35, 0.25) } else { Color::srgb(0.2, 0.2, 0.2) }),
             ))
             .with_children(|row| {
-                row.spawn(ui::slot(registry, product, recipe.count, Color::BLACK));
+                row.spawn(ui::slot(registry, &icons, product, recipe.count, Color::BLACK));
                 row.spawn(Text::new(format!("{}  ←", identifier(registry, product))));
                 // Entrées groupées par entrée, dans l'ordre de la recette.
                 let mut inputs: Vec<(ContentId, u32)> = Vec::new();
@@ -172,7 +173,7 @@ pub fn fill_craft_menu(
                     }
                 }
                 for (id, count) in inputs {
-                    row.spawn(ui::slot(registry, id, count, Color::BLACK));
+                    row.spawn(ui::slot(registry, &icons, id, count, Color::BLACK));
                 }
             });
         }
@@ -241,10 +242,11 @@ pub fn update_hotbar(
     mut commands: Commands,
     inventory: Res<Inventory>,
     game: Res<GameWorld>,
+    icons: Res<ui::Icons>,
     root: Query<Entity, With<HotbarRoot>>,
     mut held_text: Query<&mut Text, With<HeldBlockText>>,
 ) {
-    if !inventory.is_changed() {
+    if !inventory.is_changed() && !icons.is_changed() {
         return;
     }
     let registry = &game.world.registry;
@@ -259,7 +261,7 @@ pub fn update_hotbar(
     commands.entity(root).despawn_children().with_children(|bar| {
         for (i, &(id, count)) in inventory.slots.iter().enumerate() {
             let border = if i == inventory.selected { Color::WHITE } else { Color::BLACK };
-            bar.spawn(ui::slot(registry, id, count, border));
+            bar.spawn(ui::slot(registry, &icons, id, count, border));
         }
         // La case main vide, après les piles.
         let border = if inventory.selected == inventory.slots.len() { Color::WHITE } else { Color::BLACK };
@@ -280,8 +282,7 @@ fn identifier(registry: &Registry, id: ContentId) -> &str {
     registry.get(id).map_or("???", |e| e.identifier.as_str())
 }
 
-/// Couleur d'affichage d'une entrée : celle du bloc, gris sinon (un item
-/// n'a pas encore d'apparence au registre).
+/// Couleur d'une entrée sans icône (#70) : celle du bloc, gris sinon.
 pub fn color(registry: &Registry, id: ContentId) -> Color {
     match registry.get(id).map(|e| &e.kind) {
         Some(Kind::Block(b)) => Color::srgb(b.color[0], b.color[1], b.color[2]),

@@ -8,6 +8,7 @@
 pub mod chunk;
 pub mod crafting;
 pub mod generate;
+pub mod icon;
 pub mod light;
 pub mod liquids;
 pub mod mesher;

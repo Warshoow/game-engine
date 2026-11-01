@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::mesher::{push_box, MeshData, NO_TEXTURE};
 use crate::mob::Behavior;
-use crate::registry::Registry;
+use crate::registry::{ContentEntry, Kind, Registry};
 use crate::spawn::SpawnRule;
 use crate::survival::Survival;
 use crate::texgen::GeneratedTexture;
@@ -117,7 +117,6 @@ impl EntityData {
         if !(1..=MAX_MODEL_BOXES).contains(&boxes) {
             return Some(format!("model : de 1 à {MAX_MODEL_BOXES} boîtes, pas {boxes}"));
         }
-        let inside = |p: [i16; 3]| p.iter().all(|c| (-MAX_COORD..=MAX_COORD).contains(c));
         for (i, part) in self.model.iter().enumerate() {
             let before = &self.model[..i];
             if before.iter().any(|p| p.name == part.name) {
@@ -128,10 +127,10 @@ impl EntityData {
             {
                 return Some(format!("partie {} : parent {parent} absent ou déclaré après elle", part.name));
             }
-            if !inside(part.pivot) {
+            if !inside(&part.pivot) {
                 return Some(format!("partie {} : pivot hors de ±{MAX_COORD}", part.name));
             }
-            if let Some(b) = part.boxes.iter().find(|b| !inside(b.0) || !inside(b.1) || (0..3).any(|a| b.0[a] >= b.1[a])) {
+            if let Some(b) = part.boxes.iter().find(|b| b.invalid()) {
                 return Some(format!("partie {} : boîte {b:?} vide ou hors de ±{MAX_COORD}", part.name));
             }
         }
@@ -168,6 +167,30 @@ impl EntityData {
     pub(crate) fn texture_names(&self) -> impl Iterator<Item = &String> {
         self.model.iter().flat_map(|p| &p.boxes).map(|b| &b.2)
     }
+}
+
+fn inside(p: &[i16; 3]) -> bool {
+    p.iter().all(|c| (-MAX_COORD..=MAX_COORD).contains(c))
+}
+
+impl ModelBox {
+    /// Vide ou hors de ±`MAX_COORD`.
+    pub(crate) fn invalid(&self) -> bool {
+        !inside(&self.0) || !inside(&self.1) || (0..3).any(|a| self.0[a] >= self.1[a])
+    }
+}
+
+/// Ce qui cloche dans l'apparence d'item d'une entrée (#70) : réservée aux
+/// `Item`, de 0 à `MAX_MODEL_BOXES` boîtes valides.
+pub(crate) fn invalid_item_look(entry: &ContentEntry) -> Option<String> {
+    let has_look = !entry.model.is_empty() || !entry.generated_textures.is_empty();
+    if has_look && !matches!(entry.kind, Kind::Item) {
+        return Some("model / generated_textures de l'entrée : réservés aux Item".into());
+    }
+    if entry.model.len() > MAX_MODEL_BOXES {
+        return Some(format!("model : {MAX_MODEL_BOXES} boîtes au plus, pas {}", entry.model.len()));
+    }
+    entry.model.iter().find(|b| b.invalid()).map(|b| format!("model : boîte {b:?} vide ou hors de ±{MAX_COORD}"))
 }
 
 impl Part {
