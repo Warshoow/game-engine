@@ -656,9 +656,7 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   cochons fluides). Seul défaut trouvé : il sautait sur un escalier (la
   case d'escalier vue par A* est à 1 m) ; corrigé, il ne saute plus que
   si le pas automatique l'a bloqué au tick d'avant (`4a6e6fe`).
-- Poussé par Warshow jusqu'à `0c89327` (#32 fermé). À pousser : tout
-  depuis `99a1a73` (#60 et son correctif `keep`, docs et tickets QA) ;
-  #60 se ferme au push.
+- Poussé par Warshow jusqu'à `341b020` (#32 et #60 fermés).
 - Tri des tickets ouverts (2026-10-30) : #30 fermé (essayé sous Windows ;
   le reste avec effets est dans #64, la météo dans #57), #41 fermé
   (outillage validé ; mesures restantes dans #64, le ticket garde le
@@ -707,7 +705,7 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   d'autres mobs apparaissent). Mécanisme distinct des jauges du joueur,
   pas encore de ticket.
 - DeepSeek lancé sur les options de #33 : rien en une heure, coupé.
-- À pousser : tout depuis `99a1a73` (#60, docs, tickets QA, puis #33).
+- À pousser : tout depuis `244bcc5` (#33 et ses docs).
 - Mod `compact-memory` (hors dépôt, `~/.agents/mods`, demandé par
   Warshow) : un `/compact` tapé demande d'abord à l'agent principal de
   mettre à jour tickets, docs et mémoire si besoin, puis compacte à la
