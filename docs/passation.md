@@ -770,7 +770,8 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   dedans ou un chemin à suivre. Vu sous WSL : deux coups d'épée tuent un
   cochon posé, qui lâche son porc. **Les mobs n'attaquent pas encore le
   joueur** (reporté dans #68, signalé par un agent annexe) : c'est le
-  pas suivant naturel pour des hordes de nuit.
+  pas suivant naturel pour des hordes de nuit. Exe Windows refait
+  (`Téléchargements\voxel_engine`, `cmp` et `diff -r` OK) ; essais : #69.
   DeepSeek : rien en 5 minutes, deuxième fois de suite.
 
 ## Prochaines étapes
@@ -814,7 +815,7 @@ par tranches, `Swing`/`Look` ; validé sous Windows ; options : #61).
 #60 apparition des mobs (fait le 2026-10-30, **à essayer en jeu : #63** ;
 options : #62). #33 vie et survie (fait le 2026-11-01 : jauges en
 donnée ; validé sous Windows, #33 et #66 fermés ; options : #65).
-Combat et jauges des mobs (fait le 2026-11-01, à essayer sous Windows ;
+Combat et jauges des mobs (fait le 2026-11-01, à essayer sous Windows : #69 ;
 options : #68). Suite proposée : des mobs qui attaquent le joueur. **Tout ce qui attend la 4060** (#53, #51, #30, #23, la
 mer, le coût des mobs) est rassemblé dans **#64** (label `qa`).
 Ce qui a été reporté (#18, #27, #28) est listé
