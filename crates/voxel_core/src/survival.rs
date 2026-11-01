@@ -206,6 +206,12 @@ pub struct Vitals {
 }
 
 impl Vitals {
+    /// Téléporté (pieds à `feet_y`, en mètres) : la chute se mesure depuis
+    /// là, pas depuis le sol quitté.
+    pub fn teleported(&mut self, feet_y: f32) {
+        self.fall_top = Some(feet_y);
+    }
+
     /// Toutes les jauges à leur départ (monde neuf, après la mort).
     pub fn new(survival: &Survival) -> Self {
         Self { values: survival.gauges.iter().map(Gauge::start).collect(), fall_top: None }
@@ -486,6 +492,27 @@ mod tests {
         body.feet = [10.0, 15.0, 4.5];
         live(&s, &w, &mut body, &mut vitals, 2.0);
         assert_eq!(vitals.get(&s, "health"), Some(20.0));
+    }
+
+    #[test]
+    fn a_teleport_measures_the_fall_from_where_it_lands() {
+        let (s, w) = (survival(), world());
+        let mut body = Body::at([4.5, 4.0, 4.5]);
+        let mut vitals = Vitals::new(&s);
+        live(&s, &w, &mut body, &mut vitals, 0.5);
+        // En l'air à 14 m, puis téléporté au sol : pas de chute de 10 m.
+        body.feet[1] = 14.0;
+        live(&s, &w, &mut body, &mut vitals, DT);
+        body.feet[1] = 4.0;
+        vitals.teleported(4.0);
+        live(&s, &w, &mut body, &mut vitals, 1.0);
+        assert_eq!(vitals.get(&s, "health"), Some(20.0));
+        // Téléporté 10 m au-dessus du sol : la chute compte.
+        body.feet[1] = 14.0;
+        vitals.teleported(14.0);
+        live(&s, &w, &mut body, &mut vitals, 2.0);
+        let health = vitals.get(&s, "health").unwrap();
+        assert!((health - 13.5).abs() < 0.05, "vie {health}");
     }
 
     #[test]

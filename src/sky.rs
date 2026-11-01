@@ -26,10 +26,22 @@ pub struct WorldSky(pub Sky);
 #[derive(Resource, Default)]
 pub struct Hour(pub f32);
 
-/// Heures ajoutées par la touche de debug (F5). Jamais sauvées : aucune
-/// règle ne lit encore l'heure (#57).
+/// Heures ajoutées par la touche de debug (F5) et `/time`. Jamais sauvées
+/// (#57) : au rechargement, l'heure revient à celle de l'horloge du monde.
 #[derive(Resource, Default)]
-struct HourShift(f32);
+pub struct HourShift(pub f32);
+
+impl WorldSky {
+    /// L'heure du monde avec le décalage de debug : ciel, apparition des
+    /// mobs et règles de jauges lisent la même.
+    pub fn hour(&self, tick: u64, shift: &HourShift) -> f32 {
+        (self.0.hour(tick) + shift.0).rem_euclid(24.0)
+    }
+
+    pub fn daylight(&self, tick: u64, shift: &HourShift) -> f32 {
+        self.0.daylight(&self.0.at(self.hour(tick, shift)))
+    }
+}
 
 #[derive(Clone, Copy, Default, Debug, Reflect, ShaderType)]
 struct SkyUniform {
@@ -121,7 +133,7 @@ fn update_sky(
     mut voxel_materials: ResMut<Assets<VoxelMaterial>>,
     mut last_daylight: Local<Option<f32>>,
 ) {
-    hour.0 = (sky.0.hour(game.world.tick()) + shift.0).rem_euclid(24.0);
+    hour.0 = sky.hour(game.world.tick(), &shift);
     let moment = sky.0.at(hour.0);
     let daylight = sky.0.daylight(&moment);
     let srgb = |c: [f32; 3]| Color::srgb(c[0], c[1], c[2]);

@@ -10,7 +10,7 @@ use voxel_core::survival::{Show, Survival, Vitals};
 use crate::inventory::Inventory;
 use crate::items::DroppedItem;
 use crate::player::{Player, EYE_HEIGHT_M, PLAYER_HEIGHT_M, PLAYER_WIDTH_M};
-use crate::sky::WorldSky;
+use crate::sky::{HourShift, WorldSky};
 use crate::ui::{self, GameWindow};
 use crate::{assets_dir, GameWorld};
 
@@ -48,6 +48,7 @@ pub fn step_vitals(
     rules: Res<SurvivalRules>,
     game: Res<GameWorld>,
     sky: Option<Res<WorldSky>>,
+    shift: Res<HourShift>,
     mut inventory: ResMut<Inventory>,
     mut player: Query<(&mut Player, &mut PlayerVitals)>,
     opened: Query<Entity, With<GameWindow>>,
@@ -58,7 +59,7 @@ pub fn step_vitals(
     if world.chunk(world.split(world.voxel_at_m(player.body().feet)).0).is_none() {
         return;
     }
-    let daylight = sky.map_or(1.0, |s| s.0.daylight(&s.0.at(s.0.hour(world.tick()))));
+    let daylight = sky.map_or(1.0, |s| s.daylight(world.tick(), &shift));
     let size = [PLAYER_WIDTH_M, PLAYER_HEIGHT_M];
     let dt = time.delta_secs(); // dans FixedUpdate : le pas fixe
     if !vitals.0.step(&rules.0, world, player.body(), size, EYE_HEIGHT_M, daylight, dt) {

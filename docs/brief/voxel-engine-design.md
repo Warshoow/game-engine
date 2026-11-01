@@ -1,6 +1,6 @@
 # Moteur Voxel — Design du Socle
 
-> **Statut :** v0.1 — v0 figé pour le prototypage ; 2026-10-07 : recettes (§3.1), cycle de vie des block-entities (§3.3), forme du comportement (§3.6) ; 2026-10-08 : apparence (§3.1), persistance (§3.10), principe « mécanismes, pas règles de jeu » (§2), textures calculées (§3.1), génération en jeu (§3.6), réglages du worldgen dans la save (§3.10) ; 2026-10-21 : blocs à trous (§3.1) ; 2026-10-22 : blocs qui évoluent seuls (§3.6, §3.10) ; 2026-10-25 : liquides et semi-transparent (§3.1, §3.2, §3.6, §3.10), ombrage des coins (§3.8) ; 2026-10-30 : formes de blocs, modèles d'entités (§3.1), comportement et apparition des mobs (§3.6) ; 2026-11-01 : jauges et survie (§3.6, §3.10).
+> **Statut :** v0.1 — v0 figé pour le prototypage ; 2026-10-07 : recettes (§3.1), cycle de vie des block-entities (§3.3), forme du comportement (§3.6) ; 2026-10-08 : apparence (§3.1), persistance (§3.10), principe « mécanismes, pas règles de jeu » (§2), textures calculées (§3.1), génération en jeu (§3.6), réglages du worldgen dans la save (§3.10) ; 2026-10-21 : blocs à trous (§3.1) ; 2026-10-22 : blocs qui évoluent seuls (§3.6, §3.10) ; 2026-10-25 : liquides et semi-transparent (§3.1, §3.2, §3.6, §3.10), ombrage des coins (§3.8) ; 2026-10-30 : formes de blocs, modèles d'entités (§3.1), comportement et apparition des mobs (§3.6) ; 2026-11-01 : jauges et survie (§3.6, §3.10), console de debug (§3.11).
 > **Nature :** ceci est un `intent/` — la source de vérité du socle. On lit **avant** d'écrire. Toute décision qui contredit ce doc doit d'abord **modifier ce doc** (avec sa justification), pas le contourner en douce dans le code.
 > **Portée :** ce document décrit un **socle**, pas un jeu. Aucun système de gameplay (survie, magie, armes, quêtes…) n'est spécifié ici. Le socle est le substrat sur lequel ces systèmes se branchent sans toucher au core.
 
@@ -240,7 +240,7 @@ Options écartées ou reportées (règles de Minecraft, quatre jauges fixes, dé
 
 **Coût de changement :** Day-1 (discipline gratuite maintenant, cauchemar à rétrofitter).
 
-**Heure du jour** (ajout 2026-10-30, #30). L'heure n'est pas un état de plus : elle se calcule depuis l'horloge du monde (§3.10, point 7), l'heure de départ et la durée d'une journée, données de `sky.ron` (§3.10, point 9). Elle est donc déterministe : une règle pourra la lire. Pour avancer ou reculer l'heure (dormir, commande de console), un décalage sauvé s'ajoutera ; aujourd'hui seule une touche de debug la décale, sans la sauver. Reportés : #57.
+**Heure du jour** (ajout 2026-10-30, #30). L'heure n'est pas un état de plus : elle se calcule depuis l'horloge du monde (§3.10, point 7), l'heure de départ et la durée d'une journée, données de `sky.ron` (§3.10, point 9). Elle est donc déterministe : une règle pourra la lire. Pour avancer ou reculer l'heure (dormir, commande de console), un décalage sauvé s'ajoutera ; aujourd'hui seuls la touche de debug F5 et `/time` (#19) la décalent, sans la sauver ; ciel, apparition des mobs et règles de jauges lisent l'heure décalée. Reportés : #57.
 
 ### 3.10 Persistance (structure logique)
 
@@ -270,7 +270,7 @@ Contenu logique d'une save :
 
 - Sinon, dès qu'une IA génère un item, l'UI ne sait pas l'afficher. L'UI lit le registre comme tout le reste.
 - L'inventaire d'un coffre = de l'état **block-entity** (§3.3) qu'une fenêtre lit.
-- **Outillage :** `bevy_ui` (retained) pour HUD / inventaires / fenêtres de quête ; `egui` pour le debug/tooling.
+- **Outillage :** `bevy_ui` (retained) pour HUD / inventaires / fenêtres de quête, et pour la **console de debug** (#19, 2026-11-01) : une fenêtre de jeu avec un champ de texte, déjà là pour la génération en jeu ; une dépendance de plus (`egui`) ne se justifiait pas pour une ligne de saisie. Commandes en anglais, préfixées par `/` (`/tp`, `/give`, `/gauge`, `/time`, `/mob`, `/help`), en mètres ; les noms (entrées, jauges) viennent du registre et de `survival.ron`, jamais d'une liste en dur. `egui` reste possible pour un outil plus riche (historique, inspecteur). Reportés : #67.
 - **Ce qui est mou :** thème, widgets, layout (§4).
 
 **Coût de changement :** seul le principe « UI lit le registre » est Day-1. Les internals sont mous.
@@ -436,6 +436,7 @@ Ces non-goals sont *prévus par le data model* (§3) mais *pas implémentés* da
 | Jour et nuit | Heure tirée de l'horloge du monde ; ciel et lumières en donnée (le fichier du jeu prime, copie dans la save) ; soleil et lune sur une lumière ; ciel par shader à nous (#30) | Mou (2026-10-30) | faible (rendu) ; `sky.ron` dans la save |
 | Dims chunk | 32³ (reco) | **Ouvert** | faible (format porte ses dims) |
 | Index palette | `u16` (reco), adaptatif plus tard | **Ouvert** | faible |
+| Console de debug | Fenêtre `bevy_ui`, commandes `/…` en anglais, noms tirés du registre et de `survival.ron` (#19) | Mou (2026-11-01) | faible |
 | Internals UI / API mod / worldgen / backend / multi | Laissés mous | **Mou** | — |
 
 ---

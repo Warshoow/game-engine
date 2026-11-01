@@ -2,6 +2,7 @@
 //! `voxel_core` (testable headless) ; ici on ne fait que brancher :
 //! registre → worldgen → mesher → entités Bevy, et le contrôleur joueur.
 
+mod console;
 mod content;
 mod effects;
 mod entities;
@@ -226,11 +227,12 @@ fn main() {
                     inventory::give_all_blocks,
                     inventory::toggle_craft_menu,
                     generate::toggle_generate_window,
+                    console::open_console,
                 )
                     .run_if(ui::not_typing),
                 content::apply_content.before(remesh_dirty),
                 ui::type_text,
-                generate::start_generation,
+                (generate::start_generation, console::run_command),
                 generate::finish_generation.before(content::apply_content),
                 generate::show_status.after(generate::finish_generation),
                 inventory::fill_craft_menu.after(inventory::toggle_craft_menu),
@@ -369,7 +371,7 @@ fn setup_world(
         },
     ));
     commands.spawn((
-        Text::new("Clic gauche : jouer · Échap : libérer la souris · F : plein écran\nWASD/Espace : bouger · gauche : casser · droit : utiliser/poser/manger · Maj+droit : poser · molette : bloc · C : fabriquer (menu) · I : générer un bloc (IA) · R : recharger le contenu · G : un de chaque bloc (debug) · F1-F4 : effets"),
+        Text::new("Clic gauche : jouer · Échap : libérer la souris · F : plein écran\nWASD/Espace : bouger · gauche : casser · droit : utiliser/poser/manger · Maj+droit : poser · molette : bloc · C : fabriquer (menu) · I : générer un bloc (IA) · R : recharger le contenu · G : un de chaque bloc (debug) · T : console (debug) · F1-F4 : effets"),
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(12.0),

@@ -246,7 +246,7 @@ jauges des mobs, variables d'environnement du monde). Essais en attente :
   et meshing hors de l'image, fait par #53 le 2026-10-29) ;
 - #40 mémoire des chunks : mesurer avant ;
 - #12 Lua : quand un bloc ne s'exprime pas en règles ;
-- #19 console de debug (egui) : à glisser dès que téléporter ou changer
+- ~~#19 console de debug~~ : fait le 2026-11-01 (console `bevy_ui`, T, commandes `/tp`, `/give`, `/gauge`, `/time`, `/mob` ; options dans #67). Ligne d'origine : à glisser dès que téléporter ou changer
   de seed manque.
 
 **Pas planifiés :** #25 terrain lisse, #29 bord du monde, #35 véhicules,

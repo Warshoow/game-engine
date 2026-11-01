@@ -12,7 +12,7 @@ use voxel_core::registry::ContentId;
 
 use crate::inventory::Inventory;
 use crate::player::{Player, EYE_HEIGHT_M};
-use crate::sky::WorldSky;
+use crate::sky::{HourShift, WorldSky};
 use crate::{to_bevy_mesh, GameWorld};
 
 /// Un mob : son état simulé (`voxel_core`). Ses parties sont ses enfants.
@@ -99,6 +99,7 @@ pub fn simulate_mobs(
     time: Res<Time>,
     game: Res<GameWorld>,
     sky: Option<Res<WorldSky>>,
+    shift: Res<HourShift>,
     inventory: Res<Inventory>,
     mut ids: ResMut<MobIds>,
     player: Query<&Player>,
@@ -124,7 +125,7 @@ pub fn simulate_mobs(
             commands.entity(*entity).despawn();
         }
     }
-    let daylight = sky.map_or(1.0, |s| s.0.daylight(&s.0.at(s.0.hour(world.tick()))));
+    let daylight = sky.map_or(1.0, |s| s.daylight(world.tick(), &shift));
     let all: Vec<&mob::Mob> = list.iter().map(|m| &**m).collect();
     for born in spawn::spawn(world, &all, player.feet, seed, daylight) {
         spawn_mob(&mut commands, born.content, Vec3::from_array(born.feet), born.yaw, true);

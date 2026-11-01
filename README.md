@@ -56,6 +56,7 @@ cargo run
 | G | debug: one of every solid block |
 | F1 – F4 | render effects on/off: sun shadows, distance fog, volumetric fog (light shafts), bloom; off by default on software rendering |
 | F5 | debug: one hour later (not saved); the hour shows in the debug HUD |
+| T | debug console: `/tp x y z` (metres), `/give <id> [count]`, `/gauge <name> <value>`, `/time <hour>` (not saved), `/mob <id>`, `/help`; Enter runs, Esc closes |
 | Esc | release the mouse |
 
 On WSL2, rendering goes through llvmpipe (CPU) and the mouse has its quirks
@@ -174,6 +175,7 @@ src/                  Bevy binary: plugs the core into the ECS
   effects.rs          render effects: sun shadows, fog, volumetric fog, bloom (F1–F4)
   sky.rs              day and night: sun or moon, ambient light, sky dome, fog colour
   survival.rs         player gauges each tick, their bars, death and respawn
+  console.rs          debug console (T): parses and runs the /commands
   save.rs             save writes and player/items/entities restore
 assets/               content (core.ron, worldgen.ron, sky.ron, survival.ron), textures (PNG), shaders (voxel.wgsl, sky.wgsl)
 crates/voxel_core/    the WHOLE voxel core: pure, no Bevy dependency

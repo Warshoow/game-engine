@@ -1386,3 +1386,30 @@ que le joueur fait évoluer (de la lave partout → la région chauffe →
 d'autres mobs apparaissent). Un agent annexe a relevé que la jauge de
 température prévue est portée par le joueur et que les mobs ne peuvent
 pas la lire : c'est un autre mécanisme, noté comme tel dans #65.
+
+## 2026-11-01 — Console de debug (#19)
+
+Choisie par Warshow juste après #33 : « cela va nous simplifier la taff ».
+Le design doc prévoyait egui pour le debug. Pour une ligne de saisie, une
+dépendance de plus (dont la dernière version demande Bevy 0.20) et un
+deuxième système d'UI ne se justifiaient pas : la fenêtre de jeu et le
+champ de texte de la touche I existaient déjà. Doc amendé (§3.11),
+options gardées dans #67. Warshow a voulu des commandes en anglais
+préfixées par `/`.
+
+**La lecture est séparée de l'exécution.** `parse` rend une commande ou
+le message d'erreur, sans toucher au monde : c'est ce qui se teste sans
+fenêtre. L'exécution résout les noms dans le registre et `survival.ron`,
+jamais dans une liste en dur.
+
+**Deux pièges vus avant Warshow.** Le champ de la console était aussi
+lu par la génération (touche I), qui prend « le » champ ouvert : elle
+vérifie maintenant que sa propre fenêtre est là. Et une téléportation
+depuis une montagne vers la plaine aurait compté toute la différence de
+hauteur comme une chute : la chute se mesure depuis le point d'arrivée.
+
+**L'heure décalée.** Un agent annexe a relevé que F5 et `/time` ne
+changeaient que le ciel : l'apparition des mobs et les règles `Daylight`
+recalculaient la lumière depuis l'horloge seule. Une nuit « à l'écran »
+n'aurait rien fait apparaître pendant l'essai #63. Tout lit maintenant la
+même heure. Le décalage n'est toujours pas sauvé.

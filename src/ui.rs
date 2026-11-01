@@ -49,7 +49,7 @@ pub fn open(commands: &mut Commands, opened: &Query<Entity, With<GameWindow>>, t
 }
 
 /// Champ de saisie : le texte tapé au clavier, affiché par son [`Text`].
-/// Tant qu'il existe, les touches de raccourci (C, R, G, I, F) sont
+/// Tant qu'il existe, les touches de raccourci (C, R, G, I, T, F) sont
 /// coupées — voir [`not_typing`] (R : dans `content::apply_content`).
 #[derive(Component, Default)]
 pub struct TextField(pub String);

@@ -117,9 +117,14 @@ pub fn start_generation(
     keys: Res<ButtonInput<KeyCode>>,
     game: Res<GameWorld>,
     mut generation: ResMut<Generation>,
+    window: Query<(), With<GenerateWindow>>,
     field: Query<&TextField>,
 ) {
     let Ok(field) = field.single() else { return };
+    // Le champ peut être celui de la console.
+    if window.is_empty() {
+        return;
+    }
     if !keys.just_pressed(KeyCode::Enter) || field.0.trim().is_empty() || generation.pending.is_some() {
         return;
     }

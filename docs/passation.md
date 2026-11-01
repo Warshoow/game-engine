@@ -711,6 +711,19 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   mettre à jour tickets, docs et mémoire si besoin, puis compacte à la
   fin de ce tour. Un tour de mise à jour arrive donc avant chaque
   compaction : y faire seulement ces mises à jour.
+- #19 console de debug, choisie par Warshow comme chantier suivant (pour
+  accélérer les essais). Options comparées (egui, `bevy_console`, la
+  nôtre, terminal) ; retenue : la nôtre, une fenêtre `bevy_ui` avec le
+  champ de la touche I (design doc §3.11 ; options : #67). T ouvre ;
+  commandes en anglais avec `/` (demande de Warshow) : `/tp`, `/give`,
+  `/gauge`, `/time`, `/mob`, `/help`. Lecture des lignes testée
+  (`console::parse`). La téléportation mesure la chute depuis le point
+  d'arrivée (`Vitals::teleported`). Un agent annexe a relevé que le
+  décalage d'heure (F5, `/time`) ne touchait que le ciel : mobs et
+  jauges lisent maintenant la même heure (`WorldSky::hour`). Vu sous WSL
+  en tapant les commandes par XTest (`keys.py` du scratchpad, ctypes sur
+  libXtst : pas de xdotool) : pain donné, jauge, téléportation + chute,
+  nuit, cochon posé, commande inconnue.
 
 ## Prochaines étapes
 
