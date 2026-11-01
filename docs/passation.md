@@ -752,6 +752,26 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   Restent en mémoire, voulu ou à voir plus tard : les données des
   chunks (1125 après la marche) et les niveaux de liquide (27 000).
   Exe RTX pas refaits : à refaire si Warshow refait la longue marche.
+- **Combat et jauges des mobs** (#68, reportés de #65), choisis par
+  Warshow comme chantier suivant ; option B retenue (« je te fais
+  confiance »). L'entrée `EntityType` déclare `vitals` (même forme que
+  `survival.ron`) et `drops` ; une entrée déclare `hit` (`change`,
+  `push` en m/s), la main nue `hand` dans `survival.ron`. Le clic gauche
+  frappe le plus proche, bloc ou mob (contour noir sur le mob visé) ;
+  mort → disparaît et lâche ses `drops`. Jauges des mobs sauvées par nom
+  dans `mobs.ron` (6e champ ; les anciens fichiers se lisent). Contenu
+  d'exemple : cochon (vie 10, souffle, chute ; lâche `core:pork`),
+  `core:sword` (−5, recul 5 m/s ; planches ×2 + pierre à l'établi), main
+  −1. Coût mesuré : 0,23 µs par mob et par tick (physique : 0,30 µs) ;
+  une horde serait limitée d'abord par le dessin et la recherche de
+  chemin. Défaut trouvé en route : un mob qui tombait dans un liquide
+  rebondissait dessus (il « sautait » dès que ses pieds touchaient le
+  liquide, yeux dehors) ; il ne nage plus vers le haut qu'avec la tête
+  dedans ou un chemin à suivre. Vu sous WSL : deux coups d'épée tuent un
+  cochon posé, qui lâche son porc. **Les mobs n'attaquent pas encore le
+  joueur** (reporté dans #68, signalé par un agent annexe) : c'est le
+  pas suivant naturel pour des hordes de nuit.
+  DeepSeek : rien en 5 minutes, deuxième fois de suite.
 
 ## Prochaines étapes
 
@@ -793,7 +813,9 @@ en jeu ; options écartées : #58). #15 modèles d'entités (fait le
 par tranches, `Swing`/`Look` ; validé sous Windows ; options : #61).
 #60 apparition des mobs (fait le 2026-10-30, **à essayer en jeu : #63** ;
 options : #62). #33 vie et survie (fait le 2026-11-01 : jauges en
-donnée ; validé sous Windows, #33 et #66 fermés ; options : #65). **Tout ce qui attend la 4060** (#53, #51, #30, #23, la
+donnée ; validé sous Windows, #33 et #66 fermés ; options : #65).
+Combat et jauges des mobs (fait le 2026-11-01, à essayer sous Windows ;
+options : #68). Suite proposée : des mobs qui attaquent le joueur. **Tout ce qui attend la 4060** (#53, #51, #30, #23, la
 mer, le coût des mobs) est rassemblé dans **#64** (label `qa`).
 Ce qui a été reporté (#18, #27, #28) est listé
 dans `docs/jalons.md`, « Plus tard », et dans #49.

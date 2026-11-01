@@ -1431,3 +1431,29 @@ ce log les FPS ont peu baissé (84 → 76). À confirmer par une nouvelle
 marche. Corrigé là où les chunks se déchargent : les deux entités passent par
 la même boucle. Un test marche 500 m et vérifie qu'il reste autant
 d'entités d'eau que de chunks affichés.
+
+## 2026-11-01 — Les mobs ont des jauges, le joueur les frappe (#68)
+
+Un cochon dans la lave ne mourait pas : seuls les joueurs avaient des
+jauges. Plutôt qu'une vie fixe par mob (Minecraft) ou un seul nombre, le
+mob reçoit la même forme que `survival.ron` dans son entrée. Le pas des
+jauges du joueur ne lisait que le corps, le monde et des noms : il sert
+tel quel. Comme tout passe par le nom de la jauge, la lave qui retire de
+la `health` au joueur en retire à tout mob qui en a une, sans règle de
+plus. Un jeu choisit les jauges de chaque mob ; le moteur n'en connaît
+toujours aucune. Options écartées dans #68.
+
+Warshow a demandé si ça tiendrait avec beaucoup de mobs (élevage,
+hordes de nuit). Mesuré plutôt qu'estimé : 0,23 µs par mob et par tick,
+moins que sa physique. Une horde butera d'abord sur le dessin (un mesh
+par partie et par mob) et sur la recherche de chemin (64 cases par tick
+pour tous).
+
+Le premier test a montré un défaut des mobs d'avant : tombé dans la
+lave, le cochon rebondissait dessus. Un mob nageait vers le haut dès
+que ses pieds touchaient un liquide, et la physique fait sauter un corps
+dont la tête est hors du liquide (c'est ainsi qu'on remonte sur la
+berge). Il ne touchait la lave que trois ticks par bond. Il ne nage
+maintenant que la tête sous le liquide ou avec un chemin à suivre ; le
+joueur, qui ne nage que sur Espace, n'est pas touché.
+
