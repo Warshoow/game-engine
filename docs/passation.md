@@ -724,6 +724,10 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   en tapant les commandes par XTest (`keys.py` du scratchpad, ctypes sur
   libXtst : pas de xdotool) : pain donné, jauge, téléportation + chute,
   nuit, cochon posé, commande inconnue.
+- Exe de `Downloads\voxel_engine_rtx` refaits après #19 (normal et
+  profilage, `cmp` et `diff -r` OK) ; `LISEZMOI.txt` : scénario
+  « chargement » et commandes de console. Points de la console ajoutés à
+  #64 (point 8). Warshow fait l'essai sur la RTX ensuite.
 
 ## Prochaines étapes
 
