@@ -12,6 +12,9 @@ set NO_COLOR=1
 rem Seulement les systemes, les schedules et les diagnostics : le reste
 rem (executeur de Bevy, internes du rendu) gonfle la trace pour rien.
 set RUST_LOG=warn,bevy_ecs::system=info,bevy_ecs::schedule::schedule=info,bevy_diagnostic=info,bevy_render::renderer=info,voxel_engine=info,voxel_core=info
+rem Deuxieme argument "log" : seulement le log toutes les 5 s, sans le temps
+rem par systeme (trace minuscule) : pour une longue marche.
+if "%2"=="log" set RUST_LOG=warn,bevy_diagnostic=info,voxel_engine=info,voxel_core=info
 voxel_engine_profile.exe > log-%NAME%.txt 2>&1
 rem La trace fait des Go ; zippee, environ 25 fois moins.
 echo Compression de la trace...

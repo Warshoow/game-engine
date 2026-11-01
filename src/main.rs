@@ -268,8 +268,27 @@ fn main() {
         bevy::diagnostic::EntityCountDiagnosticsPlugin::default(),
         bevy::diagnostic::SystemInformationDiagnosticsPlugin,
         bevy::render::diagnostic::RenderDiagnosticsPlugin,
-    ));
+    ))
+    .add_systems(Update, log_world_tables);
     app.run();
+}
+
+/// Toutes les 5 s dans le log de profilage : les tables du monde, les mobs
+/// et la position, pour voir ce qui grossit pendant une longue marche.
+#[cfg(feature = "profile")]
+fn log_world_tables(
+    time: Res<Time>,
+    mut next: Local<f32>,
+    game: Res<GameWorld>,
+    mobs: Query<(), With<entities::Mob>>,
+    player: Query<&player::Player>,
+) {
+    if time.elapsed_secs() < *next {
+        return;
+    }
+    *next = time.elapsed_secs() + 5.0;
+    let feet = player.single().map_or(Vec3::ZERO, |p| p.feet());
+    info!("monde : {} · mobs {} · joueur {:.0} {:.0} {:.0}", game.world.table_sizes(), mobs.iter().count(), feet.x, feet.y, feet.z);
 }
 
 fn setup_world(

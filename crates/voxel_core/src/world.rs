@@ -341,6 +341,22 @@ impl VoxelWorld {
         self.block_entities.keys().copied().filter(|&v| self.split(v).0 == pos).collect()
     }
 
+    /// Tailles des tables du monde, pour le log du build de profilage : ce
+    /// qui grossit pendant une longue marche.
+    pub fn table_sizes(&self) -> String {
+        format!(
+            "chunks {} · minuteurs {} (file {}) · niveaux de liquide {} · réexamens {} (file {}) · rotations {} · block-entities {}",
+            self.chunks.len(),
+            self.timers.len(),
+            self.queue.len(),
+            self.levels.len(),
+            self.pending.len(),
+            self.updates.len(),
+            self.rotations.len(),
+            self.block_entities.len(),
+        )
+    }
+
     /// Les chunks modifiés depuis le dernier appel, et oublie la liste.
     pub fn take_edited(&mut self) -> Vec<ChunkPos> {
         self.edited.drain().collect()
