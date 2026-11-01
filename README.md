@@ -173,8 +173,9 @@ src/                  Bevy binary: plugs the core into the ECS
   ui.rs               game windows: one at a time, frees the mouse, item slot, text field
   effects.rs          render effects: sun shadows, fog, volumetric fog, bloom (F1–F4)
   sky.rs              day and night: sun or moon, ambient light, sky dome, fog colour
+  survival.rs         player gauges each tick, their bars, death and respawn
   save.rs             save writes and player/items/entities restore
-assets/               content (core.ron, worldgen.ron, sky.ron), textures (PNG), shaders (voxel.wgsl, sky.wgsl)
+assets/               content (core.ron, worldgen.ron, sky.ron, survival.ron), textures (PNG), shaders (voxel.wgsl, sky.wgsl)
 crates/voxel_core/    the WHOLE voxel core: pure, no Bevy dependency
   registry.rs         append-only content registry
   chunk.rs            palette chunk
@@ -195,6 +196,7 @@ crates/voxel_core/    the WHOLE voxel core: pure, no Bevy dependency
   mob.rs              mob behaviours (Wander, Follow, LookAt), one tick for all mobs
   path.rs             A* over the grid's cells, run in slices across ticks
   spawn.rs            mob spawning rules near the player, despawning far from it
+  survival.rs         gauges and their rules (survival.ron), fall, touched blocks, food
   save.rs             world folder, binary chunk format
 docs/                 in French
   jalons.md                      milestones, in order

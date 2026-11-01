@@ -100,6 +100,10 @@ pub struct BlockData {
     /// Comment il se tourne à la pose (#14).
     #[serde(default)]
     pub orient: Orient,
+    /// Variations de jauges par seconde tant que le corps le touche (#33,
+    /// voir [`crate::survival`]) : `[("health", -4.0)]` pour la lave.
+    #[serde(default)]
+    pub touching: Vec<(String, f32)>,
 }
 
 impl BlockData {
@@ -108,6 +112,9 @@ impl BlockData {
         self.collision.as_deref().or(self.shape.as_deref())
     }
 }
+
+/// Variations de jauges au plus dans `touching` et `eaten` réunis.
+const MAX_CHANGES: usize = 16;
 
 /// Portée maximale d'un bloc lumineux, en mètres : borne le calcul de
 /// lumière quand un bloc en pose ou en retire un.
@@ -202,6 +209,10 @@ pub struct ContentEntry {
     pub kind: Kind,
     #[serde(default)]
     pub recipes: Vec<Recipe>,
+    /// Variations de jauges d'un coup quand on la mange (#33, voir
+    /// [`crate::survival`]) : `[("hunger", 300.0)]` pour du pain.
+    #[serde(default)]
+    pub eaten: Vec<(String, f32)>,
 }
 
 impl ContentEntry {
@@ -224,8 +235,10 @@ impl ContentEntry {
                 shape: None,
                 collision: None,
                 orient: Orient::Fixed,
+                touching: Vec::new(),
             }),
             recipes: Vec::new(),
+            eaten: Vec::new(),
         }
     }
 
@@ -314,7 +327,14 @@ impl Registry {
         let registry = self;
         for (_, entry) in registry.iter() {
             let block = entry.block();
-            if let Some(reason) = block.and_then(invalid_value).or_else(|| entry.entity().and_then(EntityData::invalid)) {
+            let changes = block.map_or(&[][..], |b| &b.touching).iter().chain(&entry.eaten);
+            let bad_change = changes.clone().count() > MAX_CHANGES || changes.clone().any(|(_, v)| !v.is_finite());
+            let bad_change = bad_change.then(|| format!("touching / eaten : {MAX_CHANGES} variations finies au plus"));
+            if let Some(reason) = block
+                .and_then(invalid_value)
+                .or_else(|| entry.entity().and_then(EntityData::invalid))
+                .or(bad_change)
+            {
                 return Err(LoadError::Invalid { id: entry.identifier.clone(), reason });
             }
             let drops = block.into_iter().flat_map(|b| b.drops.iter().flatten());

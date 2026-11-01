@@ -18,7 +18,9 @@ use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, MonitorSelection, PrimaryWindow, WindowMode};
 
 use voxel_core::physics::Body;
+use voxel_core::survival::Vitals;
 
+use crate::survival::{PlayerVitals, SurvivalRules};
 use crate::GameWorld;
 
 // Gabarit et dynamique du joueur — en mètres et mètres/seconde.
@@ -88,6 +90,10 @@ impl Player {
     pub fn look(&self) -> (f32, f32) {
         (self.yaw, self.pitch)
     }
+
+    pub fn body(&self) -> &Body {
+        &self.body
+    }
 }
 
 #[derive(Component)]
@@ -103,14 +109,19 @@ pub struct PlayerCamera;
 #[derive(Resource, Default)]
 pub struct CursorCaptured(pub bool);
 
-pub fn spawn_player(mut commands: Commands, game: Res<GameWorld>) {
-    // Spawn au-dessus du terrain, interrogé en mètres — jamais en blocs.
-    // 8 m plus haut : un arbre peut pousser là (#27), le joueur tombe sur
-    // le sol ou sur son feuillage au lieu de naître dans le tronc.
-    let feet = Vec3::new(0.5, game.generator.terrain.height_m(0.5, 0.5) + 8.0, 0.5);
+/// Le départ du monde : au-dessus du terrain, interrogé en mètres — jamais
+/// en blocs. 8 m plus haut : un arbre peut pousser là (#27), le joueur tombe
+/// sur le sol ou sur son feuillage au lieu de naître dans le tronc.
+pub fn spawn_point(game: &GameWorld) -> Vec3 {
+    Vec3::new(0.5, game.generator.terrain.height_m(0.5, 0.5) + 8.0, 0.5)
+}
+
+pub fn spawn_player(mut commands: Commands, game: Res<GameWorld>, rules: Res<SurvivalRules>) {
+    let feet = spawn_point(&game);
     commands
         .spawn((
             Player::at(feet),
+            PlayerVitals(Vitals::new(&rules.0)),
             Transform::from_translation(feet),
             Visibility::default(),
         ))

@@ -49,6 +49,10 @@ pub struct PlayerSave {
     pub inventory: Vec<(ContentId, u32)>,
     /// Case choisie (`inventory.len()` = main vide).
     pub selected: usize,
+    /// Jauges (#33), par nom ; absentes d'une save plus ancienne : à leur
+    /// départ.
+    #[serde(default)]
+    pub gauges: Vec<(String, f32)>,
 }
 
 /// Items au sol : entrée et position des pieds en mètres. La vitesse n'est
@@ -444,7 +448,7 @@ mod tests {
         assert_eq!(save.read_meta().unwrap(), Some(meta));
         assert_eq!(save.read_registry().unwrap().lookup("t:bench"), Some(bench));
 
-        let player = PlayerSave { feet: [1.0, 2.0, 3.0], yaw: 0.5, pitch: -0.2, inventory: vec![(bench, 3)], selected: 1 };
+        let player = PlayerSave { feet: [1.0, 2.0, 3.0], yaw: 0.5, pitch: -0.2, inventory: vec![(bench, 3)], selected: 1, gauges: vec![("health".into(), 7.5)] };
         save.write_player(&player).unwrap();
         assert_eq!(save.read_player().unwrap(), Some(player));
 

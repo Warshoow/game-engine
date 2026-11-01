@@ -10,11 +10,13 @@ use bevy::prelude::*;
 
 use voxel_core::chunk::ChunkPos;
 use voxel_core::save::{encode_chunk, PlayerSave, Save};
+use voxel_core::survival::Vitals;
 
 use crate::inventory::Inventory;
 use crate::entities::{Mob, MobIds};
 use crate::items::{DroppedItem, ItemVisual};
 use crate::player::{Player, PlayerCamera};
+use crate::survival::{PlayerVitals, SurvivalRules};
 use crate::GameWorld;
 
 /// Toutes les combien de secondes joueur et items au sol sont écrits (en
@@ -100,7 +102,8 @@ pub fn save_player_and_items(
     mut since: Local<f32>,
     mut exit: MessageReader<AppExit>,
     save: Option<Res<WorldSave>>,
-    player: Query<&Player>,
+    player: Query<(&Player, &PlayerVitals)>,
+    rules: Res<SurvivalRules>,
     inventory: Res<Inventory>,
     items: Query<&DroppedItem>,
     mobs: Query<&Mob>,
@@ -124,10 +127,11 @@ pub fn save_player_and_items(
     if let Err(err) = save.0.write_items(&dropped) {
         error!("sauvegarde des items au sol impossible : {err}");
     }
-    let Ok(player) = player.single() else { return };
+    let Ok((player, vitals)) = player.single() else { return };
     let (yaw, pitch) = player.look();
     let (inventory, selected) = inventory.to_save();
-    let state = PlayerSave { feet: player.feet().to_array(), yaw, pitch, inventory, selected };
+    let gauges = vitals.0.saved(&rules.0);
+    let state = PlayerSave { feet: player.feet().to_array(), yaw, pitch, inventory, selected, gauges };
     if let Err(err) = save.0.write_player(&state) {
         error!("sauvegarde du joueur impossible : {err}");
     }
@@ -138,7 +142,8 @@ pub fn save_player_and_items(
 pub fn restore_player(
     save: Option<Res<WorldSave>>,
     mut inventory: ResMut<Inventory>,
-    mut player: Query<(&mut Player, &mut Transform), Without<PlayerCamera>>,
+    rules: Res<SurvivalRules>,
+    mut player: Query<(&mut Player, &mut PlayerVitals, &mut Transform), Without<PlayerCamera>>,
     mut camera: Query<&mut Transform, With<PlayerCamera>>,
 ) {
     let Some(save) = save else { return };
@@ -149,9 +154,10 @@ pub fn restore_player(
         // le monde (rien de perdu côté voxels).
         Err(err) => return error!("joueur non restauré : {err}"),
     };
-    let Ok((mut player, mut transform)) = player.single_mut() else { return };
+    let Ok((mut player, mut vitals, mut transform)) = player.single_mut() else { return };
     let feet = Vec3::from_array(state.feet);
     *player = Player::restored(feet, state.yaw, state.pitch);
+    vitals.0 = Vitals::restored(&rules.0, &state.gauges);
     transform.translation = feet;
     transform.rotation = Quat::from_rotation_y(state.yaw);
     if let Ok(mut cam) = camera.single_mut() {

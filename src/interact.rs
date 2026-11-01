@@ -44,6 +44,7 @@ use crate::player::{CursorCaptured, Player, PLAYER_HEIGHT_M, PLAYER_WIDTH_M, Pla
 use crate::inventory::Inventory;
 use crate::entities;
 use crate::items::{DroppedItem, ItemVisual, StorageChanged};
+use crate::survival::{PlayerVitals, SurvivalRules};
 use crate::{ChunkMesh, DirtyChunks, GameWorld};
 
 /// Portée de la main, en mètres (§2 — jamais « en blocs »).
@@ -89,7 +90,7 @@ pub fn highlight_target(
     }
 }
 
-// Un système Bevy prend ses ressources en paramètres : 10 ici (entrée,
+// Un système Bevy prend ses ressources en paramètres : 13 ici (entrée,
 // monde, inventaire, caméra, joueur…), c'est la forme normale.
 #[allow(clippy::too_many_arguments)]
 pub fn interact(
@@ -103,6 +104,8 @@ pub fn interact(
     mut storage: ResMut<StorageChanged>,
     camera: Query<&GlobalTransform, With<PlayerCamera>>,
     player: Query<&Player>,
+    rules: Res<SurvivalRules>,
+    mut vitals: Query<&mut PlayerVitals>,
 ) {
     // On n'interagit qu'en mode FPS — et comme ce système tourne AVANT
     // `cursor_grab` (voir l'ordre du plugin), le clic qui active le mode
@@ -113,9 +116,15 @@ pub fn interact(
         return;
     }
     let Ok(cam) = camera.single() else { return };
-    let Some(hit) = aim(&game.world, cam) else { return };
-    let now = game.world.tick();
     let holding = inventory.selected();
+    // Manger (#33) : sans rien viser, une entrée à `eaten` (bloc compris).
+    let Some(hit) = aim(&game.world, cam) else {
+        if right_click {
+            eat(&game, &rules, &mut vitals, &mut inventory, holding);
+        }
+        return;
+    };
+    let now = game.world.tick();
     let ctx = context(&game, holding, now, hit.voxel);
     let mut edit = Edit {
         commands: &mut commands,
@@ -150,6 +159,15 @@ pub fn interact(
     {
         let actions = rules::actions(&edit.game.world.registry, target, Hook::Used, ctx);
         edit.apply(hit.voxel, &actions);
+        return;
+    }
+
+    // Un item à `eaten` se mange en visant un bloc (il ne se pose pas) ; un
+    // bloc à `eaten` se pose, il se mange en ne visant rien.
+    if holding.and_then(|id| edit.game.world.registry.get(id)).is_some_and(|e| e.block().is_none() && !e.eaten.is_empty()) {
+        if let Some(inventory) = edit.inventory.as_deref_mut() {
+            eat(edit.game, &rules, &mut vitals, inventory, holding);
+        }
         return;
     }
 
@@ -216,6 +234,16 @@ pub fn interact(
         let ctx = context(edit.game, holding, now, target);
         let actions = rules::actions(&edit.game.world.registry, held, Hook::Placed, ctx);
         edit.apply(target, &actions);
+    }
+}
+
+/// Mange `holding` s'il déclare `eaten` et qu'une jauge en change : il
+/// quitte l'inventaire.
+fn eat(game: &GameWorld, rules: &SurvivalRules, vitals: &mut Query<&mut PlayerVitals>, inventory: &mut Inventory, holding: Option<ContentId>) {
+    let Some(entry) = holding.and_then(|id| game.world.registry.get(id)) else { return };
+    let Ok(mut vitals) = vitals.single_mut() else { return };
+    if !entry.eaten.is_empty() && vitals.0.eat(&rules.0, &entry.eaten) {
+        inventory.take_selected();
     }
 }
 

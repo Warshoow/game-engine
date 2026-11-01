@@ -1,0 +1,29 @@
+// Jauges et survie (#33, design doc §3.6). Le moteur ne connaît aucune de
+// ces jauges : un autre jeu en ajoute (température, oxygène en profondeur)
+// ou retire ce fichier (le joueur ne meurt plus), sans toucher au Rust.
+//
+// Une jauge : `name`, `max`, `start` (absent : max), `bar` (couleur sRGB,
+// `show: Always` ou `NotFull`). Une règle : tant que toutes les conditions
+// de `when` sont vraies, chaque jauge de `change` varie de tant par
+// seconde. Conditions : HeadInLiquid, Below(m), Gauge(nom, (min, max)),
+// Daylight((min, max)), Not(condition). Les blocs déclarent `touching`,
+// la nourriture `eaten` (dans core.ron).
+(
+    gauges: [
+        (name: "health", max: 20.0, bar: Some((color: (0.85, 0.15, 0.15)))),
+        // En secondes : un ventre plein tient 20 minutes.
+        (name: "hunger", max: 1200.0, bar: Some((color: (0.80, 0.55, 0.20)))),
+        (name: "breath", max: 15.0, bar: Some((color: (0.40, 0.70, 1.00), show: NotFull))),
+    ],
+    rules: [
+        (change: [("hunger", -1.0)]),
+        // Affamé : on perd de la vie ; nourri : on en regagne.
+        (when: [Gauge("hunger", (0.0, 0.0))], change: [("health", -0.5)]),
+        (when: [Not(Gauge("hunger", (0.0, 0.0)))], change: [("health", 0.1)]),
+        (when: [HeadInLiquid], change: [("breath", -1.0)]),
+        (when: [Not(HeadInLiquid)], change: [("breath", 5.0)]),
+        (when: [Gauge("breath", (0.0, 0.0))], change: [("health", -2.0)]),
+    ],
+    fall: Some((gauge: "health", safe: 3.5, per_m: 1.0)),
+    death: Some((gauge: "health", keep_inventory: false)),
+)

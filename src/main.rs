@@ -13,6 +13,7 @@ mod player;
 mod save;
 mod sky;
 mod streaming;
+mod survival;
 mod ui;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -206,7 +207,7 @@ fn main() {
         .insert_resource(Time::<Fixed>::from_hz(f64::from(TICKS_PER_SECOND)))
         .add_systems(
             Startup,
-            (setup_world, player::spawn_player, save::restore_player, save::restore_items, save::restore_mobs, inventory::spawn_hotbar).chain(),
+            (setup_world, player::spawn_player, save::restore_player, save::restore_items, save::restore_mobs, inventory::spawn_hotbar, survival::spawn_bars).chain(),
         )
         // Pose/casse puis streaming notent les chunks sales ; on meshe après.
         .add_systems(
@@ -236,6 +237,7 @@ fn main() {
                 inventory::click_recipe,
                 ui::close_on_escape,
                 inventory::update_hotbar.after(inventory::scroll_selection),
+                survival::update_bars,
                 save::save_edited_chunks.after(interact::interact),
             ),
         )
@@ -250,6 +252,7 @@ fn main() {
                 items::simulate_items.after(player::physics_step),
                 entities::simulate_mobs.after(player::physics_step),
                 interact::tick_blocks,
+                survival::step_vitals.after(player::physics_step),
             ),
         );
     // Diagnostics toutes les 5 s dans la console : images, entités, CPU et
@@ -317,6 +320,11 @@ fn setup_world(
             .unwrap_or_else(|| panic!("{} : {e}", sky_path.display())),
     };
     let sky = Sky::from_ron(&sky_text).unwrap_or_else(|e| panic!("ciel invalide : {e}"));
+    // Jauges (#33) : même chemin que le ciel ; sans fichier, pas de survie.
+    let rules = survival::load(&save).unwrap_or_else(|e| panic!("survie invalide : {e}"));
+    for name in rules.unknown_gauges(&registry) {
+        warn!("jauge « {name} » citée par le contenu mais absente de survival.ron : ignorée");
+    }
     let air = generator.terrain.air;
 
     // --- Le monde démarre VIDE : c'est le streaming (Update) qui génère et
@@ -339,6 +347,7 @@ fn setup_world(
     let blend_material = chunk_material(AlphaMode::Blend);
 
     commands.insert_resource(sky::WorldSky(sky));
+    commands.insert_resource(survival::SurvivalRules(rules));
     commands.insert_resource(save::ChunkWriter::new(save.clone()));
     commands.insert_resource(save::WorldSave(save));
     commands.insert_resource(GameWorld {
@@ -360,7 +369,7 @@ fn setup_world(
         },
     ));
     commands.spawn((
-        Text::new("Clic gauche : jouer · Échap : libérer la souris · F : plein écran\nWASD/Espace : bouger · gauche : casser · droit : utiliser/poser · Maj+droit : poser · molette : bloc · C : fabriquer (menu) · I : générer un bloc (IA) · R : recharger le contenu · G : un de chaque bloc (debug) · F1-F4 : effets"),
+        Text::new("Clic gauche : jouer · Échap : libérer la souris · F : plein écran\nWASD/Espace : bouger · gauche : casser · droit : utiliser/poser/manger · Maj+droit : poser · molette : bloc · C : fabriquer (menu) · I : générer un bloc (IA) · R : recharger le contenu · G : un de chaque bloc (debug) · F1-F4 : effets"),
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(12.0),
