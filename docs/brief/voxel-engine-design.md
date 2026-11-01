@@ -1,6 +1,6 @@
 # Moteur Voxel — Design du Socle
 
-> **Statut :** v0.1 — v0 figé pour le prototypage ; 2026-10-07 : recettes (§3.1), cycle de vie des block-entities (§3.3), forme du comportement (§3.6) ; 2026-10-08 : apparence (§3.1), persistance (§3.10), principe « mécanismes, pas règles de jeu » (§2), textures calculées (§3.1), génération en jeu (§3.6), réglages du worldgen dans la save (§3.10) ; 2026-10-21 : blocs à trous (§3.1) ; 2026-10-22 : blocs qui évoluent seuls (§3.6, §3.10) ; 2026-10-25 : liquides et semi-transparent (§3.1, §3.2, §3.6, §3.10), ombrage des coins (§3.8) ; 2026-10-30 : formes de blocs, modèles d'entités (§3.1), comportement et apparition des mobs (§3.6).
+> **Statut :** v0.1 — v0 figé pour le prototypage ; 2026-10-07 : recettes (§3.1), cycle de vie des block-entities (§3.3), forme du comportement (§3.6) ; 2026-10-08 : apparence (§3.1), persistance (§3.10), principe « mécanismes, pas règles de jeu » (§2), textures calculées (§3.1), génération en jeu (§3.6), réglages du worldgen dans la save (§3.10) ; 2026-10-21 : blocs à trous (§3.1) ; 2026-10-22 : blocs qui évoluent seuls (§3.6, §3.10) ; 2026-10-25 : liquides et semi-transparent (§3.1, §3.2, §3.6, §3.10), ombrage des coins (§3.8) ; 2026-10-30 : formes de blocs, modèles d'entités (§3.1), comportement et apparition des mobs (§3.6) ; 2026-11-01 : jauges et survie (§3.6, §3.10).
 > **Nature :** ceci est un `intent/` — la source de vérité du socle. On lit **avant** d'écrire. Toute décision qui contredit ce doc doit d'abord **modifier ce doc** (avec sa justification), pas le contourner en douce dans le code.
 > **Portée :** ce document décrit un **socle**, pas un jeu. Aucun système de gameplay (survie, magie, armes, quêtes…) n'est spécifié ici. Le socle est le substrat sur lequel ces systèmes se branchent sans toucher au core.
 
@@ -185,6 +185,16 @@ Options écartées ou reportées (arbres de comportement, utility AI, navmesh, f
 
 Options écartées ou reportées (Minecraft, génération du chunk, population recalculée depuis la seed, effet `Spawn` de bloc, rangement par chunk…) : #62.
 
+**Jauges et survie** (ajout 2026-11-01, #33). Le moteur ne connaît ni la vie ni la faim : il fournit des **jauges**, déclarées en donnée dans `assets/content/survival.ron` (le fichier du jeu prime, la save en garde une copie, comme le ciel). Une jauge : un nom, un maximum, une valeur de départ (le maximum par défaut), une barre à l'écran ou non (couleur, toujours ou seulement quand elle n'est pas pleine). Une **règle de jauge** : des conditions sur le joueur et, tant qu'elles sont vraies, des variations en unités par seconde, appliquées au tick fixe. Toutes les règles lisent les valeurs du début du tick, puis leurs variations s'additionnent ; une jauge reste entre 0 et son maximum. Vie, faim, souffle ne sont que des jauges écrites ainsi ; un jeu ajoute température ou oxygène en profondeur sans Rust.
+- **Conditions** (vocabulaire append-only, comme les hooks) : `HeadInLiquid` (les yeux dans un liquide), `Below(m)` (pieds sous cette hauteur), `Gauge(nom, plage)`, `Daylight(plage)` (force du jour, dans [0, 1]), `Not(condition)`.
+- **Ailleurs dans la donnée** : un bloc déclare `touching` (variations par seconde tant que le corps le touche : lave, cactus ; une seule fois par sorte de bloc touchée) ; une entrée déclare `eaten` (variations d'un coup, mangée au clic droit : un item toujours, un bloc quand on ne vise rien ; refusée si elle ne changerait rien).
+- **Chute** : la hauteur tombée en mètres depuis le dernier contact avec le sol (un liquide la remet à zéro) ; au-delà de `safe`, `per_m` par mètre retiré de la jauge nommée.
+- **Mort** : quand la jauge nommée par `death` tombe à 0, le joueur réapparaît au départ du monde, jauges à leur départ, inventaire lâché sur place ou gardé selon la donnée.
+- **Sans `survival.ron`**, aucune jauge : le joueur ne meurt pas. Une entrée qui cite une jauge inconnue n'est pas refusée (un monde doit se charger dans un jeu sans survie) : la variation est ignorée, avec un avertissement au démarrage.
+- Les mobs n'ont pas encore de jauges : même structure sur leur entrée, avec le combat.
+
+Options écartées ou reportées (règles de Minecraft, quatre jauges fixes, dégâts par les seules règles de blocs, chute à la vitesse d'impact, `Near`, variables d'environnement du monde…) : #65.
+
 **La limite assumée :** un contenu, même scripté, ne fait que combiner ce que le moteur expose. Il invente de la logique, pas un nouveau rendu, un nouveau type de physique ou un nouveau genre de fenêtre. La surface du vocabulaire borne la créativité ; elle s'élargit quand un contenu concret en a besoin (§4).
 
 **Coût de changement :** Day-1 pour le principe (comportement = data/script) et pour le contrat append-only du vocabulaire. Le runtime concret et la surface exacte du vocabulaire sont mous.
@@ -246,6 +256,7 @@ Contenu logique d'une save :
 7. **Horloge du monde et minuteurs** (ajout 2026-10-22, #34) : le numéro du tick fixe courant, et pour chaque chunk ses minuteurs en attente (position, échéance en ticks, règle). Le tick fixe vaut 1/64 s, constante du moteur : changer ce pas change le sens des échéances sauvées.
 8. **Liquides** (ajout 2026-10-25, #28) : par chunk, le niveau des cases qui coulent et les réexamens programmés (position, échéance). Sans eux, une eau sauvée en plein écoulement resterait figée au rechargement.
 9. **Ciel et jour** (ajout 2026-10-30, #30) : durée d'une journée, heure de départ, et pour quelques moments de la journée les couleurs du ciel et la force des lumières, en donnée (`assets/content/sky.ron`). Comme pour le registre, le fichier du jeu prime : une retouche s'applique aux mondes existants (changer la durée du jour ne fait que décaler l'heure, rien n'a à se régénérer à l'identique). La save en garde une copie, utilisée seulement si le jeu n'a pas de `sky.ron` : un monde garde son ciel. Un autre jeu (deux soleils, un ciel rouge) se fait sans toucher au Rust.
+10. **Jauges** (ajout 2026-11-01, #33) : les jauges et leurs règles en donnée (`assets/content/survival.ron`), même traitement que le ciel (le fichier du jeu prime, copie dans la save). La valeur de chaque jauge du joueur est sauvée avec lui, par nom : une jauge que le contenu renomme repart à sa valeur de départ.
 
 **Coût de changement :** Day-1 pour la structure. Le moteur (region-files vs `redb`/`sled`) est un choix ultérieur.
 
@@ -408,6 +419,7 @@ Ces non-goals sont *prévus par le data model* (§3) mais *pas implémentés* da
 | Modèles d'entités | `model` de l'entrée : parties avec parent et pivot, boîtes en seizièmes de mètre texturées comme les blocs ; collision en mètres à part ; lumière de la grille ; animation par mouvements en donnée avec #32 (#15) | Figé (2026-10-30) | Day-1 |
 | Comportement des mobs | `behaviors` de l'entrée : liste ordonnée d'un vocabulaire append-only, le premier applicable gagne ; physique du joueur ; A* borné par mob et par tick ; id stable par mob pour le hasard et l'ordre (#32) | Figé (2026-10-30) | Day-1 (vocabulaire) |
 | Apparition des mobs | `spawn` de l'entrée : règles (bloc sous les pieds, lumière, densité par m², groupe, disparition en m) ; essais près du joueur ; mobs gelés au-delà de 128 m ; posés jamais effacés (#60) | Figé (2026-10-30) | Day-1 (champs de la règle) |
+| Jauges et survie | `survival.ron` : jauges (nom, max, départ, barre) et règles « conditions → variation par seconde » ; `touching` d'un bloc, `eaten` d'une entrée, chute en mètres, mort ; aucune jauge connue du moteur (#33) | Figé (2026-11-01) | Day-1 (conditions, forme d'une règle) |
 | Block-entities (vie) | État initial déclaré par l'entrée ; créé à la pose, supprimé à la casse | Figé (2026-10-07) | Day-1 |
 | Forme du comportement | Propriétés → règles déclencheur/condition/effet → script ; garde-fous script | Figé (2026-10-07) | Day-1 (forme) |
 | Vocabulaire | Append-only ; save à élément inconnu refusée | Figé (2026-10-07) | Day-1 |
