@@ -20,6 +20,7 @@ use crate::model::EntityData;
 use crate::path::{self, Node, Search};
 use crate::physics::{Body, STEP_HEIGHT_M};
 use crate::registry::ContentId;
+use crate::survival::{Hit, Vitals};
 use crate::world::{VoxelWorld, TICKS_PER_SECOND};
 use crate::worldgen::hash64;
 
@@ -42,6 +43,10 @@ const STUCK_TICKS: u32 = 48;
 const TURN_RAD_S: f32 = 5.0;
 /// Vitesse à partir de laquelle les pattes se balancent pleinement.
 const FULL_SWING_M_S: f32 = 1.0;
+/// Le recul d'un coup perd cette part de sa vitesse par seconde.
+const PUSH_FADE_PER_S: f32 = 8.0;
+/// Les yeux d'un mob, en part de sa hauteur (nage, jauges).
+const EYES: f32 = 0.85;
 
 /// Un comportement de mob. Distances en mètres, durées en secondes,
 /// vitesses en m/s. **Vocabulaire append-only** (§3.6) : jamais renommé ni
@@ -134,6 +139,12 @@ pub struct Mob {
     stuck: u32,
     /// Ticks passés à suivre le joueur (`Follow::keep`) ; pas sauvé.
     followed: u64,
+    /// Ses jauges (#68), remises au départ de son entrée au premier tick.
+    pub vitals: Vitals,
+    /// Le recul d'un coup en cours, m/s à l'horizontale.
+    push: [f32; 2],
+    /// Sa jauge de mort est à 0 : à retirer, avec ses `drops`.
+    pub dead: bool,
 }
 
 impl Mob {
@@ -154,6 +165,21 @@ impl Mob {
             search: None,
             stuck: 0,
             followed: 0,
+            vitals: Vitals::default(),
+            push: [0.0; 2],
+            dead: false,
+        }
+    }
+
+    /// Reçoit un coup venu de `from` (les pieds du joueur) : les variations
+    /// de `hit` sur ses jauges, et un recul à l'opposé.
+    pub fn hit(&mut self, data: &EntityData, hit: &Hit, from: [f32; 3]) {
+        self.vitals.fit(&data.vitals);
+        self.vitals.apply(&data.vitals, &hit.change);
+        let (dx, dz) = (self.body.feet[0] - from[0], self.body.feet[2] - from[2]);
+        let len = dx.hypot(dz);
+        if len > 1e-3 {
+            self.push = [dx / len * hit.push, dz / len * hit.push];
         }
     }
 
@@ -294,10 +320,16 @@ impl Mob {
                 self.turn_to(dx.atan2(dz), dt);
             }
         }
-        // Dans un liquide, le mob nage vers la surface (il ne coule pas).
-        let wet = world.voxel(world.voxel_at_m([feet[0], feet[1] + 0.1, feet[2]])).and_then(|id| world.liquid(id));
-        let eyes = data.size[1] * 0.85;
-        self.body.step(world, data.size, eyes, wish, jump || wet.is_some(), dt);
+        // Dans un liquide, le mob nage vers la surface s'il a la tête dedans
+        // (il ne se noie pas) ou un chemin à suivre (vers la berge). Pas
+        // sinon : tombé dans la lave, il rebondirait sur elle sans brûler.
+        let eyes = data.size[1] * EYES;
+        let liquid_at = |h: f32| world.voxel(world.voxel_at_m([feet[0], feet[1] + h, feet[2]])).and_then(|id| world.liquid(id));
+        let swim = liquid_at(0.1).is_some() && (liquid_at(eyes).is_some() || !self.path.is_empty());
+        let push = self.push;
+        self.push = push.map(|p| p * (1.0 - PUSH_FADE_PER_S * dt).max(0.0));
+        let wish = [wish[0] + push[0], wish[1] + push[1]];
+        self.body.step(world, data.size, eyes, wish, jump || swim, dt);
 
         let moved = (self.body.feet[0] - feet[0]).hypot(self.body.feet[2] - feet[2]);
         self.walked += moved;
@@ -330,7 +362,8 @@ pub const SIMULATION_M: f32 = 128.0;
 /// Un tick pour tous les mobs, `mobs` triés par id. `turn` : l'id après
 /// lequel la recherche de chemin reprend au tick suivant (tour à tour, pour
 /// qu'aucun mob n'attende toujours) ; à garder d'un tick à l'autre.
-pub fn step_all(world: &VoxelWorld, mobs: &mut [&mut Mob], player: Option<&Player>, seed: u64, dt: f32, turn: &mut u64) {
+/// `daylight` : la force du jour, lue par les règles de jauges.
+pub fn step_all(world: &VoxelWorld, mobs: &mut [&mut Mob], player: Option<&Player>, seed: u64, daylight: f32, dt: f32, turn: &mut u64) {
     let tick = world.tick();
     let mut speeds = vec![0.0; mobs.len()];
     for (mob, speed) in mobs.iter_mut().zip(&mut speeds) {
@@ -366,6 +399,9 @@ pub fn step_all(world: &VoxelWorld, mobs: &mut [&mut Mob], player: Option<&Playe
         }
         let Some(data) = world.registry.get(mob.content).and_then(|e| e.entity()) else { continue };
         mob.walk(world, data, speed, dt);
+        mob.vitals.fit(&data.vitals);
+        let size = data.size;
+        mob.dead = mob.vitals.step(&data.vitals, world, &mob.body, size, size[1] * EYES, daylight, dt);
     }
 }
 
@@ -401,6 +437,11 @@ mod tests {
     /// Monde 32³ à 1 vox/m, sol jusqu'à y = 4, et un cochon aux
     /// comportements `behaviors`.
     fn world(behaviors: &str) -> VoxelWorld {
+        world_with(behaviors, "")
+    }
+
+    /// Idem, `more` ajouté à l'entrée du cochon (`vitals`, `drops`).
+    fn world_with(behaviors: &str, more: &str) -> VoxelWorld {
         let reg = Registry::from_ron(&format!(
             r#"[
                 (identifier: "t:air", kind: Block((solid: false, color: (0.0, 0.0, 0.0)))),
@@ -412,7 +453,11 @@ mod tests {
                     shape: Some([((0, 0, 0), (16, 8, 16)), ((0, 8, 8), (16, 16, 16))])))),
                 (identifier: "t:pig", kind: EntityType((size: (0.9, 0.9),
                     model: [(name: "body", boxes: [((-5, 0, -8), (5, 14, 8), "t")])],
-                    behaviors: [{behaviors}]))),
+                    behaviors: [{behaviors}]{more}))),
+                (identifier: "t:lava", kind: Block((solid: false, color: (1.0, 0.4, 0.0),
+                    liquid: Some((spread: 3.0, delay: 1.0)), touching: [("health", -4.0)]))),
+                (identifier: "t:water", kind: Block((solid: false, color: (0.0, 0.0, 1.0),
+                    liquid: Some((spread: 7.0, delay: 0.25))))),
             ]"#
         ))
         .unwrap();
@@ -438,7 +483,7 @@ mod tests {
     fn resume(w: &mut VoxelWorld, mut mobs: Vec<Mob>, player: Option<Player>, seed: u64, seconds: f32) -> Vec<Mob> {
         let mut turn = 0;
         for _ in 0..ticks(seconds) {
-            step_all(w, &mut mobs.iter_mut().collect::<Vec<_>>(), player.as_ref(), seed, DT, &mut turn);
+            step_all(w, &mut mobs.iter_mut().collect::<Vec<_>>(), player.as_ref(), seed, 1.0, DT, &mut turn);
             w.advance();
         }
         mobs
@@ -538,5 +583,70 @@ mod tests {
             let pig = &resume(&mut w, mobs, Some(player), 1, seconds)[0];
             assert_eq!(pig.spawned, spawned, "keep: {keep}, {seconds} s");
         }
+    }
+
+    const VITALS: &str = r#", vitals: (gauges: [(name: "health", max: 10.0)], death: Some((gauge: "health"))),
+        drops: ["t:wheat"]"#;
+
+    #[test]
+    fn a_pig_in_lava_dies_and_one_without_gauges_does_not() {
+        // Un puits de lave de 4 m dans le sol ; il tombe de 2 m avant d'y entrer. 1 de
+        // vie : un quart de seconde dedans.
+        let mut w = world_with("", &VITALS.replace("10.0", "1.0"));
+        let lava = w.registry.lookup("t:lava").unwrap();
+        for y in 1..=4 {
+            w.set_voxel([10, y, 10], lava);
+        }
+        let pig = &run(&mut w, 1, None, 1, 0.3)[0];
+        assert!(!pig.dead, "pas encore dans la lave : {:?}", pig.body.feet);
+        let pig = &resume(&mut w, vec![pig.clone()], None, 1, 3.0)[0];
+        assert!(pig.dead, "vie {:?}, pieds {:?}", pig.vitals.values, pig.body.feet);
+        let id = w.registry.lookup("t:pig").unwrap();
+        assert_eq!(w.registry.drops(id), vec![w.registry.lookup("t:wheat").unwrap()]);
+
+        let mut w = world("");
+        for y in 1..=4 {
+            w.set_voxel([10, y, 10], lava);
+        }
+        let pig = &run(&mut w, 1, None, 1, 5.0)[0];
+        assert!(!pig.dead && pig.vitals.values.is_empty(), "sans vitals : il ne meurt pas");
+    }
+
+    #[test]
+    fn a_hit_takes_gauges_and_pushes_the_pig_away() {
+        let mut w = world_with("", VITALS);
+        let pig = w.registry.lookup("t:pig").unwrap();
+        let data = w.registry.get(pig).and_then(|e| e.entity()).unwrap().clone();
+        let mut mob = resume(&mut w, vec![Mob::new(1, pig, [10.5, 4.0, 10.5], 0.0)], None, 1, 0.1).remove(0);
+        let hit = Hit { change: vec![("health".into(), -4.0)], push: 6.0 };
+        let player = [8.5, 4.0, 10.5];
+        mob.hit(&data, &hit, player);
+        mob.hit(&data, &hit, player);
+        assert_eq!(mob.vitals.values, vec![2.0]);
+        let mob = resume(&mut w, vec![mob], None, 1, 1.0).remove(0);
+        assert!(mob.body.feet[0] > 11.0, "repoussé à l'opposé du joueur : {:?}", mob.body.feet);
+        assert!((mob.body.feet[2] - 10.5).abs() < 0.01);
+        assert!(!mob.dead);
+        let mut mob = mob;
+        mob.hit(&data, &hit, player);
+        assert!(resume(&mut w, vec![mob], None, 1, DT)[0].dead, "à 0 : mort au tick suivant");
+    }
+
+    #[test]
+    fn a_pig_dropped_in_deep_water_floats_without_bouncing() {
+        let mut w = world("");
+        let water = w.registry.lookup("t:water").unwrap();
+        for (x, y, z) in (8..13).flat_map(|x| (1..4).flat_map(move |y| (8..13).map(move |z| (x, y, z)))) {
+            w.set_voxel([x, y, z], water);
+        }
+        let mut mobs = run(&mut w, 1, None, 1, 0.5);
+        let mut top: f32 = 0.0;
+        for _ in 0..10 {
+            mobs = resume(&mut w, mobs, None, 1, 1.0);
+            top = top.max(mobs[0].body.feet[1]);
+        }
+        let eyes = mobs[0].body.feet[1] + 0.9 * EYES;
+        assert!((3.5..4.5).contains(&eyes), "les yeux à la surface (y = 4) : {eyes}");
+        assert!(top < 4.0, "aucun bond hors de l'eau : {top}");
     }
 }

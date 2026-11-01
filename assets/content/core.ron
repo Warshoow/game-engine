@@ -177,6 +177,19 @@
         // 64 m autour d'un point (π × 64² × 0,0003), par 2 ou 3 ; disparaît
         // au-delà de 128 m.
         spawn: [(on: ["core:grass"], light: (0.5, 1.0), density: 0.0003, group: (2, 3), despawn: 128.0)],
+        // Jauges (#68) : même forme que survival.ron. La lave (`touching`
+        // health) le brûle, la chute le blesse ; à 0 il lâche `drops`.
+        vitals: (
+            gauges: [(name: "health", max: 10.0), (name: "breath", max: 15.0)],
+            rules: [
+                (when: [HeadInLiquid], change: [("breath", -1.0)]),
+                (when: [Not(HeadInLiquid)], change: [("breath", 5.0)]),
+                (when: [Gauge("breath", (0.0, 0.0))], change: [("health", -2.0)]),
+            ],
+            fall: Some((gauge: "health", safe: 3.5, per_m: 1.0)),
+            death: Some((gauge: "health")),
+        ),
+        drops: ["core:pork"],
         animation: [
             Swing(part: "leg_front_left", angle: 35.0, stride: 1.2, phase: 0.0),
             Swing(part: "leg_back_right", angle: 35.0, stride: 1.2, phase: 0.0),
@@ -195,4 +208,10 @@
     // en visant un bloc. Fait de blé, sans établi.
     (identifier: "core:bread", kind: Item, eaten: [("hunger", 300.0)],
         recipes: [(inputs: ["core:wheat", "core:wheat", "core:wheat"])]),
+
+    // Combat (#68) : `hit` remplace le coup de la main nue (`hand` dans
+    // survival.ron) sur les jauges du mob touché ; `push` : recul en m/s.
+    (identifier: "core:pork", kind: Item, eaten: [("hunger", 200.0)]),
+    (identifier: "core:sword", kind: Item, hit: (change: [("health", -5.0)], push: 5.0),
+        recipes: [(inputs: ["core:planks", "core:planks", "core:stone"], station: "core:workbench")]),
 ]

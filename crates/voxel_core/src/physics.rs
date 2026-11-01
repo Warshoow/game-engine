@@ -47,6 +47,24 @@ impl Aabb {
         ]
     }
 
+    /// Distance le long du rayon (`dir` unitaire) jusqu'à la boîte, si le
+    /// rayon la touche (0 depuis l'intérieur).
+    pub fn ray(&self, origin: [f32; 3], dir: [f32; 3]) -> Option<f32> {
+        let (mut near, mut far) = (0.0f32, f32::INFINITY);
+        for k in 0..3 {
+            if dir[k].abs() < 1e-9 {
+                if origin[k] < self.min[k] || origin[k] > self.max[k] {
+                    return None;
+                }
+                continue;
+            }
+            let (a, b) = ((self.min[k] - origin[k]) / dir[k], (self.max[k] - origin[k]) / dir[k]);
+            near = near.max(a.min(b));
+            far = far.min(a.max(b));
+        }
+        (near <= far).then_some(near)
+    }
+
     fn translated(mut self, axis: usize, d: f32) -> Self {
         self.min[axis] += d;
         self.max[axis] += d;
@@ -355,5 +373,15 @@ mod tests {
         let walked = move_and_collide(&w, landed.aabb, [0.5, 0.0, 0.0]);
         assert!(!walked.collided[0] && !walked.collided[2]);
         assert!(walked.aabb.min[1] >= 4.0 - 1e-3);
+    }
+
+    #[test]
+    fn a_ray_finds_the_box_in_front_and_misses_beside_or_behind() {
+        let b = Aabb::from_feet([5.0, 0.0, 0.0], 1.0, 2.0);
+        let hit = b.ray([0.0, 1.0, 0.0], [1.0, 0.0, 0.0]).unwrap();
+        assert!((hit - 4.5).abs() < 1e-5, "{hit}");
+        assert_eq!(b.ray([0.0, 3.0, 0.0], [1.0, 0.0, 0.0]), None, "au-dessus");
+        assert_eq!(b.ray([0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]), None, "derrière");
+        assert_eq!(b.ray([5.0, 1.0, 0.0], [0.0, 1.0, 0.0]), Some(0.0), "dedans");
     }
 }

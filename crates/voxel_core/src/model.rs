@@ -16,6 +16,7 @@ use crate::mesher::{push_box, MeshData, NO_TEXTURE};
 use crate::mob::Behavior;
 use crate::registry::Registry;
 use crate::spawn::SpawnRule;
+use crate::survival::Survival;
 use crate::texgen::GeneratedTexture;
 
 /// Parties au plus par modèle.
@@ -53,6 +54,13 @@ pub struct EntityData {
     /// Où et combien il apparaît seul (§3.6, #60) ; vide : jamais.
     #[serde(default)]
     pub spawn: Vec<SpawnRule>,
+    /// Ses jauges, même forme que `survival.ron` (#68) ; vide : il ne
+    /// meurt pas.
+    #[serde(default)]
+    pub vitals: Survival,
+    /// Ce qu'il lâche en mourant (#68).
+    #[serde(default)]
+    pub drops: Vec<String>,
 }
 
 /// Un mouvement d'animation : il tourne une partie autour de son pivot.
@@ -135,6 +143,12 @@ impl EntityData {
         }
         if let Some(reason) = self.spawn.iter().find_map(SpawnRule::invalid) {
             return Some(reason);
+        }
+        if let Some(reason) = self.vitals.invalid() {
+            return Some(format!("vitals : {reason}"));
+        }
+        if self.drops.len() > MAX_BEHAVIORS {
+            return Some(format!("au plus {MAX_BEHAVIORS} drops"));
         }
         for motion in &self.animation {
             let fine = match motion {

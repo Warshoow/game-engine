@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use crate::model::EntityData;
 use crate::rules::Rule;
 use crate::shape::{Cuboid, Orient, MAX_BOXES};
+use crate::survival::Hit;
 use crate::texgen::{self, GeneratedTexture};
 
 /// ID entier stable d'une entrée du registre.
@@ -213,6 +214,10 @@ pub struct ContentEntry {
     /// [`crate::survival`]) : `[("hunger", 300.0)]` pour du pain.
     #[serde(default)]
     pub eaten: Vec<(String, f32)>,
+    /// Le coup porté à un mob en la tenant (#68) ; absent : celui de la
+    /// main nue.
+    #[serde(default)]
+    pub hit: Option<Hit>,
 }
 
 impl ContentEntry {
@@ -239,6 +244,7 @@ impl ContentEntry {
             }),
             recipes: Vec::new(),
             eaten: Vec::new(),
+            hit: None,
         }
     }
 
@@ -334,18 +340,19 @@ impl Registry {
                 .and_then(invalid_value)
                 .or_else(|| entry.entity().and_then(EntityData::invalid))
                 .or(bad_change)
+                .or_else(|| entry.hit.as_ref().and_then(Hit::invalid))
             {
                 return Err(LoadError::Invalid { id: entry.identifier.clone(), reason });
             }
             let drops = block.into_iter().flat_map(|b| b.drops.iter().flatten());
             let rules = block.into_iter().flat_map(|b| b.rules.iter().flat_map(Rule::references));
             let behaviors = entry.entity().into_iter().flat_map(|e| e.behaviors.iter().filter_map(|b| b.references()));
-            let spawns = entry.entity().into_iter().flat_map(|e| e.spawn.iter().flat_map(|r| &r.on));
+            let spawns_and_drops = entry.entity().into_iter().flat_map(|e| e.spawn.iter().flat_map(|r| &r.on).chain(&e.drops));
             let recipes = entry
                 .recipes
                 .iter()
                 .flat_map(|r| r.inputs.iter().chain(&r.station));
-            for target in drops.chain(rules).chain(behaviors).chain(spawns).chain(recipes) {
+            for target in drops.chain(rules).chain(behaviors).chain(spawns_and_drops).chain(recipes) {
                 if registry.lookup(target).is_none() {
                     return Err(LoadError::UnknownReference {
                         from: entry.identifier.clone(),
@@ -422,9 +429,12 @@ impl Registry {
         self.textures.iter().position(|t| t.name == name).map(|i| i as u32)
     }
 
-    /// Ce que donne le bloc `id` quand on le casse (voir [`BlockData::drops`]).
-    /// Vide si `id` n'est pas un bloc.
+    /// Ce que donne le bloc `id` quand on le casse (voir [`BlockData::drops`]),
+    /// ou le mob `id` quand il meurt. Vide pour un item.
     pub fn drops(&self, id: ContentId) -> Vec<ContentId> {
+        if let Some(e) = self.get(id).and_then(ContentEntry::entity) {
+            return e.drops.iter().filter_map(|t| self.lookup(t)).collect();
+        }
         match self.get(id).and_then(ContentEntry::block) {
             None => Vec::new(),
             Some(BlockData { drops: None, .. }) => vec![id],
@@ -617,6 +627,23 @@ mod tests {
         assert_ne!(top, reg.texture_layer(&faces.side).unwrap());
         let t = &reg.textures()[top as usize];
         assert_eq!(t.rgba.len(), (t.size * t.size * 4) as usize);
+    }
+
+    /// Les jauges d'un mob et le coup d'un item (#68) passent par la save.
+    #[test]
+    fn shipped_content_round_trips_through_a_snapshot_and_a_bad_hit_is_refused() {
+        let reg = Registry::from_ron(include_str!("../../../assets/content/core.ron")).unwrap();
+        let back = Registry::from_snapshot(&reg.to_snapshot()).unwrap();
+        assert_eq!(back.iter().map(|(_, e)| e).collect::<Vec<_>>(), reg.iter().map(|(_, e)| e).collect::<Vec<_>>());
+        let pig = back.get(back.lookup("core:pig").unwrap()).unwrap().entity().unwrap();
+        assert_eq!(pig.vitals.index("health"), Some(0));
+        let bad = r#"[(identifier: "a:air", kind: Block((solid: false, color: (0.0, 0.0, 0.0)))),
+            (identifier: "a:sword", kind: Item, hit: (change: [("health", -1.0)], push: -2.0))]"#;
+        assert!(Registry::from_ron(bad).is_err(), "recul négatif");
+        let bad = r#"[(identifier: "a:air", kind: Block((solid: false, color: (0.0, 0.0, 0.0)))),
+            (identifier: "a:pig", kind: EntityType((size: (0.9, 0.9), model: [(name: "b", boxes: [((0, 0, 0), (1, 1, 1), "t")])],
+                drops: ["a:nothing"])))]"#;
+        assert!(Registry::from_ron(bad).is_err(), "drop inconnu");
     }
 
     #[test]

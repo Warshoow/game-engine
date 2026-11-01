@@ -1,7 +1,8 @@
 //! Pose / casse de voxels — critère §7.3 de la slice.
 //!
 //! Clic gauche : casser le voxel visé, qui laisse tomber ses drops
-//! (`Registry::drops`) en items au sol. Clic droit : *utiliser* le bloc visé
+//! (`Registry::drops`) en items au sol ; ou frapper le mob visé s'il est
+//! plus près (#68 : le `hit` de ce qu'on tient, sinon `hand`). Clic droit : *utiliser* le bloc visé
 //! s'il a une règle `Used` (§3.6), sinon poser le bloc en main (pris dans
 //! l'[`Inventory`]) sur la face visée ; Maj + clic droit pose toujours. Les
 //! hooks `Placed` et `Broken` déclenchent les règles du bloc concerné. Un
@@ -42,7 +43,7 @@ use voxel_core::world::{neighbors, VoxelWorld, MAX_UPDATES_PER_TICK, TICKS_PER_S
 
 use crate::player::{CursorCaptured, Player, PLAYER_HEIGHT_M, PLAYER_WIDTH_M, PlayerCamera};
 use crate::inventory::Inventory;
-use crate::entities;
+use crate::entities::{self, Mob};
 use crate::items::{DroppedItem, ItemVisual, StorageChanged};
 use crate::survival::{PlayerVitals, SurvivalRules};
 use crate::{ChunkMesh, DirtyChunks, GameWorld};
@@ -64,6 +65,21 @@ fn aim(world: &VoxelWorld, cam: &GlobalTransform) -> Option<RayHit> {
     )
 }
 
+/// Le mob visé et sa boîte, s'il est à portée et plus près que le bloc
+/// visé (#68).
+fn aim_mob<'a>(world: &VoxelWorld, cam: &GlobalTransform, mobs: impl Iterator<Item = (Entity, &'a Mob)>) -> Option<(Entity, Aabb)> {
+    let (origin, dir) = (cam.translation().to_array(), cam.forward().as_vec3().to_array());
+    let block = aim(world, cam).map_or(REACH_M, |h| h.distance_m);
+    mobs.filter_map(|(entity, mob)| {
+        let [w, h] = world.registry.get(mob.content)?.entity()?.size;
+        let aabb = Aabb::from_feet(mob.body.feet, w, h);
+        Some((aabb.ray(origin, dir)?, entity, aabb))
+    })
+    .filter(|(d, ..)| *d <= block)
+    .min_by(|a, b| a.0.total_cmp(&b.0))
+    .map(|(_, entity, aabb)| (entity, aabb))
+}
+
 /// Contour du voxel visé (gizmo, redessiné à chaque frame) : ses boîtes
 /// pour un bloc à forme (#14). Rien hors mode
 /// FPS — on ne peut pas interagir — ni quand le regard ne touche rien.
@@ -71,12 +87,18 @@ pub fn highlight_target(
     captured: Res<CursorCaptured>,
     game: Res<GameWorld>,
     camera: Query<&GlobalTransform, With<PlayerCamera>>,
+    mobs: Query<(Entity, &Mob)>,
     mut gizmos: Gizmos,
 ) {
     if !captured.0 {
         return;
     }
     let Ok(cam) = camera.single() else { return };
+    if let Some((_, aabb)) = aim_mob(&game.world, cam, mobs.iter()) {
+        let (min, max) = (Vec3::from_array(aabb.min), Vec3::from_array(aabb.max));
+        gizmos.cube(Transform::from_translation((min + max) / 2.0).with_scale(max - min), Color::BLACK);
+        return;
+    }
     let Some(hit) = aim(&game.world, cam) else { return };
     let size_m = 1.0 / game.world.voxels_per_meter();
     for [min, max] in game.world.boxes(hit.voxel, false) {
@@ -106,6 +128,7 @@ pub fn interact(
     player: Query<&Player>,
     rules: Res<SurvivalRules>,
     mut vitals: Query<&mut PlayerVitals>,
+    mut mobs: Query<(Entity, &mut Mob)>,
 ) {
     // On n'interagit qu'en mode FPS — et comme ce système tourne AVANT
     // `cursor_grab` (voir l'ordre du plugin), le clic qui active le mode
@@ -117,6 +140,19 @@ pub fn interact(
     }
     let Ok(cam) = camera.single() else { return };
     let holding = inventory.selected();
+    // Frapper le mob visé (#68) : le coup de ce qu'on tient, sinon celui de
+    // la main nue.
+    if breaking && let Some((target, _)) = aim_mob(&game.world, cam, mobs.iter()) {
+        let registry = &game.world.registry;
+        let hit = holding.and_then(|id| registry.get(id)?.hit.as_ref()).or(rules.0.hand.as_ref());
+        let from = player.single().map_or(cam.translation(), Player::feet).to_array();
+        if let (Some(hit), Ok((_, mut mob))) = (hit, mobs.get_mut(target))
+            && let Some(data) = registry.get(mob.content).and_then(|e| e.entity())
+        {
+            mob.hit(data, hit, from);
+        }
+        return;
+    }
     // Manger (#33) : sans rien viser, une entrée à `eaten` (bloc compris).
     let Some(hit) = aim(&game.world, cam) else {
         if right_click {
@@ -242,7 +278,7 @@ pub fn interact(
 fn eat(game: &GameWorld, rules: &SurvivalRules, vitals: &mut Query<&mut PlayerVitals>, inventory: &mut Inventory, holding: Option<ContentId>) {
     let Some(entry) = holding.and_then(|id| game.world.registry.get(id)) else { return };
     let Ok(mut vitals) = vitals.single_mut() else { return };
-    if !entry.eaten.is_empty() && vitals.0.eat(&rules.0, &entry.eaten) {
+    if !entry.eaten.is_empty() && vitals.0.apply(&rules.0, &entry.eaten) {
         inventory.take_selected();
     }
 }

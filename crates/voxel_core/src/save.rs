@@ -59,9 +59,10 @@ pub struct PlayerSave {
 /// pas gardée : un item sauvé en pleine chute repart à l'arrêt.
 pub type DroppedItems = Vec<(ContentId, [f32; 3])>;
 
-/// Entités posées (#15) : entrée `EntityType`, pieds en mètres, cap en
-/// radians (autour de +Y, 0 : regarde vers +Z).
-pub type Mobs = Vec<(u64, ContentId, [f32; 3], f32, bool)>;
+/// Entités posées (#15) : id, entrée `EntityType`, pieds en mètres, cap en
+/// radians (autour de +Y, 0 : regarde vers +Z), apparu seul (#60), jauges
+/// par nom (#68).
+pub type Mobs = Vec<(u64, ContentId, [f32; 3], f32, bool, Vec<(String, f32)>)>;
 
 /// Le dossier d'un monde.
 #[derive(Debug, Clone)]
@@ -145,14 +146,18 @@ impl Save {
             Ok(mobs) => return Ok(mobs.unwrap_or_default()),
             Err(e) => e,
         };
+        // Sauvés avant #68, sans jauges : à leur départ.
+        if let Ok(old) = self.read_ron::<Vec<(u64, ContentId, [f32; 3], f32, bool)>>("mobs.ron") {
+            return Ok(old.unwrap_or_default().into_iter().map(|(id, c, f, y, s)| (id, c, f, y, s, Vec::new())).collect());
+        }
         // Sauvés avant #60, sans « apparu seul » : tous posés.
         if let Ok(old) = self.read_ron::<Vec<(u64, ContentId, [f32; 3], f32)>>("mobs.ron") {
-            return Ok(old.unwrap_or_default().into_iter().map(|(id, c, f, y)| (id, c, f, y, false)).collect());
+            return Ok(old.unwrap_or_default().into_iter().map(|(id, c, f, y)| (id, c, f, y, false, Vec::new())).collect());
         }
         // Sauvés avant #32, sans id : numérotés dans l'ordre du fichier.
         self.read_ron::<Vec<(ContentId, [f32; 3], f32)>>("mobs.ron")
             .map_err(|_| e)
-            .map(|old| old.unwrap_or_default().into_iter().zip(0..).map(|((c, f, y), id)| (id, c, f, y, false)).collect())
+            .map(|old| old.unwrap_or_default().into_iter().zip(0..).map(|((c, f, y), id)| (id, c, f, y, false, Vec::new())).collect())
     }
 
     pub fn write_mobs(&self, mobs: &Mobs) -> Result<(), String> {
@@ -457,14 +462,19 @@ mod tests {
         save.write_items(&items).unwrap();
         assert_eq!(save.read_items().unwrap(), items);
         assert_eq!(save.read_mobs().unwrap(), vec![]);
-        let mobs = vec![(3, bench, [1.5, 4.0, 2.5], 1.25, true)];
+        let mobs = vec![(3, bench, [1.5, 4.0, 2.5], 1.25, true, vec![("health".to_string(), 4.5)])];
         save.write_mobs(&mobs).unwrap();
         assert_eq!(save.read_mobs().unwrap(), mobs);
+        save.write_ron("mobs.ron", &vec![(3, bench, [1.5, 4.0, 2.5], 1.25, true)]).unwrap();
+        assert_eq!(save.read_mobs().unwrap(), vec![(3, bench, [1.5, 4.0, 2.5], 1.25, true, vec![])], "avant #68 : sans jauges");
         save.write_ron("mobs.ron", &vec![(3, bench, [1.5, 4.0, 2.5], 1.25)]).unwrap();
-        assert_eq!(save.read_mobs().unwrap(), vec![(3, bench, [1.5, 4.0, 2.5], 1.25, false)], "avant #60 : posés");
+        assert_eq!(save.read_mobs().unwrap(), vec![(3, bench, [1.5, 4.0, 2.5], 1.25, false, vec![])], "avant #60 : posés");
         // Un fichier d'avant #32, sans id, se relit.
         save.write_ron("mobs.ron", &vec![(bench, [1.5, 4.0, 2.5], 1.25), (bench, [0.0; 3], 0.0)]).unwrap();
-        assert_eq!(save.read_mobs().unwrap(), vec![(0, bench, [1.5, 4.0, 2.5], 1.25, false), (1, bench, [0.0; 3], 0.0, false)]);
+        assert_eq!(
+            save.read_mobs().unwrap(),
+            vec![(0, bench, [1.5, 4.0, 2.5], 1.25, false, vec![]), (1, bench, [0.0; 3], 0.0, false, vec![])]
+        );
 
         save.write_ron("world.ron", &WorldMeta { format: 99, seed: 0, voxels_per_meter: 1.0, chunk_size: 8 }).unwrap();
         assert!(save.read_meta().is_err(), "autre version refusée");

@@ -11,6 +11,7 @@ use voxel_core::model::Motion;
 use voxel_core::registry::ContentId;
 
 use crate::inventory::Inventory;
+use crate::items::DroppedItem;
 use crate::player::{Player, EYE_HEIGHT_M};
 use crate::sky::{HourShift, WorldSky};
 use crate::{to_bevy_mesh, GameWorld};
@@ -92,7 +93,7 @@ pub fn add_mob_models(
 }
 
 /// Un tick de tous les mobs, dans l'ordre de leur id (§2) ; puis ceux
-/// qui disparaissent et ceux qui apparaissent (#60).
+/// qui meurent (#68), qui disparaissent et qui apparaissent (#60).
 #[allow(clippy::too_many_arguments)]
 pub fn simulate_mobs(
     mut commands: Commands,
@@ -118,14 +119,24 @@ pub fn simulate_mobs(
     let (entities, mut list): (Vec<Entity>, Vec<&mut mob::Mob>) = list.into_iter().map(|(e, m)| (e, &mut m.0)).unzip();
     let seed = game.generator.terrain.seed;
     let world = &game.world;
-    mob::step_all(world, &mut list, player.as_ref(), seed, time.delta_secs(), &mut ids.turn);
+    let daylight = sky.map_or(1.0, |s| s.daylight(world.tick(), &shift));
+    mob::step_all(world, &mut list, player.as_ref(), seed, daylight, time.delta_secs(), &mut ids.turn);
+    for (entity, mob) in entities.iter().zip(&list) {
+        if mob.dead {
+            commands.entity(*entity).despawn();
+            let [w, h] = world.registry.get(mob.content).and_then(|e| e.entity()).map_or([0.0; 2], |d| d.size);
+            let center = Vec3::from_array(mob.body.feet) + Vec3::Y * h.max(w) / 2.0;
+            for id in world.registry.drops(mob.content) {
+                commands.spawn(DroppedItem::new(id, center));
+            }
+        }
+    }
     let Some(player) = player else { return };
     for (entity, mob) in entities.iter().zip(&list) {
-        if spawn::gone(world, mob, player.feet) {
+        if !mob.dead && spawn::gone(world, mob, player.feet) {
             commands.entity(*entity).despawn();
         }
     }
-    let daylight = sky.map_or(1.0, |s| s.daylight(world.tick(), &shift));
     let all: Vec<&mob::Mob> = list.iter().map(|m| &**m).collect();
     for born in spawn::spawn(world, &all, player.feet, seed, daylight) {
         spawn_mob(&mut commands, born.content, Vec3::from_array(born.feet), born.yaw, true);

@@ -390,7 +390,7 @@ fn setup_world(
         },
     ));
     commands.spawn((
-        Text::new("Clic gauche : jouer · Échap : libérer la souris · F : plein écran\nWASD/Espace : bouger · gauche : casser · droit : utiliser/poser/manger · Maj+droit : poser · molette : bloc · C : fabriquer (menu) · I : générer un bloc (IA) · R : recharger le contenu · G : un de chaque bloc (debug) · T : console (debug) · F1-F4 : effets"),
+        Text::new("Clic gauche : jouer · Échap : libérer la souris · F : plein écran\nWASD/Espace : bouger · gauche : casser/frapper · droit : utiliser/poser/manger · Maj+droit : poser · molette : bloc · C : fabriquer (menu) · I : générer un bloc (IA) · R : recharger le contenu · G : un de chaque bloc (debug) · T : console (debug) · F1-F4 : effets"),
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(12.0),

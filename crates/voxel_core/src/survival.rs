@@ -9,7 +9,7 @@
 //! blocs touchés (`touching`), la chute et la nourriture (`eaten`) font
 //! varier les jauges que la donnée nomme. Une jauge reste dans [0, max].
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::physics::{Aabb, Body};
 use crate::registry::{parse, ContentId, Registry};
@@ -19,13 +19,14 @@ use crate::world::VoxelWorld;
 const MAX_GAUGES: usize = 32;
 const MAX_RULES: usize = 128;
 const MAX_PER_RULE: usize = 16;
+const MAX_PUSH_M_S: f32 = 30.0;
 
 /// Distance à laquelle un bloc solide compte comme touché (un cactus contre
 /// lequel on marche : la collision arrête le corps juste avant lui).
 const TOUCH_MARGIN_M: f32 = 0.05;
 
 /// Une jauge : une valeur dans [0, max] portée par le joueur.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Gauge {
     pub name: String,
     pub max: f32,
@@ -44,14 +45,14 @@ impl Gauge {
 }
 
 /// Barre à l'écran : couleur sRGB et quand l'afficher.
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub struct Bar {
     pub color: [f32; 3],
     #[serde(default)]
     pub show: Show,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub enum Show {
     #[default]
     Always,
@@ -61,7 +62,7 @@ pub enum Show {
 
 /// Tant que toutes les conditions sont vraies, chaque jauge citée varie
 /// de tant par seconde.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct GaugeRule {
     #[serde(default)]
     pub when: Vec<Condition>,
@@ -70,7 +71,7 @@ pub struct GaugeRule {
 
 /// Ce qu'une règle de jauge peut lire du joueur. **Vocabulaire
 /// append-only** (§3.6).
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub enum Condition {
     /// Les yeux dans un liquide.
     HeadInLiquid,
@@ -84,15 +85,33 @@ pub enum Condition {
 }
 
 /// La chute retire `per_m` par mètre au-delà de `safe` à la jauge nommée.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Fall {
     pub gauge: String,
     pub safe: f32,
     pub per_m: f32,
 }
 
+/// Un coup porté à un mob (#68) : `change`, variations d'un coup sur ses
+/// jauges (comme `eaten`), et `push`, recul en m/s.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct Hit {
+    pub change: Vec<(String, f32)>,
+    #[serde(default)]
+    pub push: f32,
+}
+
+impl Hit {
+    pub(crate) fn invalid(&self) -> Option<String> {
+        let fine = self.change.len() <= MAX_PER_RULE
+            && self.change.iter().all(|(_, v)| v.is_finite())
+            && (0.0..=MAX_PUSH_M_S).contains(&self.push);
+        (!fine).then(|| format!("hit : {MAX_PER_RULE} variations finies au plus, push dans [0, {MAX_PUSH_M_S}]"))
+    }
+}
+
 /// Le joueur meurt quand la jauge nommée tombe à 0.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Death {
     pub gauge: String,
     #[serde(default)]
@@ -100,7 +119,7 @@ pub struct Death {
 }
 
 /// Le contenu de `survival.ron`. Par défaut : aucune jauge, pas de mort.
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct Survival {
     #[serde(default)]
     pub gauges: Vec<Gauge>,
@@ -110,6 +129,9 @@ pub struct Survival {
     pub fall: Option<Fall>,
     #[serde(default)]
     pub death: Option<Death>,
+    /// Le coup de la main nue (#68) ; absent : elle ne frappe pas.
+    #[serde(default)]
+    pub hand: Option<Hit>,
 }
 
 impl Survival {
@@ -123,7 +145,7 @@ impl Survival {
         self.gauges.iter().position(|g| g.name == name)
     }
 
-    fn invalid(&self) -> Option<String> {
+    pub(crate) fn invalid(&self) -> Option<String> {
         if self.gauges.len() > MAX_GAUGES || self.rules.len() > MAX_RULES {
             return Some(format!("{MAX_GAUGES} jauges et {MAX_RULES} règles au plus"));
         }
@@ -174,6 +196,9 @@ impl Survival {
                 return Some("fall : safe et per_m positifs".into());
             }
         }
+        if let Some(reason) = self.hand.as_ref().and_then(Hit::invalid) {
+            return Some(reason);
+        }
         self.death.as_ref().and_then(|d| known(&d.gauge).err())
     }
 
@@ -194,8 +219,9 @@ impl Survival {
     }
 }
 
-/// Les jauges du joueur, dans l'ordre de [`Survival::gauges`].
-#[derive(Debug, Clone, PartialEq)]
+/// Les jauges d'un corps (joueur ou mob), dans l'ordre de
+/// [`Survival::gauges`].
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Vitals {
     pub values: Vec<f32>,
     /// Le point le plus haut depuis le dernier contact avec le sol ou un
@@ -210,6 +236,14 @@ impl Vitals {
     /// là, pas depuis le sol quitté.
     pub fn teleported(&mut self, feet_y: f32) {
         self.fall_top = Some(feet_y);
+    }
+
+    /// Remises à leur départ si elles ne suivent pas `survival` (un mob
+    /// neuf, ou dont l'entrée a changé de jauges).
+    pub fn fit(&mut self, survival: &Survival) {
+        if self.values.len() != survival.gauges.len() {
+            *self = Self::new(survival);
+        }
     }
 
     /// Toutes les jauges à leur départ (monde neuf, après la mort).
@@ -288,9 +322,9 @@ impl Vitals {
         survival.death.as_ref().and_then(|d| self.get(survival, &d.gauge)).is_some_and(|v| v <= 0.0)
     }
 
-    /// Mange une entrée qui déclare `eaten` : ses variations d'un coup. Rend
-    /// faux (rien n'est mangé) si aucune jauge connue n'en changerait.
-    pub fn eat(&mut self, survival: &Survival, eaten: &[(String, f32)]) -> bool {
+    /// Des variations d'un coup (`eaten`, un coup reçu). Rend faux si
+    /// aucune jauge connue n'en change (rien n'est mangé).
+    pub fn apply(&mut self, survival: &Survival, eaten: &[(String, f32)]) -> bool {
         let mut changed = false;
         for (name, amount) in eaten {
             let Some(i) = survival.index(name) else { continue };
@@ -533,9 +567,9 @@ mod tests {
         let s = survival();
         let mut vitals = Vitals::new(&s);
         let bread = [("hunger".to_string(), 30.0), ("unknown".to_string(), 5.0)];
-        assert!(!vitals.eat(&s, &bread), "faim pleine : rien n'est mangé");
+        assert!(!vitals.apply(&s, &bread), "faim pleine : rien n'est mangé");
         vitals.values[s.index("hunger").unwrap()] = 80.0;
-        assert!(vitals.eat(&s, &bread));
+        assert!(vitals.apply(&s, &bread));
         assert_eq!(vitals.get(&s, "hunger"), Some(100.0), "bornée au max");
     }
 

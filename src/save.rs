@@ -120,7 +120,13 @@ pub fn save_player_and_items(
         error!("sauvegarde de l'horloge impossible : {err}");
     }
     let dropped = items.iter().map(|i| (i.content, i.feet().to_array())).collect();
-    let placed = mobs.iter().map(|m| (m.id, m.content, m.body.feet, m.yaw, m.spawned)).collect();
+    let placed = mobs
+        .iter()
+        .map(|m| {
+            let gauges = game.world.registry.get(m.content).and_then(|e| e.entity()).map_or(Vec::new(), |d| m.vitals.saved(&d.vitals));
+            (m.id, m.content, m.body.feet, m.yaw, m.spawned, gauges)
+        })
+        .collect();
     if let Err(err) = save.0.write_mobs(&placed) {
         error!("sauvegarde des entités impossible : {err}");
     }
@@ -181,14 +187,17 @@ pub fn restore_items(mut commands: Commands, save: Option<Res<WorldSave>>) {
 }
 
 /// Refait apparaître les mobs sauvés (#15).
-pub fn restore_mobs(mut commands: Commands, mut ids: ResMut<MobIds>, save: Option<Res<WorldSave>>) {
+pub fn restore_mobs(mut commands: Commands, mut ids: ResMut<MobIds>, save: Option<Res<WorldSave>>, game: Res<GameWorld>) {
     let Some(save) = save else { return };
     match save.0.read_mobs() {
         Ok(mobs) => {
-            for (id, content, feet, yaw, spawned) in mobs {
+            for (id, content, feet, yaw, spawned, gauges) in mobs {
                 ids.next = ids.next.max(id + 1);
                 let mut mob = voxel_core::mob::Mob::new(id, content, feet, yaw);
                 mob.spawned = spawned;
+                if let Some(data) = game.world.registry.get(content).and_then(|e| e.entity()) {
+                    mob.vitals = Vitals::restored(&data.vitals, &gauges);
+                }
                 commands.spawn(Mob(mob));
             }
         }
