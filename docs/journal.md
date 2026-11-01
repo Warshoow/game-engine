@@ -1484,3 +1484,27 @@ En route, on a vu que les textures des blocs lâchés étaient décalées
 d'une demi-image. Leurs coordonnées de texture partaient du centre de
 la boîte : elles partent maintenant du coin.
 
+## 2026-11-01 — Mobs qui attaquent (#72)
+
+Un mob hostile n'est qu'un comportement de plus dans sa liste : `Attack`
+se place avant `Wander` et gagne quand le joueur est à portée. On aurait
+pu copier Minecraft, où le choix de la cible est séparé de l'action :
+plus général (un loup qui chasse un cochon), mais il aurait fallu
+réécrire `Follow` et `LookAt` autour de « la cible » alors qu'aucun
+contenu ne vise un autre mob. Le coup a la forme de celui d'une épée, et
+`when` reprend les conditions des règles de jauges : un mob hostile la
+nuit seulement s'écrit en donnée.
+
+La vue compte : le mob doit voir le joueur pour commencer, sinon un
+zombie de grotte sous ses pieds chercherait un chemin à travers la
+roche. Une fois lancé, il poursuit sans la vue, comme dans Minecraft.
+
+Deux défauts sont sortis en jeu, pas en test. Le zombie s'arrêtait à
+1,16 m du joueur, 6 cm hors de portée : la case du joueur, au bord
+d'une marche, n'avait pas d'appui pour son corps, et le chemin
+s'arrêtait une case avant. Il va maintenant tout droit sur les deux
+derniers mètres. Ensuite, le joueur ne mourait pas : le coup mettait la
+vie à 0, et la régénération du même tick la remontait avant le test de
+mort. Le test de mort passe maintenant en premier. Le défaut existait
+déjà pour un mob qui guérit.
+

@@ -790,6 +790,23 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   Reportés dans #70 : l'image pixel art plate (à revoir, des modèles
   d'IA spécialisés existent ; l'icône restera calculée par le moteur),
   le délai avant ramassage, le regroupement des items identiques au sol.
+- **Mobs qui attaquent** (#72, choisi par Warshow après #71). Un
+  comportement de plus, `Attack` (`range`, `speed`, `reach`, `every`,
+  `hit`, `when`) : poursuite par le chemin de `Follow`, arrêt à `reach`
+  du bord de sa boîte, un coup toutes les `every` s. `step_all` rend les
+  coups (`Strike`), le jeu les applique aux jauges du joueur
+  (`simulate_mobs`). Il faut **voir** le joueur (rayon des yeux aux yeux)
+  pour commencer et pour frapper, pas pour poursuivre. À moins de 2 m
+  d'un joueur visible, tout droit (`STRAIGHT_M`) : sa case n'a pas
+  toujours d'appui pour le mob, le chemin s'arrêtait une case avant.
+  Le recul est passé de `Mob` à `Body` (joueur et mobs). Corrigé en
+  route : un coup à 0 ne tuait pas quand une règle fait remonter la vie
+  (`Vitals::step` regarde la mort d'abord). Contenu : `core:zombie`,
+  dans le noir (nuit ou grotte), 2,4 m/s (joueur : 5), 3 de vie par
+  coup. Vu sous WSL : poursuite, coups, recul, mort et réapparition.
+  Reportés dans #72 : joueur intouchable après un coup, brûler au
+  soleil, riposte, écran rouge, projectiles, mob contre mob, mode
+  paisible.
 
 ## Prochaines étapes
 
@@ -834,8 +851,8 @@ options : #62). #33 vie et survie (fait le 2026-11-01 : jauges en
 donnée ; validé sous Windows, #33 et #66 fermés ; options : #65).
 Combat et jauges des mobs (fait le 2026-11-01, à essayer sous Windows : #69 ;
 options : #68). Icônes 3D et apparence des items (fait le 2026-11-01, à
-essayer sous Windows : #71 ; options : #70). Suite proposée : des mobs
-qui attaquent le joueur. **Tout ce qui attend la 4060** (#53, #51, #30, #23, la
+essayer sous Windows : #71 ; options : #70). Mobs qui attaquent (fait
+le 2026-11-01, à essayer sous Windows : #73 ; options : #72). **Tout ce qui attend la 4060** (#53, #51, #30, #23, la
 mer, le coût des mobs) est rassemblé dans **#64** (label `qa`).
 Ce qui a été reporté (#18, #27, #28) est listé
 dans `docs/jalons.md`, « Plus tard », et dans #49.
