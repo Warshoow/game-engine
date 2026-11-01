@@ -86,6 +86,8 @@ const SINK_M_S: f32 = 2.0;
 /// Marche montée sans sauter (#14) : une dalle ou un escalier, pas un
 /// bloc plein d'un mètre.
 pub const STEP_HEIGHT_M: f32 = 0.6;
+/// Le recul d'un coup perd cette part de sa vitesse par seconde.
+const PUSH_FADE_PER_S: f32 = 8.0;
 
 /// Un corps qui marche, saute, nage et tombe : le joueur et les mobs
 /// (#32). En mètres, au tick fixe.
@@ -95,11 +97,23 @@ pub struct Body {
     pub feet: [f32; 3],
     pub velocity: [f32; 3],
     pub grounded: bool,
+    /// Le recul d'un coup reçu (#68, #72), m/s à l'horizontale, ajouté à
+    /// la marche ; il s'efface en une fraction de seconde.
+    pub push: [f32; 2],
 }
 
 impl Body {
     pub fn at(feet: [f32; 3]) -> Self {
         Self { feet, ..Self::default() }
+    }
+
+    /// Un coup venu de `from` : un recul de `speed` m/s à l'opposé.
+    pub fn knock(&mut self, from: [f32; 3], speed: f32) {
+        let (dx, dz) = (self.feet[0] - from[0], self.feet[2] - from[2]);
+        let len = dx.hypot(dz);
+        if len > 1e-3 {
+            self.push = [dx / len * speed, dz / len * speed];
+        }
     }
 
     /// Un pas de `dt` secondes. `walk` : vitesse horizontale voulue (x, z),
@@ -116,9 +130,11 @@ impl Body {
         // Liquide aux pieds : freiné de son `drag`, la gravité aussi.
         let wet = liquid_at(0.1);
         let slow = 1.0 - wet.map_or(0.0, |l| l.drag);
+        let push = self.push;
+        self.push = push.map(|p| p * (1.0 - PUSH_FADE_PER_S * dt).max(0.0));
         let v = &mut self.velocity;
-        v[0] = walk[0] * slow;
-        v[2] = walk[1] * slow;
+        v[0] = (walk[0] + push[0]) * slow;
+        v[2] = (walk[1] + push[1]) * slow;
         v[1] -= GRAVITY_M_S2 * slow * dt;
         if wet.is_some() {
             v[1] = v[1].max(-SINK_M_S);

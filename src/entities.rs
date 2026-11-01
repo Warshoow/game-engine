@@ -14,6 +14,7 @@ use crate::inventory::Inventory;
 use crate::items::{DroppedItem, ItemVisual};
 use crate::player::{Player, EYE_HEIGHT_M};
 use crate::sky::{HourShift, WorldSky};
+use crate::survival::{PlayerVitals, SurvivalRules};
 use crate::{to_bevy_mesh, GameWorld};
 
 /// Un mob : son état simulé (`voxel_core`). Ses parties sont ses enfants.
@@ -92,8 +93,9 @@ pub fn add_mob_models(
     }
 }
 
-/// Un tick de tous les mobs, dans l'ordre de leur id (§2) ; puis ceux
-/// qui meurent (#68), qui disparaissent et qui apparaissent (#60).
+/// Un tick de tous les mobs, dans l'ordre de leur id (§2) ; leurs coups au
+/// joueur (#72) ; puis ceux qui meurent (#68), qui disparaissent et qui
+/// apparaissent (#60).
 #[allow(clippy::too_many_arguments)]
 pub fn simulate_mobs(
     mut commands: Commands,
@@ -103,10 +105,12 @@ pub fn simulate_mobs(
     shift: Res<HourShift>,
     inventory: Res<Inventory>,
     mut ids: ResMut<MobIds>,
-    player: Query<&Player>,
+    rules: Res<SurvivalRules>,
+    mut player: Query<(&mut Player, &mut PlayerVitals)>,
     mut mobs: Query<(Entity, &mut Mob)>,
 ) {
-    let player = player.single().ok().map(|p| {
+    let mut target = player.single_mut().ok();
+    let player = target.as_ref().map(|(p, _)| {
         let feet = p.feet();
         mob::Player {
             feet: feet.to_array(),
@@ -120,7 +124,13 @@ pub fn simulate_mobs(
     let seed = game.generator.terrain.seed;
     let world = &game.world;
     let daylight = sky.map_or(1.0, |s| s.daylight(world.tick(), &shift));
-    mob::step_all(world, &mut list, player.as_ref(), seed, daylight, time.delta_secs(), &mut ids.turn);
+    let strikes = mob::step_all(world, &mut list, player.as_ref(), seed, daylight, time.delta_secs(), &mut ids.turn);
+    if let Some((p, vitals)) = &mut target {
+        for strike in strikes {
+            vitals.0.apply(&rules.0, &strike.hit.change);
+            p.knock(strike.from, strike.hit.push);
+        }
+    }
     for (entity, mob) in entities.iter().zip(&list) {
         if mob.dead {
             commands.entity(*entity).despawn();

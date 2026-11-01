@@ -18,7 +18,7 @@ use crate::world::VoxelWorld;
 /// Bornes de la donnée : elle vient d'un fichier, pas du code.
 const MAX_GAUGES: usize = 32;
 const MAX_RULES: usize = 128;
-const MAX_PER_RULE: usize = 16;
+pub(crate) const MAX_PER_RULE: usize = 16;
 const MAX_PUSH_M_S: f32 = 30.0;
 
 /// Distance à laquelle un bloc solide compte comme touché (un cactus contre
@@ -273,14 +273,19 @@ impl Vitals {
     }
 
     /// Un tick de `dt` secondes, après le pas de physique de `body` (taille
-    /// `size`, yeux à `eyes_m`). Rend vrai si le joueur meurt.
+    /// `size`, yeux à `eyes_m`). Rend vrai si le joueur meurt, y compris
+    /// d'un coup reçu depuis le tick d'avant (`apply`) : sans ça, une
+    /// règle qui fait remonter la vie l'empêcherait de rester à 0.
     #[allow(clippy::too_many_arguments)]
     pub fn step(&mut self, survival: &Survival, world: &VoxelWorld, body: &Body, size: [f32; 2], eyes_m: f32, daylight: f32, dt: f32) -> bool {
         let liquid_at = |height_m: f32| {
             let v = world.voxel_at_m([body.feet[0], body.feet[1] + height_m, body.feet[2]]);
             world.voxel(v).and_then(|id| world.liquid(id)).is_some()
         };
-        let senses = Senses { head_in_liquid: liquid_at(eyes_m), feet_y: body.feet[1], daylight };
+        if self.dead(survival) {
+            return true;
+        }
+        let senses = Senses::of(world, body, eyes_m, daylight);
         let mut delta = vec![0.0; self.values.len()];
         let mut add = |name: &str, amount: f32| {
             if let Some(i) = survival.index(name) {
@@ -317,6 +322,14 @@ impl Vitals {
         self.dead(survival)
     }
 
+    /// Toutes les conditions de `when` sont vraies pour ce corps (`Attack`
+    /// d'un mob, #72), comme pour une règle de jauge.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn hold(&self, when: &[Condition], survival: &Survival, world: &VoxelWorld, body: &Body, eyes_m: f32, daylight: f32) -> bool {
+        let senses = Senses::of(world, body, eyes_m, daylight);
+        when.iter().all(|c| senses.holds(c, survival, &self.values))
+    }
+
     /// La jauge de `death` est à 0.
     pub fn dead(&self, survival: &Survival) -> bool {
         survival.death.as_ref().and_then(|d| self.get(survival, &d.gauge)).is_some_and(|v| v <= 0.0)
@@ -344,6 +357,12 @@ struct Senses {
 }
 
 impl Senses {
+    fn of(world: &VoxelWorld, body: &Body, eyes_m: f32, daylight: f32) -> Self {
+        let v = world.voxel_at_m([body.feet[0], body.feet[1] + eyes_m, body.feet[2]]);
+        let head_in_liquid = world.voxel(v).and_then(|id| world.liquid(id)).is_some();
+        Self { head_in_liquid, feet_y: body.feet[1], daylight }
+    }
+
     fn holds(&self, c: &Condition, survival: &Survival, values: &[f32]) -> bool {
         let within = |v: f32, r: [f32; 2]| r[0] <= v && v <= r[1];
         match c {
@@ -560,6 +579,19 @@ mod tests {
         live(&s, &w, &mut inside, &mut vitals, 1.0);
         let health = vitals.get(&s, "health").unwrap();
         assert!((health - 16.0).abs() < 0.1, "4/s pendant 1 s : {health}");
+    }
+
+    #[test]
+    fn a_blow_to_zero_kills_even_when_a_rule_heals() {
+        let s = Survival::from_ron(
+            r#"(gauges: [(name: "health", max: 20.0)], rules: [(change: [("health", 0.1)])], death: Some((gauge: "health")))"#,
+        )
+        .unwrap();
+        let w = world();
+        let mut body = Body::at([4.5, 4.0, 4.5]);
+        let mut vitals = Vitals::new(&s);
+        vitals.apply(&s, &[("health".to_string(), -25.0)]);
+        assert!(live(&s, &w, &mut body, &mut vitals, DT));
     }
 
     #[test]

@@ -94,6 +94,11 @@ impl Player {
     pub fn body(&self) -> &Body {
         &self.body
     }
+
+    /// Un coup reçu venu de `from` : le recul (#72).
+    pub fn knock(&mut self, from: [f32; 3], speed: f32) {
+        self.body.knock(from, speed);
+    }
 }
 
 #[derive(Component)]

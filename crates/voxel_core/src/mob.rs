@@ -19,8 +19,9 @@ use serde::{Deserialize, Serialize};
 use crate::model::EntityData;
 use crate::path::{self, Node, Search};
 use crate::physics::{Body, STEP_HEIGHT_M};
+use crate::raycast::raycast;
 use crate::registry::ContentId;
-use crate::survival::{Hit, Vitals};
+use crate::survival::{Condition, Hit, Vitals, MAX_PER_RULE};
 use crate::world::{VoxelWorld, TICKS_PER_SECOND};
 use crate::worldgen::hash64;
 
@@ -37,14 +38,16 @@ const FOLLOW_STOP_M: f32 = 2.0;
 /// Le chemin de `Follow` est refait quand le joueur s'est éloigné de sa
 /// fin de plus que ça.
 const FOLLOW_REPATH_M: f32 = 1.5;
+/// En deçà, un joueur visible se rejoint tout droit, sans chemin : sa case
+/// n'a pas toujours d'appui pour ce corps (bord d'une marche, d'un trou),
+/// le chemin s'arrêterait une case avant lui.
+const STRAIGHT_M: f32 = 2.0;
 /// Ticks sans avancer avant d'abandonner un chemin (bloc posé dessus…).
 const STUCK_TICKS: u32 = 48;
 /// Rotation du corps, en radians par seconde.
 const TURN_RAD_S: f32 = 5.0;
 /// Vitesse à partir de laquelle les pattes se balancent pleinement.
 const FULL_SWING_M_S: f32 = 1.0;
-/// Le recul d'un coup perd cette part de sa vitesse par seconde.
-const PUSH_FADE_PER_S: f32 = 8.0;
 /// Les yeux d'un mob, en part de sa hauteur (nage, jauges).
 const EYES: f32 = 0.85;
 
@@ -70,6 +73,22 @@ pub enum Behavior {
     /// S'arrêter et regarder le joueur à moins de `range`, pendant `time`
     /// secondes ; pas avant `time` secondes de nouveau après.
     LookAt { range: f32, time: f32 },
+    /// Attaquer le joueur à moins de `range` (#72) : le poursuivre comme
+    /// `Follow` ; à moins de `reach` du bord de sa boîte, s'arrêter et
+    /// frapper toutes les `every` secondes (`hit` : variations sur les
+    /// jauges du joueur, recul en m/s). Il doit le voir pour commencer et
+    /// pour frapper, pas pour continuer à le poursuivre. `when` : les
+    /// conditions des règles de jauges, lues sur le mob (`Daylight` : la
+    /// nuit seulement) ; vide : toujours.
+    Attack {
+        range: f32,
+        speed: f32,
+        reach: f32,
+        every: f32,
+        hit: Hit,
+        #[serde(default)]
+        when: Vec<Condition>,
+    },
 }
 
 impl Behavior {
@@ -82,6 +101,14 @@ impl Behavior {
                 ok(*range, 64.0) && ok(*speed, 20.0) && keep.is_none_or(|k| (0.0..=600.0).contains(&k))
             }
             Behavior::LookAt { range, time } => ok(*range, 64.0) && ok(*time, 600.0),
+            Behavior::Attack { range, speed, reach, every, hit, when } => {
+                ok(*range, 64.0)
+                    && ok(*speed, 20.0)
+                    && ok(*reach, 8.0)
+                    && ok(*every, 600.0)
+                    && hit.invalid().is_none()
+                    && when.len() <= MAX_PER_RULE
+            }
         };
         (!fine).then(|| format!("comportement {self:?} : réglage nul, négatif ou trop grand"))
     }
@@ -93,6 +120,14 @@ impl Behavior {
             _ => None,
         }
     }
+}
+
+/// Un coup porté au joueur par un mob (`Attack`), à appliquer par le jeu :
+/// les variations de `hit` sur ses jauges, le recul venu de `from`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Strike {
+    pub hit: Hit,
+    pub from: [f32; 3],
 }
 
 /// Ce que le mob voit du joueur.
@@ -141,8 +176,8 @@ pub struct Mob {
     followed: u64,
     /// Ses jauges (#68), remises au départ de son entrée au premier tick.
     pub vitals: Vitals,
-    /// Le recul d'un coup en cours, m/s à l'horizontale.
-    push: [f32; 2],
+    /// Pas de coup (`Attack`) avant ce tick ; pas sauvé.
+    strike_at: u64,
     /// Sa jauge de mort est à 0 : à retirer, avec ses `drops`.
     pub dead: bool,
 }
@@ -166,7 +201,7 @@ impl Mob {
             stuck: 0,
             followed: 0,
             vitals: Vitals::default(),
-            push: [0.0; 2],
+            strike_at: 0,
             dead: false,
         }
     }
@@ -176,10 +211,38 @@ impl Mob {
     pub fn hit(&mut self, data: &EntityData, hit: &Hit, from: [f32; 3]) {
         self.vitals.fit(&data.vitals);
         self.vitals.apply(&data.vitals, &hit.change);
-        let (dx, dz) = (self.body.feet[0] - from[0], self.body.feet[2] - from[2]);
-        let len = dx.hypot(dz);
-        if len > 1e-3 {
-            self.push = [dx / len * hit.push, dz / len * hit.push];
+        self.body.knock(from, hit.push);
+    }
+
+    /// Ses yeux voient ceux du joueur : aucun bloc solide entre eux.
+    fn sees(&self, world: &VoxelWorld, data: &EntityData, p: &Player) -> bool {
+        let f = self.body.feet;
+        let eyes = [f[0], f[1] + data.size[1] * EYES, f[2]];
+        let dir = [0, 1, 2].map(|i| p.eyes[i] - eyes[i]);
+        let far = dist(eyes, p.eyes);
+        raycast(world, eyes, dir, far).is_none_or(|hit| hit.distance_m >= far)
+    }
+
+    /// Le joueur est à moins de `reach` du bord de sa boîte (à l'horizontale
+    /// depuis son centre ; en hauteur, entre ses pieds et sa tête).
+    fn reaches(&self, data: &EntityData, p: &Player, reach: f32) -> bool {
+        let f = self.body.feet;
+        let flat = (p.feet[0] - f[0]).hypot(p.feet[2] - f[2]);
+        flat <= data.size[0] / 2.0 + reach && p.feet[1] <= f[1] + data.size[1] + reach && p.eyes[1] >= f[1] - reach
+    }
+
+    /// Vers le joueur, par un chemin refait quand il s'est éloigné de la
+    /// fin du chemin (`Follow`, `Attack`).
+    fn chase(&mut self, world: &VoxelWorld, data: &EntityData, p: &Player) {
+        let f = self.body.feet;
+        if (p.feet[0] - f[0]).hypot(p.feet[2] - f[2]) < STRAIGHT_M && self.sees(world, data, p) {
+            self.path = vec![Node { cell: world.voxel_at_m(p.feet), feet_y: p.feet[1] }];
+            self.search = None;
+            return;
+        }
+        let end = self.path.last().map(|n| world_center(world, n.cell));
+        if self.search.is_none() && end.is_none_or(|e| dist(e, p.feet) > FOLLOW_REPATH_M) {
+            self.search = Some(self.search_to(world, data, world.voxel_at_m(p.feet)));
         }
     }
 
@@ -191,7 +254,8 @@ impl Mob {
 
     /// Le comportement `b` peut-il démarrer (`keep` : continuer, avec la
     /// marge de portée) ?
-    fn applies(&self, b: &Behavior, player: Option<&Player>, world: &VoxelWorld, tick: u64, keep: bool) -> bool {
+    #[allow(clippy::too_many_arguments)]
+    fn applies(&self, b: &Behavior, data: &EntityData, player: Option<&Player>, world: &VoxelWorld, daylight: f32, tick: u64, keep: bool) -> bool {
         let near = |range: f32| {
             let reach = if keep { range * KEEP_RANGE } else { range };
             player.is_some_and(|p| dist(p.feet, self.body.feet) <= reach)
@@ -204,19 +268,25 @@ impl Mob {
             Behavior::LookAt { range, .. } => {
                 near(*range) && (if keep { tick < self.doing.map_or(0, |d| d.until) } else { tick >= self.look_rest_until })
             }
+            Behavior::Attack { range, when, .. } => {
+                near(*range)
+                    && self.vitals.hold(when, &data.vitals, world, &self.body, data.size[1] * EYES, daylight)
+                    && (keep || player.is_some_and(|p| self.sees(world, data, p)))
+            }
         }
     }
 
     /// Choisit le comportement du tick et ce qu'il veut : vitesse de marche
-    /// et case visée.
-    fn think(&mut self, data: &EntityData, player: Option<&Player>, world: &VoxelWorld, seed: u64, tick: u64) -> f32 {
+    /// et case visée ; et le coup qu'il porte au joueur, s'il frappe.
+    #[allow(clippy::too_many_arguments)]
+    fn think<'d>(&mut self, data: &'d EntityData, player: Option<&Player>, world: &VoxelWorld, seed: u64, daylight: f32, tick: u64) -> (f32, Option<&'d Hit>) {
         let current = self.doing.map(|d| d.index);
-        let keeps = current.is_some_and(|i| self.applies(&data.behaviors[i], player, world, tick, true));
+        let keeps = current.is_some_and(|i| self.applies(&data.behaviors[i], data, player, world, daylight, tick, true));
         // Un regard fini se repose avant de pouvoir reprendre.
         if let (false, Some(Behavior::LookAt { time, .. })) = (keeps, current.map(|i| &data.behaviors[i])) {
             self.look_rest_until = tick + ticks(*time);
         }
-        let first = data.behaviors.iter().position(|b| self.applies(b, player, world, tick, false));
+        let first = data.behaviors.iter().position(|b| self.applies(b, data, player, world, daylight, tick, false));
         let chosen = match (first, current) {
             (Some(f), Some(c)) if keeps && c <= f => Some(c),
             _ => first,
@@ -229,7 +299,7 @@ impl Mob {
                 self.doing = chosen.map(|index| Doing { index, until: tick + ticks(*time) });
             }
         }
-        let Some(doing) = self.doing else { return 0.0 };
+        let Some(doing) = self.doing else { return (0.0, None) };
         self.look_at = None;
         match &data.behaviors[doing.index] {
             Behavior::Wander { speed, range, pause } => {
@@ -243,7 +313,7 @@ impl Mob {
                         self.doing = Some(Doing { until: 0, ..doing });
                     }
                 }
-                *speed
+                (*speed, None)
             }
             Behavior::Follow { speed, keep, .. } => {
                 let p = player.expect("Follow ne s'applique qu'avec un joueur");
@@ -255,17 +325,29 @@ impl Mob {
                 if dist(p.feet, self.body.feet) <= FOLLOW_STOP_M {
                     self.path.clear();
                     self.search = None;
-                    return 0.0;
+                    return (0.0, None);
                 }
-                let end = self.path.last().map(|n| world_center(world, n.cell));
-                if self.search.is_none() && end.is_none_or(|e| dist(e, p.feet) > FOLLOW_REPATH_M) {
-                    self.search = Some(self.search_to(world, data, world.voxel_at_m(p.feet)));
-                }
-                *speed
+                self.chase(world, data, p);
+                (*speed, None)
             }
             Behavior::LookAt { .. } => {
                 self.look_at = player.map(|p| p.eyes);
-                0.0
+                (0.0, None)
+            }
+            Behavior::Attack { speed, reach, every, hit, .. } => {
+                let p = player.expect("Attack ne s'applique qu'avec un joueur");
+                self.look_at = Some(p.eyes);
+                if !self.reaches(data, p, *reach) {
+                    self.chase(world, data, p);
+                    return (*speed, None);
+                }
+                self.path.clear();
+                self.search = None;
+                if tick < self.strike_at || !self.sees(world, data, p) {
+                    return (0.0, None);
+                }
+                self.strike_at = tick + ticks(*every);
+                (0.0, Some(hit))
             }
         }
     }
@@ -326,9 +408,6 @@ impl Mob {
         let eyes = data.size[1] * EYES;
         let liquid_at = |h: f32| world.voxel(world.voxel_at_m([feet[0], feet[1] + h, feet[2]])).and_then(|id| world.liquid(id));
         let swim = liquid_at(0.1).is_some() && (liquid_at(eyes).is_some() || !self.path.is_empty());
-        let push = self.push;
-        self.push = push.map(|p| p * (1.0 - PUSH_FADE_PER_S * dt).max(0.0));
-        let wish = [wish[0] + push[0], wish[1] + push[1]];
         self.body.step(world, data.size, eyes, wish, jump || swim, dt);
 
         let moved = (self.body.feet[0] - feet[0]).hypot(self.body.feet[2] - feet[2]);
@@ -362,17 +441,24 @@ pub const SIMULATION_M: f32 = 128.0;
 /// Un tick pour tous les mobs, `mobs` triés par id. `turn` : l'id après
 /// lequel la recherche de chemin reprend au tick suivant (tour à tour, pour
 /// qu'aucun mob n'attende toujours) ; à garder d'un tick à l'autre.
-/// `daylight` : la force du jour, lue par les règles de jauges.
-pub fn step_all(world: &VoxelWorld, mobs: &mut [&mut Mob], player: Option<&Player>, seed: u64, daylight: f32, dt: f32, turn: &mut u64) {
+/// `daylight` : la force du jour, lue par les règles de jauges. Rend les
+/// coups portés au joueur ce tick (`Attack`), dans l'ordre des mobs.
+pub fn step_all(world: &VoxelWorld, mobs: &mut [&mut Mob], player: Option<&Player>, seed: u64, daylight: f32, dt: f32, turn: &mut u64) -> Vec<Strike> {
     let tick = world.tick();
     let mut speeds = vec![0.0; mobs.len()];
+    let mut strikes = Vec::new();
     for (mob, speed) in mobs.iter_mut().zip(&mut speeds) {
         mob.prev_feet = mob.body.feet;
         if !active(world, mob.body.feet, player) {
             continue;
         }
         let Some(data) = world.registry.get(mob.content).and_then(|e| e.entity()) else { continue };
-        *speed = mob.think(data, player, world, seed, tick);
+        mob.vitals.fit(&data.vitals);
+        let (wish, hit) = mob.think(data, player, world, seed, daylight, tick);
+        *speed = wish;
+        if let Some(hit) = hit {
+            strikes.push(Strike { hit: hit.clone(), from: mob.body.feet });
+        }
     }
     // Les recherches de chemin avancent tour à tour à partir de `turn`,
     // dans la limite du budget du tick.
@@ -403,6 +489,7 @@ pub fn step_all(world: &VoxelWorld, mobs: &mut [&mut Mob], player: Option<&Playe
         let size = data.size;
         mob.dead = mob.vitals.step(&data.vitals, world, &mob.body, size, size[1] * EYES, daylight, dt);
     }
+    strikes
 }
 
 /// On ne simule pas dans un chunk absent, comme le joueur : il tomberait
@@ -648,5 +735,69 @@ mod tests {
         let eyes = mobs[0].body.feet[1] + 0.9 * EYES;
         assert!((3.5..4.5).contains(&eyes), "les yeux à la surface (y = 4) : {eyes}");
         assert!(top < 4.0, "aucun bond hors de l'eau : {top}");
+    }
+
+    const ATTACK: &str = r#"Attack(range: 16.0, speed: 2.0, reach: 0.5, every: 1.0,
+        hit: (change: [("health", -3.0)], push: 5.0)"#;
+
+    /// `seconds` de simulation du premier cochon face à `player`, le jour
+    /// à `daylight` ; rend le cochon et les ticks où il a frappé.
+    fn strikes(w: &mut VoxelWorld, player: Player, daylight: f32, seconds: f32) -> (Mob, Vec<u64>) {
+        let mut mobs = pigs(w)[..1].to_vec();
+        let (mut turn, mut at) = (0, Vec::new());
+        for _ in 0..ticks(seconds) {
+            let hits = step_all(w, &mut mobs.iter_mut().collect::<Vec<_>>(), Some(&player), 1, daylight, DT, &mut turn);
+            for s in hits {
+                assert_eq!(s.hit.push, 5.0);
+                at.push(w.tick());
+            }
+            w.advance();
+        }
+        (mobs.remove(0), at)
+    }
+
+    #[test]
+    fn an_attacking_pig_runs_to_the_player_and_strikes_once_per_every() {
+        let mut w = world(&format!("{ATTACK})"));
+        let player = Player { feet: [20.5, 4.0, 10.5], eyes: [20.5, 5.6, 10.5], holding: None };
+        let (pig, at) = strikes(&mut w, player, 1.0, 12.0);
+        let gap = dist(pig.body.feet, player.feet);
+        assert!(gap <= 0.45 + 0.5 + 0.01, "arrêté à portée : {gap}");
+        assert!(at.len() >= 4, "des coups : {at:?}");
+        assert!(at.windows(2).all(|t| t[1] - t[0] == ticks(1.0)), "un par seconde : {at:?}");
+    }
+
+    #[test]
+    fn a_pig_does_not_attack_a_player_it_cannot_see_or_when_its_conditions_fail() {
+        let player = Player { feet: [20.5, 4.0, 10.5], eyes: [20.5, 5.6, 10.5], holding: None };
+        // Un mur plein entre eux.
+        let mut w = world(&format!("{ATTACK})"));
+        let stone = w.registry.lookup("t:stone").unwrap();
+        for (y, z) in (4..32).flat_map(|y| (0..32).map(move |z| (y, z))) {
+            w.set_voxel([15, y, z], stone);
+        }
+        let (pig, at) = strikes(&mut w, player, 1.0, 5.0);
+        assert!(at.is_empty() && (pig.body.feet[0] - 10.5).abs() < 0.01, "derrière un mur : {:?}", pig.body.feet);
+        // Hostile la nuit seulement, en plein jour.
+        let mut w = world(&format!("{ATTACK}, when: [Daylight((0.0, 0.3))])"));
+        let (pig, at) = strikes(&mut w, player, 1.0, 5.0);
+        assert!(at.is_empty() && (pig.body.feet[0] - 10.5).abs() < 0.01, "le jour : {:?}", pig.body.feet);
+        let mut w = world(&format!("{ATTACK}, when: [Daylight((0.0, 0.3))])"));
+        assert!(!strikes(&mut w, player, 0.1, 12.0).1.is_empty(), "la nuit, il frappe");
+    }
+
+    #[test]
+    fn an_attacking_pig_reaches_a_player_whose_cell_has_no_ground() {
+        // Le joueur au-dessus d'un trou sans fond (debout sur le bord, en
+        // z = 13,6) : sa case n'a pas d'appui, le chemin s'arrête en z = 12.
+        let mut w = world(&format!("{ATTACK})"));
+        let air = w.registry.lookup("t:air").unwrap();
+        for (x, y) in (0..32).flat_map(|x| (0..4).map(move |y| (x, y))) {
+            w.set_voxel([x, y, 13], air);
+        }
+        let player = Player { feet: [10.5, 4.0, 13.6], eyes: [10.5, 5.6, 13.6], holding: None };
+        let (pig, at) = strikes(&mut w, player, 1.0, 8.0);
+        assert!(!at.is_empty(), "il frappe : {:?}", pig.body.feet);
+        assert!((pig.body.feet[1] - 4.0).abs() < 0.01, "sans tomber : {:?}", pig.body.feet);
     }
 }

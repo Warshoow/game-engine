@@ -203,6 +203,58 @@
             (name: "pig_eye", pattern: Plain, color: (0.08, 0.08, 0.08), seed: 17),
         ]))),
 
+    // Mob hostile (#72) : apparaît dans le noir (nuit, grotte), poursuit le
+    // joueur qu'il voit à moins de 16 m et le frappe une fois par seconde.
+    // Plus lent que le joueur (5 m/s) : on peut le fuir. Il ne brûle pas
+    // au soleil (reporté, #72) : apparu la nuit, il reste le jour.
+    (identifier: "core:zombie", kind: EntityType((size: (0.6, 1.9),
+        model: [
+            (name: "body", pivot: (0, 12, 0), boxes: [((-4, 12, -2), (4, 22, 2), "zombie_shirt")]),
+            (name: "head", parent: "body", pivot: (0, 22, 0), boxes: [
+                ((-4, 22, -4), (4, 30, 4), "zombie_skin"),
+                ((-3, 26, 4), (-1, 27, 5), "zombie_eye"),
+                ((1, 26, 4), (3, 27, 5), "zombie_eye"),
+            ]),
+            (name: "arm_left", parent: "body", pivot: (5, 20, 0), boxes: [((4, 18, -2), (7, 21, 10), "zombie_skin")]),
+            (name: "arm_right", parent: "body", pivot: (-5, 20, 0), boxes: [((-7, 18, -2), (-4, 21, 10), "zombie_skin")]),
+            (name: "leg_left", parent: "body", pivot: (2, 12, 0), boxes: [((0, 0, -2), (4, 12, 2), "zombie_trousers")]),
+            (name: "leg_right", parent: "body", pivot: (-2, 12, 0), boxes: [((-4, 0, -2), (0, 12, 2), "zombie_trousers")]),
+        ],
+        behaviors: [
+            // `reach` : depuis le bord de sa boîte ; `hit` : comme celui de
+            // l'épée, mais sur les jauges du joueur (survival.ron).
+            Attack(range: 16.0, speed: 2.4, reach: 0.8, every: 1.0,
+                hit: (change: [("health", -3.0)], push: 5.0)),
+            Wander(speed: 0.8, range: 8.0, pause: 5.0),
+        ],
+        // Dans le noir : la nuit en surface (force du jour 0,04), ou en
+        // grotte à toute heure. Seul ou par deux.
+        spawn: [(on: ["core:grass", "core:dirt", "core:stone", "core:sand"], light: (0.0, 0.1),
+            density: 0.0002, group: (1, 2), despawn: 128.0)],
+        vitals: (
+            gauges: [(name: "health", max: 20.0), (name: "breath", max: 15.0)],
+            rules: [
+                (when: [HeadInLiquid], change: [("breath", -1.0)]),
+                (when: [Not(HeadInLiquid)], change: [("breath", 5.0)]),
+                (when: [Gauge("breath", (0.0, 0.0))], change: [("health", -2.0)]),
+            ],
+            fall: Some((gauge: "health", safe: 3.5, per_m: 1.0)),
+            death: Some((gauge: "health")),
+        ),
+        animation: [
+            Swing(part: "leg_left", angle: 35.0, stride: 1.4, phase: 0.0),
+            Swing(part: "leg_right", angle: 35.0, stride: 1.4, phase: 0.5),
+            Swing(part: "arm_left", angle: 8.0, stride: 1.4, phase: 0.5),
+            Swing(part: "arm_right", angle: 8.0, stride: 1.4, phase: 0.0),
+            Look(part: "head", max: 50.0),
+        ],
+        generated_textures: [
+            (name: "zombie_skin", pattern: Spots, color: (0.45, 0.56, 0.42), noise: 0.2, seed: 23),
+            (name: "zombie_shirt", pattern: Plain, color: (0.36, 0.26, 0.18), noise: 0.3, seed: 24),
+            (name: "zombie_trousers", pattern: Plain, color: (0.28, 0.29, 0.33), noise: 0.2, seed: 25),
+            (name: "zombie_eye", pattern: Plain, color: (0.70, 0.08, 0.06), seed: 26),
+        ]))),
+
     // Nourriture (#33) : `eaten` fait varier les jauges de survival.ron
     // d'un coup, au clic droit. Un item ne se pose pas : il se mange même
     // en visant un bloc. Fait de blé, sans établi.
