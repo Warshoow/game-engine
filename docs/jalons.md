@@ -235,6 +235,11 @@ quand une mesure la réclame.
    faim, souffle, chute, lave et cactus, pain, mort ; le moteur ne connaît
    aucune jauge par son nom (options dans #65 ; validé sous Windows, #66).
 
+**Cet ordre est terminé** (2026-11-01). Le prochain chantier est à choisir
+avec Warshow, parmi la liste ci-dessous ou les reports de #65 (combat et
+jauges des mobs, variables d'environnement du monde). Essais en attente :
+#63 (apparition des mobs), #64 (RTX 4060).
+
 **Quand le besoin apparaît, pas dans l'ordre :**
 - #41 profilage : dès que le build Windows saccade ;
 - #6 / #24 distance de vue : voir loin coûte des chunks (#39, génération

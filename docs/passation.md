@@ -716,6 +716,10 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
 
 ## Prochaines étapes
 
+**L'ordre des jalons (`docs/jalons.md`) est terminé depuis #33
+(2026-11-01) : proposer le prochain chantier à Warshow, ne pas le choisir
+seul.** Essais en attente : #63, #64.
+
 Ordre décidé avec Warshow (2026-10-08) : **`docs/jalons.md`, « Suite :
 ordre des tickets ouverts »**. #45, #46, #17, #18 + #44, #27, #22, #34, #28
 faits et validés sous Windows (reste à voir : la mer, dans un monde neuf).
