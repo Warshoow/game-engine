@@ -728,6 +728,13 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   profilage, `cmp` et `diff -r` OK) ; `LISEZMOI.txt` : scénario
   « chargement » et commandes de console. Points de la console ajoutés à
   #64 (point 8). Warshow fait l'essai sur la RTX ensuite.
+- Essai RTX de Warshow : tout va bien, sauf qu'en marchant tout droit les
+  FPS baissent et saccadent au bout d'une certaine distance. Non
+  reproduit sous WSL (138 m, rendu logiciel). Le build de profilage
+  log toutes les 5 s les tables du monde, les mobs et la position ;
+  `profilage.bat longue log` pour une longue marche (#64, point 9). Piste
+  non confirmée : `VoxelWorld::in_chunk` parcourt toutes les tables à
+  chaque chunk enregistré.
 
 ## Prochaines étapes
 
