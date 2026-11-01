@@ -1457,3 +1457,29 @@ berge). Il ne touchait la lave que trois ticks par bond. Il ne nage
 maintenant que la tête sous le liquide ou avec un chemin à suivre ; le
 joueur, qui ne nage que sur Espace, n'est pas touché.
 
+## 2026-11-01 — Items visibles, icônes 3D calculées par le moteur (#70)
+
+Warshow a tué un cochon sans voir le porc au sol, puis l'a trouvé gris
+dans l'inventaire. Deux causes. La première était un bug : seule la casse
+d'un bloc donnait son apparence à l'item lâché, pas la mort d'un mob ni
+celle du joueur. La seconde, un manque : un `Item` n'avait aucune
+apparence.
+
+Un item reçoit des boîtes, la même forme que les modèles d'entités, sans
+parties puisqu'il ne s'anime pas. C'est ce qu'une IA écrit sans peine.
+L'image pixel art plate de Minecraft reste à revoir : Warshow signale
+des modèles d'IA spécialisés. Au sol, j'avais d'abord réduit le modèle
+à 25 cm comme un bloc. Warshow a préféré la vraie taille : la taille
+donnée au modèle doit se voir.
+
+Pour les icônes, le moteur dessine lui-même chaque entrée en pixels,
+une fois au chargement. Il projette les triangles, remplit leurs pixels,
+garde le plus proche et lit la texture au point touché. C'est un GPU en
+petit, testable sans fenêtre et identique partout. Une caméra Bevy
+aurait donné le même dessin sans pouvoir être testée. Comme aucune
+entrée n'apporte son icône, un item généré a sa case sans rien d'autre.
+
+En route, on a vu que les textures des blocs lâchés étaient décalées
+d'une demi-image. Leurs coordonnées de texture partaient du centre de
+la boîte : elles partent maintenant du coin.
+

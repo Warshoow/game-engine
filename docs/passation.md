@@ -773,6 +773,21 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   pas suivant naturel pour des hordes de nuit. Exe Windows refait
   (`Téléchargements\voxel_engine`, `cmp` et `diff -r` OK) ; essais : #69.
   DeepSeek : rien en 5 minutes, deuxième fois de suite.
+- **Items visibles et icônes 3D** (#70, demandés par Warshow après #69).
+  Bug d'abord : les drops d'un mob mort et l'inventaire lâché à la mort
+  du joueur naissaient sans `ItemVisual`, donc invisibles (mais
+  ramassables). Ensuite, une entrée `Item` déclare `model` (boîtes en
+  seizièmes de mètre, sans parties) et ses `generated_textures`. Au sol,
+  le modèle est dessiné à sa vraie taille, posé sur son dessous
+  (Warshow : « un item n'a pas les mêmes dimensions qu'un bloc »), et la
+  collision reste le cube de 25 cm. Icônes : `voxel_core::icon` dessine
+  lui-même le mesh de chaque entrée (bloc, item, entité) en 38 × 38 px,
+  vue de 3/4, au chargement et à la touche R (ressource `ui::Icons`).
+  Porc, pain et épée ont un modèle. Vu sous WSL : barre en icônes 3D,
+  items au sol, porc lâché visible. Exe Windows refait ; essais : #71.
+  Reportés dans #70 : l'image pixel art plate (à revoir, des modèles
+  d'IA spécialisés existent ; l'icône restera calculée par le moteur),
+  le délai avant ramassage, le regroupement des items identiques au sol.
 
 ## Prochaines étapes
 
@@ -816,7 +831,9 @@ par tranches, `Swing`/`Look` ; validé sous Windows ; options : #61).
 options : #62). #33 vie et survie (fait le 2026-11-01 : jauges en
 donnée ; validé sous Windows, #33 et #66 fermés ; options : #65).
 Combat et jauges des mobs (fait le 2026-11-01, à essayer sous Windows : #69 ;
-options : #68). Suite proposée : des mobs qui attaquent le joueur. **Tout ce qui attend la 4060** (#53, #51, #30, #23, la
+options : #68). Icônes 3D et apparence des items (fait le 2026-11-01, à
+essayer sous Windows : #71 ; options : #70). Suite proposée : des mobs
+qui attaquent le joueur. **Tout ce qui attend la 4060** (#53, #51, #30, #23, la
 mer, le coût des mobs) est rassemblé dans **#64** (label `qa`).
 Ce qui a été reporté (#18, #27, #28) est listé
 dans `docs/jalons.md`, « Plus tard », et dans #49.
