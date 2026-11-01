@@ -735,7 +735,7 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   `profilage.bat longue log` pour une longue marche (#64, point 9). Piste
   non confirmée : `VoxelWorld::in_chunk` parcourt toutes les tables à
   chaque chunk enregistré.
-- Poussé par Warshow jusqu'à `f5a1dc9` (#19 fermé).
+- Poussé par Warshow jusqu'à `018f14b` (#19 fermé, correctif de l'eau compris).
 - `log-longue.txt` de la RTX (#64, point 9) : 8 min, ~1600 m. Pas de
   vraie chute (moyenne 84 → 76 FPS, image 12,7 → 13,6 ms), mais le
   nombre d'entités double (844 → 1758). Une fuite trouvée : l'entité
