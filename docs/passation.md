@@ -705,7 +705,7 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   d'autres mobs apparaissent). Mécanisme distinct des jauges du joueur,
   pas encore de ticket.
 - DeepSeek lancé sur les options de #33 : rien en une heure, coupé.
-- À pousser : tout depuis `244bcc5` (#33 et ses docs).
+- Poussé par Warshow jusqu'à `18ce461` (#33 et ses docs).
 - Mod `compact-memory` (hors dépôt, `~/.agents/mods`, demandé par
   Warshow) : un `/compact` tapé demande d'abord à l'agent principal de
   mettre à jour tickets, docs et mémoire si besoin, puis compacte à la
