@@ -230,9 +230,10 @@ quand une mesure la réclame.
    #32 fait le même jour (comportements en donnée, A* par tranches,
    animation ; validé sous Windows ; options dans #61), puis #60
    (apparition et disparition en donnée, gel au-delà de 128 m, élevage
-   par `Follow { keep }` ; options dans #62 ; essai en jeu : #63). Reste
-   #33, un choix de jeu : du contenu que `core.ron` active, pas une règle
-   du moteur.
+   par `Follow { keep }` ; options dans #62 ; essai en jeu : #63). #33
+   fait le 2026-11-01 : jauges déclarées en donnée (`survival.ron`), vie,
+   faim, souffle, chute, lave et cactus, pain, mort ; le moteur ne connaît
+   aucune jauge par son nom (options dans #65 ; essai en jeu : #66).
 
 **Quand le besoin apparaît, pas dans l'ordre :**
 - #41 profilage : dès que le build Windows saccade ;

@@ -1,4 +1,4 @@
-# Passation de session — 2026-10-30
+# Passation de session — 2026-11-01
 
 > Document de reprise pour une session Claude fraîche. Lire ceci, puis
 > `CLAUDE.md` (racine) et `docs/brief/voxel-engine-design.md` (canonique)
@@ -170,6 +170,17 @@ WSL le rendu est logiciel et rame — normal.
   ne quittent pas la mémoire, sans ce gel les mobs marchaient partout où
   le joueur était passé. `SIMULATION_M` = vue + marge de déchargement et
   `SPAWN_MAX_M` = vue : vérifié à la compilation dans `streaming.rs`.
+- **Jauges et survie** (#33, `voxel_core::survival`) : le moteur ne
+  connaît **aucune jauge par son nom** ; vie, faim, souffle sont écrites
+  dans `survival.ron` (fichier du jeu prime, copie dans la save, comme le
+  ciel). Toutes les règles lisent les valeurs du début du tick, puis les
+  variations s'additionnent (l'ordre des règles ne compte pas). La chute
+  ne compte qu'après un premier contact avec le sol (`fall_top: None`) :
+  le départ du monde est 8 m en l'air. Une entrée qui cite une jauge
+  inconnue (`touching`, `eaten`) est ignorée avec un avertissement, pas
+  refusée : un monde doit se charger dans un jeu sans survie. Les jauges
+  sont portées par le joueur seul : une variable du monde (température
+  d'une zone que lisent les mobs) est un autre mécanisme (#65).
 - **Liquides** (#28) : le voxel reste l'ID du liquide, son niveau est dans
   `VoxelWorld::levels` (absent = source, `Some(0)` = chute, sinon distance
   à plat en voxels). `set_voxel` efface le niveau : écrire le niveau
@@ -676,6 +687,27 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   `docs/agents/triage-labels.md` (ticket d'options : `documentation` ;
   QA : `qa` + `ready-for-human` ; fonctionnalité : `enhancement` + un état).
 
+## Fait dans la session du 2026-11-01
+
+- #33 vie, dégâts, survie, exploré puis tranché avec Warshow. Première
+  reco : quatre jauges fixes réglées en donnée. Warshow a demandé de
+  pouvoir **ajouter des jauges en donnée** (température, oxygène en
+  profondeur) : le modèle est devenu jauges + règles « conditions →
+  variation par seconde » (design doc §3.6 « Jauges et survie », §3.10
+  point 10 ; options : #65). Conditions : `HeadInLiquid`, `Below`,
+  `Gauge`, `Daylight`, `Not`. Blocs `touching` (lave −4/s, cactus −1/s),
+  entrées `eaten` (`core:bread`, item fait de 3 blés), chute au-delà de
+  3,5 m, mort → réapparition au départ, inventaire lâché. Barres en
+  `bevy_ui`. Vu sous WSL (monde neuf, 75 s) : barres rouge et orange, la
+  chute du départ ne blesse pas, `player.ron` garde les jauges.
+  **À essayer sous Windows : #66** (exe et assets copiés).
+- Vision de Warshow notée dans #65 : des variables d'environnement du
+  monde que le joueur fait évoluer (lave partout → la région chauffe →
+  d'autres mobs apparaissent). Mécanisme distinct des jauges du joueur,
+  pas encore de ticket.
+- DeepSeek lancé sur les options de #33 : rien en une heure, coupé.
+- À pousser : tout depuis `99a1a73` (#60, docs, tickets QA, puis #33).
+
 ## Prochaines étapes
 
 Ordre décidé avec Warshow (2026-10-08) : **`docs/jalons.md`, « Suite :
@@ -711,7 +743,8 @@ en jeu ; options écartées : #58). #15 modèles d'entités (fait le
 (fait le 2026-10-30 : physique partagée, `Wander`/`Follow`/`LookAt`, A*
 par tranches, `Swing`/`Look` ; validé sous Windows ; options : #61).
 #60 apparition des mobs (fait le 2026-10-30, **à essayer en jeu : #63** ;
-options : #62). **Tout ce qui attend la 4060** (#53, #51, #30, #23, la
+options : #62). #33 vie et survie (fait le 2026-11-01 : jauges en
+donnée ; **à essayer en jeu : #66** ; options : #65). **Tout ce qui attend la 4060** (#53, #51, #30, #23, la
 mer, le coût des mobs) est rassemblé dans **#64** (label `qa`).
 Ce qui a été reporté (#18, #27, #28) est listé
 dans `docs/jalons.md`, « Plus tard », et dans #49.

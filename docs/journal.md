@@ -1352,3 +1352,37 @@ densité compte autour du point d'apparition, et la zone d'apparition
 (24 à 96 m) en couvre plusieurs. Densité baissée à 0,0003 (environ 3 dans
 64 m) : 11 cochons.
 
+
+## 2026-11-01 — Jauges et survie (#33)
+
+**Première reco, puis mieux.** L'exploration comparait les règles de
+Minecraft (20 demi-cœurs, saturation cachée, chute en blocs), quatre
+jauges fixes réglées en donnée, des jauges libres et des dégâts par les
+seules règles de blocs. La reco était les quatre jauges fixes. Warshow :
+« pour les barres pourrais t'on prévoir la possibilité de pouvoir en
+ajouter via la données ? » (température, oxygène en profondeur). Le
+modèle retenu ne coûte pas plus : des jauges et des règles « tant que
+ces conditions sont vraies, telle jauge varie de tant par seconde ». Vie,
+faim, souffle sont trois jauges de `survival.ron` ; le moteur n'en
+connaît aucune. C'est la forme des règles de blocs (§3.6) appliquée au
+joueur.
+
+**Valeurs du début du tick.** Toutes les règles lisent les jauges avant
+toute variation, puis on additionne : l'ordre des règles dans le fichier
+ne change rien, une règle ne voit pas l'effet d'une autre au même tick.
+
+**La chute.** Mesurée en mètres depuis le dernier contact avec le sol,
+remise à zéro dans un liquide. Premier piège vu avant de lancer le jeu :
+le départ du monde est 8 m au-dessus du terrain (pour ne pas naître dans
+un arbre), chaque monde neuf et chaque réapparition auraient blessé. La
+chute ne compte donc qu'après un premier contact.
+
+**Jauge inconnue.** Une lave qui cite `health` dans un jeu sans
+`survival.ron` : refuser le monde aurait empêché de jouer sans survie.
+La variation est ignorée, avec un avertissement au démarrage.
+
+**Ce qui n'est pas une jauge.** Warshow imagine des variables du monde
+que le joueur fait évoluer (de la lave partout → la région chauffe →
+d'autres mobs apparaissent). Un agent annexe a relevé que la jauge de
+température prévue est portée par le joueur et que les mobs ne peuvent
+pas la lire : c'est un autre mécanisme, noté comme tel dans #65.
