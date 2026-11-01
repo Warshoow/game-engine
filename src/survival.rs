@@ -8,7 +8,7 @@ use voxel_core::save::Save;
 use voxel_core::survival::{Show, Survival, Vitals};
 
 use crate::inventory::Inventory;
-use crate::items::DroppedItem;
+use crate::items::{DroppedItem, ItemVisual};
 use crate::player::{Player, EYE_HEIGHT_M, PLAYER_HEIGHT_M, PLAYER_WIDTH_M};
 use crate::sky::{HourShift, WorldSky};
 use crate::ui::{self, GameWindow};
@@ -72,7 +72,7 @@ pub fn step_vitals(
         let center = player.feet() + Vec3::Y * PLAYER_HEIGHT_M / 2.0;
         for (id, count) in slots {
             for _ in 0..count {
-                commands.spawn(DroppedItem::new(id, center));
+                commands.spawn((DroppedItem::new(id, center), ItemVisual(id)));
             }
         }
     }

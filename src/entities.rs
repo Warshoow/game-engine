@@ -11,7 +11,7 @@ use voxel_core::model::Motion;
 use voxel_core::registry::ContentId;
 
 use crate::inventory::Inventory;
-use crate::items::DroppedItem;
+use crate::items::{DroppedItem, ItemVisual};
 use crate::player::{Player, EYE_HEIGHT_M};
 use crate::sky::{HourShift, WorldSky};
 use crate::{to_bevy_mesh, GameWorld};
@@ -127,7 +127,7 @@ pub fn simulate_mobs(
             let [w, h] = world.registry.get(mob.content).and_then(|e| e.entity()).map_or([0.0; 2], |d| d.size);
             let center = Vec3::from_array(mob.body.feet) + Vec3::Y * h.max(w) / 2.0;
             for id in world.registry.drops(mob.content) {
-                commands.spawn(DroppedItem::new(id, center));
+                commands.spawn((DroppedItem::new(id, center), ItemVisual(id)));
             }
         }
     }
