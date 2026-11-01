@@ -735,6 +735,8 @@ Détail dans `docs/journal.md`. Tickets GitHub fermés ou à fermer au push.
   `profilage.bat longue log` pour une longue marche (#64, point 9). Piste
   non confirmée : `VoxelWorld::in_chunk` parcourt toutes les tables à
   chaque chunk enregistré.
+- Poussé par Warshow jusqu'à `f5a1dc9` (#19 fermé). En attente : le
+  `log-longue.txt` de la RTX (#64, point 9) avant tout correctif.
 
 ## Prochaines étapes
 
